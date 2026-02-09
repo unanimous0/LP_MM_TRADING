@@ -49,6 +49,15 @@ This project uses SQLite database to store and manage investor flow data for KOS
 | market_cap | BIGINT | 시가총액 |
 | created_at | TIMESTAMP | 생성일시 |
 
+**단위:**
+- foreign_net_volume, institution_net_volume: 주 (원 단위 환산)
+- foreign_net_amount, institution_net_amount: 원 (₩)
+- market_cap: 원 (₩)
+
+**주의:** 엑셀 원본 파일은 천원(1,000원) 단위이지만,
+데이터베이스에는 원 단위로 변환되어 저장됩니다.
+(2026-02-09 마이그레이션 완료)
+
 **Constraints:**
 - UNIQUE(trade_date, stock_code) - 중복 방지
 

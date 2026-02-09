@@ -13,6 +13,15 @@ data/*.csv
 data/*.json
 !data/.gitkeep
 
+# Database files
+data/processed/
+
+# Analysis results (regeneratable)
+data/analysis_results/
+
+# Claude local settings
+.claude/
+
 # IDE
 .vscode/
 .idea/

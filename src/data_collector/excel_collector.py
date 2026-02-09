@@ -38,7 +38,7 @@ class ExcelCollector:
             sheet_name: 시트명 ('KOSPI200' 또는 'KOSDAQ150')
 
         Returns:
-            pd.DataFrame: 정규화된 투자자 수급 데이터
+            pd.DataFrame: 정규화된 투자자 수급 데이터 (금액은 원 단위)
         """
         # Multi-level header 읽기
         df = pd.read_excel(excel_path, sheet_name=sheet_name, header=[0, 1])
@@ -65,16 +65,29 @@ class ExcelCollector:
                 continue
 
             for i, date in enumerate(dates):
+                # 엑셀 파일의 실제 순서: 기관 → 외국인
+                # cols[0]: 기관 순매수 수량
+                # cols[1]: 기관 순매수 금액
+                # cols[2]: 외국인 순매수 수량
+                # cols[3]: 외국인 순매수 금액
                 records.append({
                     'trade_date': date,
                     'stock_name': stock_name,
-                    'foreign_net_volume': df[cols[0]].iloc[i],
-                    'foreign_net_amount': df[cols[1]].iloc[i],
-                    'institution_net_volume': df[cols[2]].iloc[i],
-                    'institution_net_amount': df[cols[3]].iloc[i]
+                    'institution_net_volume': df[cols[0]].iloc[i],  # 기관 수량
+                    'institution_net_amount': df[cols[1]].iloc[i],  # 기관 금액
+                    'foreign_net_volume': df[cols[2]].iloc[i],      # 외국인 수량
+                    'foreign_net_amount': df[cols[3]].iloc[i]       # 외국인 금액
                 })
 
-        return pd.DataFrame(records)
+        df_result = pd.DataFrame(records)
+
+        # 엑셀 파일은 천원 단위이므로 원 단위로 변환 (2026-02-09 추가)
+        df_result['foreign_net_volume'] = df_result['foreign_net_volume'] * 1000
+        df_result['foreign_net_amount'] = df_result['foreign_net_amount'] * 1000
+        df_result['institution_net_volume'] = df_result['institution_net_volume'] * 1000
+        df_result['institution_net_amount'] = df_result['institution_net_amount'] * 1000
+
+        return df_result
 
     def load_market_caps(self, excel_path: str, sheet_name: str) -> pd.DataFrame:
         """
