@@ -1,0 +1,4 @@
+pandas>=2.0.0
+numpy>=1.24.0
+openpyxl>=3.1.0  # 엑셀 파일 처리
+python-dotenv>=1.0.0  # 환경변수 관리

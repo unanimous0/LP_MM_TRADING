@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+
+# Data files
+data/*.xlsx
+data/*.csv
+data/*.json
+!data/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# API keys
+.env
+config/secrets.json
+
+# OS
+.DS_Store
+Thumbs.db
