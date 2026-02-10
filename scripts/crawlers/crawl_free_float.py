@@ -1,21 +1,27 @@
 """
-유통주식 데이터 크롤러 (FnGuide → DB 직접 업데이트)
+유통주식 + 업종 데이터 크롤러 (FnGuide → DB 직접 업데이트)
 
-기존 free_float_crawler.py를 개선하여 DB에서 종목 리스트를 읽고
-크롤링 결과를 investor_flows 테이블에 직접 업데이트합니다.
+기존 free_float_crawler.py를 확장하여 유통주식 정보와 함께
+FICS 업종 정보도 크롤링합니다.
 
 사용법:
-    # 전체 종목 크롤링
-    python scripts/crawl_free_float.py
+    # 유통주식 + 업종 동시 수집 (권장)
+    python scripts/crawlers/crawl_free_float.py
+
+    # 업종만 수집 (유통주식 스킵)
+    python scripts/crawlers/crawl_free_float.py --sector-only
+
+    # 유통주식만 수집 (업종 스킵)
+    python scripts/crawlers/crawl_free_float.py --skip-sector
 
     # 특정 시장만
-    python scripts/crawl_free_float.py --market KOSPI200
+    python scripts/crawlers/crawl_free_float.py --market KOSPI200
 
     # 실패 종목만 재시도
-    python scripts/crawl_free_float.py --retry-failed
+    python scripts/crawlers/crawl_free_float.py --retry-failed
 
     # 요청 간격 조정
-    python scripts/crawl_free_float.py --delay 1.0
+    python scripts/crawlers/crawl_free_float.py --delay 1.0
 """
 
 import sys
@@ -74,16 +80,42 @@ def parse_float_data(text: str):
     return None, None
 
 
+def extract_sector(soup) -> Optional[str]:
+    """
+    FnGuide HTML에서 FICS 업종 추출
+
+    Args:
+        soup: BeautifulSoup 객체
+
+    Returns:
+        업종명 (없으면 None)
+    """
+    try:
+        text = soup.get_text()
+        # 정규식으로 "FICS" 다음 업종명 추출
+        # 예: "FICS 반도체 및 관련장비"
+        match = re.search(r'FICS\s+([^|\n]+)', text)
+        if match:
+            sector = match.group(1).strip()
+            # 공백 정규화 및 길이 검증
+            sector = re.sub(r'\s+', ' ', sector)
+            if 0 < len(sector) < 100:
+                return sector
+    except Exception:
+        pass
+    return None
+
+
 def get_fnguide_data(code: str, retry: int = 3) -> Dict[str, Optional[str]]:
     """
-    FnGuide에서 발행주식수, 유동주식수, 유동비율을 크롤링합니다.
+    FnGuide에서 발행주식수, 유동주식수, 유동비율, 업종을 크롤링합니다.
 
     Args:
         code: 6자리 종목코드
         retry: 재시도 횟수
 
     Returns:
-        발행주식수, 유동주식수, 유동비율을 담은 딕셔너리
+        발행주식수, 유동주식수, 유동비율, 업종을 담은 딕셔너리
     """
     url = f"https://comp.fnguide.com/SVO2/ASP/SVD_Main.asp?pGB=1&gicode=A{code}&cID=&MenuYn=Y&ReportGB=&NewMenuID=101&stkGb=701"
 
@@ -104,6 +136,7 @@ def get_fnguide_data(code: str, retry: int = 3) -> Dict[str, Optional[str]]:
             issued_shares = None
             float_shares = None
             float_ratio = None
+            sector = None
 
             # 발행주식수 찾기
             main_grid = soup.find('div', {'id': 'svdMainGrid1'})
@@ -144,21 +177,25 @@ def get_fnguide_data(code: str, retry: int = 3) -> Dict[str, Optional[str]]:
                 if float_shares:
                     break
 
+            # 업종 추출
+            sector = extract_sector(soup)
+
             return {
                 '발행주식수': issued_shares,
                 '유동주식수': float_shares,
-                '유동비율': float_ratio
+                '유동비율': float_ratio,
+                '업종': sector
             }
 
         except requests.exceptions.RequestException as e:
             if attempt < retry - 1:
                 time.sleep(1 * (attempt + 1))
                 continue
-            return {'발행주식수': None, '유동주식수': None, '유동비율': None}
+            return {'발행주식수': None, '유동주식수': None, '유동비율': None, '업종': None}
         except Exception as e:
-            return {'발행주식수': None, '유동주식수': None, '유동비율': None}
+            return {'발행주식수': None, '유동주식수': None, '유동비율': None, '업종': None}
 
-    return {'발행주식수': None, '유동주식수': None, '유동비율': None}
+    return {'발행주식수': None, '유동주식수': None, '유동비율': None, '업종': None}
 
 
 def load_stock_list(conn, market: str = None) -> pd.DataFrame:
@@ -227,6 +264,31 @@ def update_free_float(conn, stock_code: str, ff_shares: str, ff_ratio: str) -> i
     return cursor.rowcount
 
 
+def update_stock_sector(conn, stock_code: str, sector: str) -> int:
+    """
+    stocks 테이블의 sector 컬럼 업데이트
+
+    Args:
+        conn: DB 연결
+        stock_code: 종목 코드
+        sector: 업종명
+
+    Returns:
+        업데이트된 레코드 수
+    """
+    if not sector:
+        return 0
+
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE stocks
+        SET sector = ?
+        WHERE stock_code = ?
+    """, (sector, stock_code))
+    conn.commit()
+    return cursor.rowcount
+
+
 def load_failed_stocks() -> list:
     """이전 실패 종목 로드"""
     failed_file = Path(__file__).parent / 'failed_stocks.txt'
@@ -255,17 +317,23 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 예시:
-  # 전체 종목 크롤링
-  python scripts/crawl_free_float.py
+  # 유통주식 + 업종 동시 수집 (권장)
+  python scripts/crawlers/crawl_free_float.py
+
+  # 업종만 수집
+  python scripts/crawlers/crawl_free_float.py --sector-only
+
+  # 유통주식만 수집
+  python scripts/crawlers/crawl_free_float.py --skip-sector
 
   # KOSPI200만
-  python scripts/crawl_free_float.py --market KOSPI200
+  python scripts/crawlers/crawl_free_float.py --market KOSPI200
 
   # 실패 종목 재시도
-  python scripts/crawl_free_float.py --retry-failed
+  python scripts/crawlers/crawl_free_float.py --retry-failed
 
   # 요청 간격 1초
-  python scripts/crawl_free_float.py --delay 1.0
+  python scripts/crawlers/crawl_free_float.py --delay 1.0
         """
     )
 
@@ -275,17 +343,27 @@ def main():
                        help='이전 실패 종목만 재시도')
     parser.add_argument('--delay', type=float, default=0.3,
                        help='요청 간 대기 시간 (초, 기본: 0.3)')
+    parser.add_argument('--sector-only', action='store_true',
+                       help='업종 정보만 수집 (유통주식 스킵)')
+    parser.add_argument('--skip-sector', action='store_true',
+                       help='업종 정보 수집 스킵 (유통주식만)')
 
     args = parser.parse_args()
 
     print("=" * 70)
-    print("🔄 FnGuide 유통주식 크롤러")
+    print("🔄 FnGuide 유통주식 + 업종 크롤러")
     print("=" * 70)
     print(f"파라미터:")
     print(f"  - 시장: {args.market or '전체'}")
     print(f"  - 요청 간격: {args.delay}초")
     if args.retry_failed:
         print(f"  - 모드: 실패 종목 재시도")
+    if args.sector_only:
+        print(f"  - 수집: 업종만 (유통주식 스킵)")
+    elif args.skip_sector:
+        print(f"  - 수집: 유통주식만 (업종 스킵)")
+    else:
+        print(f"  - 수집: 유통주식 + 업종")
     print("=" * 70)
 
     # DB 연결
@@ -338,18 +416,38 @@ def main():
 
                 ff_shares = data.get('유동주식수')
                 ff_ratio = data.get('유동비율')
+                sector = data.get('업종')
 
-                if ff_shares and ff_ratio:
-                    # DB 업데이트
-                    updated_count = update_free_float(conn, stock_code, ff_shares, ff_ratio)
+                updated_ff = 0
+                updated_sector = 0
 
+                # 유통주식 업데이트 (--sector-only가 아닌 경우)
+                if not args.sector_only and ff_shares and ff_ratio:
+                    updated_ff = update_free_float(conn, stock_code, ff_shares, ff_ratio)
+
+                # 섹터 업데이트 (--skip-sector가 아닌 경우)
+                if not args.skip_sector and sector:
+                    updated_sector = update_stock_sector(conn, stock_code, sector)
+
+                # 성공 판정
+                success = False
+                if args.sector_only:
+                    success = sector is not None
+                elif args.skip_sector:
+                    success = ff_shares is not None and ff_ratio is not None
+                else:
+                    success = (ff_shares is not None and ff_ratio is not None) or sector is not None
+
+                if success:
                     results.append({
                         'stock_code': stock_code,
                         'stock_name': stock_name,
                         'market': market_name,
                         'ff_shares': ff_shares,
                         'ff_ratio': ff_ratio,
-                        'updated_records': updated_count,
+                        'sector': sector,
+                        'updated_records': updated_ff,
+                        'updated_sector': updated_sector,
                         'status': 'success'
                     })
                 else:
@@ -360,7 +458,9 @@ def main():
                         'market': market_name,
                         'ff_shares': None,
                         'ff_ratio': None,
+                        'sector': None,
                         'updated_records': 0,
+                        'updated_sector': 0,
                         'status': 'no_data'
                     })
 
@@ -372,7 +472,9 @@ def main():
                     'market': market_name,
                     'ff_shares': None,
                     'ff_ratio': None,
+                    'sector': None,
                     'updated_records': 0,
+                    'updated_sector': 0,
                     'status': f'error: {str(e)}'
                 })
 
@@ -390,13 +492,16 @@ def main():
         no_data_count = (df_results['status'] == 'no_data').sum()
         error_count = len(df_results) - success_count - no_data_count
 
-        total_updated = df_results['updated_records'].sum()
+        total_updated_ff = df_results['updated_records'].sum()
+        total_updated_sector = df_results['updated_sector'].sum()
 
         print(f"총 처리 종목: {len(df_results)}")
         print(f"  ✓ 성공: {success_count}")
         print(f"  ⚠ 데이터 없음: {no_data_count}")
         print(f"  ✗ 오류: {error_count}")
-        print(f"\n총 업데이트 레코드: {total_updated:,}")
+        print(f"\n업데이트 통계:")
+        print(f"  - 유통주식 레코드: {total_updated_ff:,}건")
+        print(f"  - 섹터 정보: {total_updated_sector:,}건")
 
         # 실패 종목 저장
         if failed_stocks:
@@ -417,9 +522,12 @@ def main():
             df_success = df_results[df_results['status'] == 'success'].head(5)
             for _, row in df_success.iterrows():
                 print(f"  [{row['stock_name']}] ({row['stock_code']})")
-                print(f"    유통주식수: {int(float(row['ff_shares'])):,}")
-                print(f"    유통비율: {float(row['ff_ratio']):.2f}%")
-                print(f"    업데이트: {row['updated_records']:,} records")
+                if not args.sector_only and row['ff_shares']:
+                    print(f"    유통주식수: {int(float(row['ff_shares'])):,}")
+                    print(f"    유통비율: {float(row['ff_ratio']):.2f}%")
+                    print(f"    업데이트: {row['updated_records']:,} records")
+                if not args.skip_sector and row['sector']:
+                    print(f"    업종: {row['sector']}")
 
         print("=" * 70)
 
@@ -427,7 +535,7 @@ def main():
             print("\n[SUCCESS] 크롤링 완료!")
             print("\n다음 단계:")
             print("  1. python scripts/analysis/abnormal_supply_detector.py")
-            print("  2. Sff, Z-Score 분석 실행")
+            print("  2. Sff, Z-Score 분석 실행 (섹터 정보 포함)")
 
     except Exception as e:
         print(f"\n[ERROR] Crawling failed: {e}")

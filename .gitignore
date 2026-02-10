@@ -6,6 +6,7 @@ __pycache__/
 .Python
 venv/
 env/
+.pytest_cache/
 
 # Data files
 data/*.xlsx
@@ -15,6 +16,11 @@ data/*.json
 
 # Database files
 data/processed/
+
+# Output files (regeneratable)
+output/test_*.png
+output/bench_*.png
+output/*.log
 
 # Analysis results (regeneratable)
 data/analysis_results/

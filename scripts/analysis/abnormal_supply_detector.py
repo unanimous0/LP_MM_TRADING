@@ -23,7 +23,6 @@ Z < -2.0: 평균 대비 표준편차 2배 이상 강한 매도세
 import argparse
 import sys
 from pathlib import Path
-from datetime import datetime
 
 # 프로젝트 루트를 sys.path에 추가
 project_root = Path(__file__).parent.parent.parent
@@ -31,6 +30,7 @@ sys.path.insert(0, str(project_root))
 
 from src.analyzer.normalizer import SupplyNormalizer
 from src.database.connection import get_connection
+from src.utils import validate_date_format
 
 
 def print_header(args):
@@ -85,6 +85,7 @@ def print_results(df, args):
     for idx, row in df.iterrows():
         stock_name = row['stock_name']
         stock_code = row['stock_code']
+        sector = row.get('sector', 'N/A')
         date = row['trade_date']
         foreign_z = row['foreign_zscore']
         inst_z = row['institution_zscore']
@@ -96,7 +97,7 @@ def print_results(df, args):
         # 시그널 타입
         signal = format_signal(combined_z, args.threshold)
 
-        print(f"{signal} [{stock_name}] ({stock_code})")
+        print(f"{signal} [{stock_name}] ({stock_code}) - {sector}")
         print(f"    📅 날짜: {date}")
         print(f"    📊 Z-Score:")
         print(f"       • 외국인: {foreign_z:+.2f} σ")
@@ -149,11 +150,9 @@ def main():
 
     args = parser.parse_args()
 
-    # 날짜 형식 검증
+    # 날짜 형식 검증 (보안: SQL 인젝션 방지)
     if args.date:
-        try:
-            datetime.strptime(args.date, '%Y-%m-%d')
-        except ValueError:
+        if not validate_date_format(args.date):
             print(f"[ERROR] Invalid date format: {args.date}")
             print("        Expected format: YYYY-MM-DD (e.g., 2026-02-09)")
             sys.exit(1)

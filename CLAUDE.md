@@ -1,11 +1,13 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- 현재 작업: **Stage 1 완료! Stage 2 준비 중** ✅
-- 마지막 업데이트: 2026-02-10
-- 다음 시작점: Stage 2 - 시공간 히트맵 시각화 (8개 기간)
+- 현재 작업: **Stage 2 완료! 시공간 히트맵 시각화 구축 성공** ✅
+- 마지막 업데이트: 2026-02-11
+- 다음 시작점: Stage 3 - 이벤트 센서 (MA 골든크로스, 가속도, 동조율)
 - 현재 브랜치: main
 - **Stage 1 성과**: 데이터 정규화 완료, Sff/Z-Score 분석 가능, 이상 수급 탐지 20건
+- **Stage 2 성과**: 8개 기간 히트맵 생성 (1.5초), 섹터/상위N개 필터링, CSV 출력, 벡터화 최적화
+- **섹터 통합**: 1,576개 종목 섹터 정보 수집 완료 (97.9% 커버리지), 20개 주요 섹터 식별
 
 ## [Progress]
 - ✅ 2026-02-09: GitHub 저장소 연결 완료
@@ -28,12 +30,25 @@
 - ✅ 2026-02-10: 이상 수급 탐지기 CLI 도구 구현 (abnormal_supply_detector.py)
 - ✅ 2026-02-10: 데이터 크롤링 완료 (주가 99.5%, 유통주식 100%, 총 171,227 레코드)
 - ✅ 2026-02-10: 실전 분석 실행 성공 (이상 수급 이벤트 20건 탐지)
+- ✅ 2026-02-10: 섹터 정보 크롤링 설계 및 구현 완료
+- ✅ 2026-02-10: crawl_free_float.py 확장 (유통주식 + 업종 통합 수집)
+- ✅ 2026-02-10: FnGuide FICS 업종 파싱 로직 구현 (extract_sector 함수)
+- ✅ 2026-02-10: 분석 결과에 섹터 정보 자동 표시 (normalizer.py, abnormal_supply_detector.py)
+- ✅ 2026-02-10: **전체 섹터 크롤링 완료** - 1,576개 종목 (97.9% 커버리지, 17분 51초 소요)
+- ✅ 2026-02-10: 섹터별 분석 가능 - 20개 주요 섹터 식별 (반도체 120개, 의료 103개, 제약 96개 등)
+- ✅ 2026-02-11: **Stage 2 구현 완료** - 시공간 히트맵 시각화 (8개 기간)
+- ✅ 2026-02-11: config.py 생성 (전역 파라미터 중앙화)
+- ✅ 2026-02-11: performance_optimizer.py 구현 (Sff 캐싱 + 벡터화 Z-Score)
+- ✅ 2026-02-11: heatmap_renderer.py 구현 (350×8 매트릭스, Y축 강도순 정렬)
+- ✅ 2026-02-11: heatmap_generator.py CLI 도구 구현 (파라미터 조정 가능)
+- ✅ 2026-02-11: 성능 최적화 성공 (345종목×7기간, 1.5초 완료)
+- ✅ 2026-02-11: 필터링 기능 구현 (섹터, 상위N개, CSV 출력)
 
 ## [Next Steps]
 1. ~~유통물량(Free Float) 데이터 수령 및 DB 스키마 확장~~ ✅ 완료
 2. ~~1단계 구현: 데이터 정규화 (Sff, Z-Score 계산 모듈)~~ ✅ 완료
-3. **2단계 구현: 시공간 히트맵 시각화 (8개 기간)** ← 다음 작업
-4. 3단계 구현: 이벤트 센서 (MA 골든크로스, 가속도, 동조율)
+3. ~~2단계 구현: 시공간 히트맵 시각화 (8개 기간)~~ ✅ 완료
+4. **3단계 구현: 이벤트 센서 (MA 골든크로스, 가속도, 동조율)** ← 다음 작업
 5. 4단계 구현: 통합 스코어링 및 3개 바구니 분류
 
 ## [Tech Stack]
@@ -41,7 +56,7 @@
 - 데이터베이스: SQLite (내장)
 - 데이터 수집: pandas, openpyxl (엑셀 파일), **FinanceDataReader (주가 크롤링)**, **BeautifulSoup (유통주식 크롤링)**
 - 데이터 분석: pandas, numpy, SQL
-- 시각화: matplotlib, seaborn (Stage 2에서 추가 예정)
+- **시각화: matplotlib, seaborn (Stage 2)**
 - 버전 관리: Git & GitHub
 
 ## [Project Structure]
@@ -67,15 +82,20 @@ LP_MM_TRADING/
 │   ├── data_loader/              # 데이터 로더 모듈 ✅
 │   │   └── validator.py          # 데이터 검증
 │   ├── analyzer/                 # 분석 모듈 ✅
-│   │   ├── normalizer.py         # Sff, Z-Score 정규화
+│   │   ├── normalizer.py         # Sff, Z-Score 정규화 (Stage 1+2)
 │   │   └── __init__.py
-│   └── visualizer/               # 시각화 모듈 (Stage 2에서 개발)
+│   ├── visualizer/               # 시각화 모듈 ✅ (Stage 2)
+│   │   ├── performance_optimizer.py  # 벡터화 Z-Score 계산
+│   │   ├── heatmap_renderer.py       # 히트맵 렌더링
+│   │   └── __init__.py
+│   └── config.py                 # 전역 설정 관리 ✅
 ├── scripts/                      # 스크립트
 │   ├── analysis/                 # 분석 스크립트 ✅
-│   │   └── abnormal_supply_detector.py  # 이상 수급 탐지기 (Stage 1)
+│   │   ├── abnormal_supply_detector.py  # 이상 수급 탐지기 (Stage 1)
+│   │   └── heatmap_generator.py        # 히트맵 생성기 (Stage 2)
 │   ├── crawlers/                 # 데이터 크롤러 ✅
 │   │   ├── crawl_all_data.py     # 통합 크롤러 (주가 + 유통주식)
-│   │   ├── crawl_free_float.py   # 유통주식 크롤러 (FnGuide)
+│   │   ├── crawl_free_float.py   # 유통주식 + 업종 크롤러 (FnGuide) ✅ 확장됨
 │   │   └── crawl_stock_prices.py # 주가 크롤러 (FinanceDataReader)
 │   ├── loaders/                  # 데이터 로더 ✅
 │   │   ├── load_daily_data.py    # 일별 증분 업데이트
@@ -99,16 +119,16 @@ LP_MM_TRADING/
 
 ## [Data Source]
 - **Initial**: 엑셀 파일 (투자자수급_200_150.xlsx, 시가총액_200_150.xlsx)
-- **Crawling**: FinanceDataReader (주가), FnGuide (유통주식)
+- **Crawling**: FinanceDataReader (주가), FnGuide (유통주식 + 업종)
 - **Database**: SQLite (investor_data.db)
   - **172,155 레코드** (2024-01-02 ~ 2026-01-20)
   - **171,227 레코드** 완전한 데이터 (주가+유통주식, 99.5% 커버리지)
   - 345개 핵심 종목 (KOSPI200 + KOSDAQ150)
-  - 1,609개 종목 마스터 데이터
+  - **1,609개 종목 마스터 데이터** (섹터 정보 97.9% 커버리지)
 
 ## [Database Schema]
 - **markets**: 시장 구분 (KOSPI200, KOSDAQ150)
-- **stocks**: 종목 마스터 (종목코드, 종목명, 시장ID)
+- **stocks**: 종목 마스터 (종목코드, 종목명, 시장ID, **섹터**)
 - **investor_flows**: 투자자 수급 데이터 (**13개 컬럼**)
   - 기존: 외국인/기관 순매수량/금액, 시가총액
   - **신규**: 종가, 거래량, 거래대금, 유통주식수, 유통비율
@@ -148,9 +168,32 @@ python scripts/loaders/load_daily_data.py data/투자자수급_20260210.xlsx dat
     --price-file data/주가_20260210.xlsx --ff-file data/유통주식_20260210.xlsx
 ```
 
+### **섹터 정보 수집**
+```bash
+# 유통주식 + 업종 정보 동시 수집 (권장, 약 8분)
+python scripts/crawlers/crawl_free_float.py
+
+# 업종만 수집 (유통주식 스킵)
+python scripts/crawlers/crawl_free_float.py --sector-only
+
+# 유통주식만 수집 (업종 스킵)
+python scripts/crawlers/crawl_free_float.py --skip-sector
+
+# 특정 시장만
+python scripts/crawlers/crawl_free_float.py --market KOSPI200
+
+# 섹터 데이터 검증
+python -c "from src.database.connection import get_connection; \
+import pandas as pd; \
+conn = get_connection(); \
+df = pd.read_sql('SELECT COUNT(*) as total, COUNT(sector) as with_sector, \
+ROUND(100.0 * COUNT(sector) / COUNT(*), 1) as coverage_pct FROM stocks', conn); \
+print(df); conn.close()"
+```
+
 ### **이상 수급 분석 (Stage 1)**
 ```bash
-# 기본 분석 (임계값 2.0, 상위 20개)
+# 기본 분석 (임계값 2.0, 상위 20개, 섹터 정보 포함)
 python scripts/analysis/abnormal_supply_detector.py
 
 # 매수 시그널만 (임계값 2.5)
@@ -159,6 +202,34 @@ python scripts/analysis/abnormal_supply_detector.py --direction buy --threshold 
 # 매도 시그널
 python scripts/analysis/abnormal_supply_detector.py --direction sell
 ```
+
+### **히트맵 생성 (Stage 2)**
+```bash
+# 기본 실행 (전체 8개 기간: 1D, 1W, 1M, 3M, 6M, 1Y, 2Y)
+python scripts/analysis/heatmap_generator.py
+
+# 단기 3개 기간만
+python scripts/analysis/heatmap_generator.py --periods 1D 1W 1M
+
+# 섹터 필터링 (반도체 120개 → 33개 데이터 충분한 종목)
+python scripts/analysis/heatmap_generator.py --sector "반도체 및 관련장비"
+
+# 상위 50개 종목만 (Z-Score 강도순)
+python scripts/analysis/heatmap_generator.py --top 50
+
+# 색상 임계값 조정 (±2.5σ)
+python scripts/analysis/heatmap_generator.py --threshold 2.5
+
+# 고해상도 출력 + CSV 동시 저장
+python scripts/analysis/heatmap_generator.py --dpi 300 --save-csv
+
+# 복합 필터 (제약 섹터, 상위 30개, CSV 저장)
+python scripts/analysis/heatmap_generator.py --sector 제약 --top 30 --save-csv
+```
+
+**성능:**
+- 345종목 × 7기간: 1.5초
+- 120종목 × 7기간: 0.5초 (섹터 필터링 시)
 
 ### **Python API 사용**
 ```python

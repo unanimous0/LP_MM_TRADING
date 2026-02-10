@@ -18,6 +18,9 @@ import pandas as pd
 import numpy as np
 from typing import Optional
 
+# 보안: SQL 인젝션 방지를 위한 입력 검증
+from src.utils import validate_stock_codes, validate_date_format
+
 
 class SupplyNormalizer:
     """수급 데이터 정규화 클래스"""
@@ -53,17 +56,33 @@ class SupplyNormalizer:
 
         Returns:
             pd.DataFrame: (trade_date, stock_code, foreign_sff, institution_sff, combined_sff)
+
+        Raises:
+            ValueError: 유효하지 않은 종목 코드 또는 날짜 형식
         """
 
-        # WHERE 절 생성
+        # 보안: 입력 검증 (SQL 인젝션 방지)
+        if stock_codes:
+            stock_codes = validate_stock_codes(stock_codes)
+
+        if start_date and not validate_date_format(start_date):
+            raise ValueError(f"Invalid start_date format: {start_date}. Expected YYYY-MM-DD")
+
+        if end_date and not validate_date_format(end_date):
+            raise ValueError(f"Invalid end_date format: {end_date}. Expected YYYY-MM-DD")
+
+        # WHERE 절 생성 (검증된 입력만 사용)
         where_clauses = ["close_price IS NOT NULL", "free_float_shares IS NOT NULL"]
 
         if stock_codes:
+            # 검증된 종목 코드를 안전하게 문자열로 결합
             codes_str = "','".join(stock_codes)
             where_clauses.append(f"stock_code IN ('{codes_str}')")
         if start_date:
+            # 검증된 날짜만 사용
             where_clauses.append(f"trade_date >= '{start_date}'")
         if end_date:
+            # 검증된 날짜만 사용
             where_clauses.append(f"trade_date <= '{end_date}'")
 
         where_sql = "WHERE " + " AND ".join(where_clauses)
@@ -212,14 +231,14 @@ class SupplyNormalizer:
             ]
             sort_ascending = False
 
-        # 종목명 추가
-        df_stocks = pd.read_sql('SELECT stock_code, stock_name FROM stocks', self.conn)
+        # 종목명 + 섹터 추가
+        df_stocks = pd.read_sql('SELECT stock_code, stock_name, sector FROM stocks', self.conn)
         df_filtered = df_filtered.merge(df_stocks, on='stock_code', how='left')
 
         # combined_zscore로 정렬 후 상위 N개
         df_result = df_filtered.sort_values('combined_zscore', ascending=sort_ascending).head(top_n)
 
-        return df_result[['stock_code', 'stock_name', 'trade_date',
+        return df_result[['stock_code', 'stock_name', 'sector', 'trade_date',
                          'foreign_sff', 'institution_sff', 'combined_sff',
                          'foreign_zscore', 'institution_zscore', 'combined_zscore']]
 
@@ -267,3 +286,67 @@ class SupplyNormalizer:
         }
 
         return summary
+
+    def _get_sff_data(self, stock_codes: Optional[list] = None) -> pd.DataFrame:
+        """
+        [Stage 2] Sff 데이터 추출 메서드 (캐싱용)
+
+        기존 calculate_sff() 로직을 재사용하되,
+        OptimizedMultiPeriodCalculator에서 호출하기 쉽게 분리
+
+        Args:
+            stock_codes: 종목 코드 리스트 (None이면 전체)
+
+        Returns:
+            pd.DataFrame: (trade_date, stock_code, combined_sff)
+                - trade_date: 거래일
+                - stock_code: 종목 코드
+                - combined_sff: 외국인 + 기관 합산 Sff
+
+        Raises:
+            ValueError: 유효하지 않은 종목 코드
+        """
+        # 보안: 입력 검증 (SQL 인젝션 방지)
+        if stock_codes:
+            stock_codes = validate_stock_codes(stock_codes)
+
+        # WHERE 절 생성 (검증된 입력만 사용)
+        where_clauses = ["close_price IS NOT NULL", "free_float_shares IS NOT NULL"]
+
+        if stock_codes:
+            # 검증된 종목 코드를 안전하게 문자열로 결합
+            codes_str = "','".join(stock_codes)
+            where_clauses.append(f"stock_code IN ('{codes_str}')")
+
+        where_sql = "WHERE " + " AND ".join(where_clauses)
+
+        # 쿼리 실행
+        query = f"""
+        SELECT
+            trade_date,
+            stock_code,
+            foreign_net_amount,
+            institution_net_amount,
+            close_price,
+            free_float_shares,
+            (close_price * free_float_shares) as free_float_mcap
+        FROM investor_flows
+        {where_sql}
+        ORDER BY stock_code, trade_date
+        """
+
+        df = pd.read_sql(query, self.conn)
+
+        if df.empty:
+            print("[WARN] No data found for Sff calculation")
+            return pd.DataFrame(columns=['trade_date', 'stock_code', 'combined_sff'])
+
+        # Sff 계산
+        df['foreign_sff'] = (df['foreign_net_amount'] / df['free_float_mcap']) * 100
+        df['institution_sff'] = (df['institution_net_amount'] / df['free_float_mcap']) * 100
+        df['combined_sff'] = df['foreign_sff'] + df['institution_sff']
+
+        # inf/nan 처리
+        df = df.replace([np.inf, -np.inf], np.nan)
+
+        return df[['trade_date', 'stock_code', 'combined_sff']]
