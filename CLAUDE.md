@@ -71,21 +71,18 @@ LP_MM_TRADING/
 │   │   └── __init__.py
 │   └── visualizer/               # 시각화 모듈 (Stage 2에서 개발)
 ├── scripts/                      # 스크립트
-│   ├── load_initial_data.py      # 초기 데이터 로드 ✅
-│   ├── load_daily_data.py        # 일별 증분 업데이트 ✅
-│   ├── load_price_volume_backfill.py  # 주가/유통주식 백필 ✅
-│   ├── crawl_stock_prices.py     # 주가 크롤러 (FinanceDataReader) ✅
-│   ├── crawl_free_float.py       # 유통주식 크롤러 (FnGuide) ✅
-│   ├── crawl_all_data.py         # 통합 크롤러 ✅
 │   ├── analysis/                 # 분석 스크립트 ✅
-│   │   ├── top_net_buyers.py    # 순매수 상위 종목
-│   │   ├── top_net_buyers_by_mcap_ratio.py  # 시총 대비 순매수 비중 상위
-│   │   └── abnormal_supply_detector.py  # 이상 수급 탐지기 ✅
-│   ├── migrations/               # DB 마이그레이션 ✅
-│   │   └── migrate_add_columns.py  # 5개 컬럼 추가
-│   └── maintenance/              # 유지보수 스크립트 ✅
-│       ├── migrate_to_won_unit.py  # 단위 변환 마이그레이션
-│       └── swap_foreign_institution.py  # 컬럼 swap 마이그레이션
+│   │   └── abnormal_supply_detector.py  # 이상 수급 탐지기 (Stage 1)
+│   ├── crawlers/                 # 데이터 크롤러 ✅
+│   │   ├── crawl_all_data.py     # 통합 크롤러 (주가 + 유통주식)
+│   │   ├── crawl_free_float.py   # 유통주식 크롤러 (FnGuide)
+│   │   └── crawl_stock_prices.py # 주가 크롤러 (FinanceDataReader)
+│   ├── loaders/                  # 데이터 로더 ✅
+│   │   ├── load_daily_data.py    # 일별 증분 업데이트
+│   │   ├── load_initial_data.py  # 초기 데이터 로드
+│   │   └── load_price_volume_backfill.py  # 주가/유통주식 백필
+│   └── migrations/               # DB 마이그레이션 ✅
+│       └── migrate_add_columns.py  # 5개 컬럼 추가
 └── tests/                        # 테스트 코드 (향후 개발)
 ```
 
@@ -125,7 +122,7 @@ LP_MM_TRADING/
 python -c "from src.database.schema import create_database; create_database()"
 
 # 2. 초기 데이터 로드
-python scripts/load_initial_data.py
+python scripts/loaders/load_initial_data.py
 
 # 3. 마이그레이션 (5개 컬럼 추가)
 python scripts/migrations/migrate_add_columns.py
@@ -134,20 +131,20 @@ python scripts/migrations/migrate_add_columns.py
 ### **데이터 수집 (크롤링)**
 ```bash
 # 통합 크롤러 (주가 + 유통주식, 약 26분 소요)
-python scripts/crawl_all_data.py --start 2024-01-01
+python scripts/crawlers/crawl_all_data.py --start 2024-01-01
 
 # 또는 개별 실행
-python scripts/crawl_stock_prices.py --start 2024-01-01  # 주가 (12분)
-python scripts/crawl_free_float.py                        # 유통주식 (2분)
+python scripts/crawlers/crawl_stock_prices.py --start 2024-01-01  # 주가 (12분)
+python scripts/crawlers/crawl_free_float.py                        # 유통주식 (2분)
 ```
 
 ### **일별 데이터 업데이트**
 ```bash
 # 엑셀 파일 사용
-python scripts/load_daily_data.py data/투자자수급_20260210.xlsx data/시가총액_20260210.xlsx
+python scripts/loaders/load_daily_data.py data/투자자수급_20260210.xlsx data/시가총액_20260210.xlsx
 
 # 주가/유통주식 포함
-python scripts/load_daily_data.py data/투자자수급_20260210.xlsx data/시가총액_20260210.xlsx \
+python scripts/loaders/load_daily_data.py data/투자자수급_20260210.xlsx data/시가총액_20260210.xlsx \
     --price-file data/주가_20260210.xlsx --ff-file data/유통주식_20260210.xlsx
 ```
 
