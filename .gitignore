@@ -19,6 +19,10 @@ data/processed/
 # Analysis results (regeneratable)
 data/analysis_results/
 
+# Crawling logs (regeneratable)
+scripts/failed_stocks.txt
+*.log
+
 # Claude local settings
 .claude/
 
