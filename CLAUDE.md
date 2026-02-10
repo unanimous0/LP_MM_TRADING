@@ -1,10 +1,11 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- 현재 작업: 수급 레짐 스캐너 설계 준비 중 🔄
+- 현재 작업: **Stage 1 완료! Stage 2 준비 중** ✅
 - 마지막 업데이트: 2026-02-10
-- 다음 시작점: 유통물량 데이터 수령 및 DB 스키마 확장
+- 다음 시작점: Stage 2 - 시공간 히트맵 시각화 (8개 기간)
 - 현재 브랜치: main
+- **Stage 1 성과**: 데이터 정규화 완료, Sff/Z-Score 분석 가능, 이상 수급 탐지 20건
 
 ## [Progress]
 - ✅ 2026-02-09: GitHub 저장소 연결 완료
@@ -21,20 +22,26 @@
 - ✅ 2026-02-10: TODO List 작성 완료 (수급 레짐 스캐너 4단계 방법론)
 - ✅ 2026-02-10: 요구사항 분석 완료 (유통물량 기반 정규화, 히트맵, 이벤트 센서, 스코어링)
 - ✅ 2026-02-10: 파라미터 가변성 설계 방향 확정 (MA 기간, 가속도 임계값 등 config 기반)
+- ✅ 2026-02-10: **Stage 1 구현 완료** - DB 스키마 확장 (13개 컬럼)
+- ✅ 2026-02-10: 데이터 수집 크롤러 3개 구현 (주가, 유통주식, 통합)
+- ✅ 2026-02-10: Sff, Z-Score 정규화 모듈 구현 (src/analyzer/normalizer.py)
+- ✅ 2026-02-10: 이상 수급 탐지기 CLI 도구 구현 (abnormal_supply_detector.py)
+- ✅ 2026-02-10: 데이터 크롤링 완료 (주가 99.5%, 유통주식 100%, 총 171,227 레코드)
+- ✅ 2026-02-10: 실전 분석 실행 성공 (이상 수급 이벤트 20건 탐지)
 
 ## [Next Steps]
-1. 유통물량(Free Float) 데이터 수령 및 DB 스키마 확장
-2. 1단계 구현: 데이터 정규화 (Sff, Z-Score 계산 모듈)
-3. 2단계 구현: 시공간 히트맵 시각화 (8개 기간)
+1. ~~유통물량(Free Float) 데이터 수령 및 DB 스키마 확장~~ ✅ 완료
+2. ~~1단계 구현: 데이터 정규화 (Sff, Z-Score 계산 모듈)~~ ✅ 완료
+3. **2단계 구현: 시공간 히트맵 시각화 (8개 기간)** ← 다음 작업
 4. 3단계 구현: 이벤트 센서 (MA 골든크로스, 가속도, 동조율)
 5. 4단계 구현: 통합 스코어링 및 3개 바구니 분류
 
 ## [Tech Stack]
 - Python 3.10+
 - 데이터베이스: SQLite (내장)
-- 데이터 수집: pandas, openpyxl (엑셀 파일)
+- 데이터 수집: pandas, openpyxl (엑셀 파일), **FinanceDataReader (주가 크롤링)**, **BeautifulSoup (유통주식 크롤링)**
 - 데이터 분석: pandas, numpy, SQL
-- 시각화: matplotlib, seaborn (추후 추가 가능)
+- 시각화: matplotlib, seaborn (Stage 2에서 추가 예정)
 - 버전 관리: Git & GitHub
 
 ## [Project Structure]
@@ -53,20 +60,29 @@ LP_MM_TRADING/
 │       └── investor_data.db       # SQLite 데이터베이스
 ├── src/                          # 소스 코드
 │   ├── database/                 # 데이터베이스 모듈 ✅
-│   │   ├── schema.py             # 스키마 정의 및 생성
+│   │   ├── schema.py             # 스키마 정의 및 생성 (13개 컬럼)
 │   │   └── connection.py         # 연결 관리
 │   ├── data_collector/           # 데이터 수집 모듈 ✅
-│   │   └── excel_collector.py    # 엑셀 파싱
+│   │   └── excel_collector.py    # 엑셀 파싱 (주가/유통주식 포함)
 │   ├── data_loader/              # 데이터 로더 모듈 ✅
 │   │   └── validator.py          # 데이터 검증
-│   ├── analyzer/                 # 분석 모듈 (향후 개발)
-│   └── visualizer/               # 시각화 모듈 (향후 개발)
+│   ├── analyzer/                 # 분석 모듈 ✅
+│   │   ├── normalizer.py         # Sff, Z-Score 정규화
+│   │   └── __init__.py
+│   └── visualizer/               # 시각화 모듈 (Stage 2에서 개발)
 ├── scripts/                      # 스크립트
 │   ├── load_initial_data.py      # 초기 데이터 로드 ✅
 │   ├── load_daily_data.py        # 일별 증분 업데이트 ✅
+│   ├── load_price_volume_backfill.py  # 주가/유통주식 백필 ✅
+│   ├── crawl_stock_prices.py     # 주가 크롤러 (FinanceDataReader) ✅
+│   ├── crawl_free_float.py       # 유통주식 크롤러 (FnGuide) ✅
+│   ├── crawl_all_data.py         # 통합 크롤러 ✅
 │   ├── analysis/                 # 분석 스크립트 ✅
 │   │   ├── top_net_buyers.py    # 순매수 상위 종목
-│   │   └── top_net_buyers_by_mcap_ratio.py  # 시총 대비 순매수 비중 상위
+│   │   ├── top_net_buyers_by_mcap_ratio.py  # 시총 대비 순매수 비중 상위
+│   │   └── abnormal_supply_detector.py  # 이상 수급 탐지기 ✅
+│   ├── migrations/               # DB 마이그레이션 ✅
+│   │   └── migrate_add_columns.py  # 5개 컬럼 추가
 │   └── maintenance/              # 유지보수 스크립트 ✅
 │       ├── migrate_to_won_unit.py  # 단위 변환 마이그레이션
 │       └── swap_foreign_institution.py  # 컬럼 swap 마이그레이션
@@ -85,19 +101,25 @@ LP_MM_TRADING/
 4. `git push origin main`
 
 ## [Data Source]
-- **Current**: 엑셀 파일 (투자자수급_200_150.xlsx, 시가총액_200_150.xlsx)
+- **Initial**: 엑셀 파일 (투자자수급_200_150.xlsx, 시가총액_200_150.xlsx)
+- **Crawling**: FinanceDataReader (주가), FnGuide (유통주식)
 - **Database**: SQLite (investor_data.db)
-  - 172,155 레코드 (2024-01-02 ~ 2026-01-20)
-  - 345개 종목 (KOSPI200 + KOSDAQ150)
+  - **172,155 레코드** (2024-01-02 ~ 2026-01-20)
+  - **171,227 레코드** 완전한 데이터 (주가+유통주식, 99.5% 커버리지)
+  - 345개 핵심 종목 (KOSPI200 + KOSDAQ150)
   - 1,609개 종목 마스터 데이터
 
 ## [Database Schema]
 - **markets**: 시장 구분 (KOSPI200, KOSDAQ150)
 - **stocks**: 종목 마스터 (종목코드, 종목명, 시장ID)
-- **investor_flows**: 투자자 수급 데이터 (외국인/기관 순매수량/금액, 시가총액)
+- **investor_flows**: 투자자 수급 데이터 (**13개 컬럼**)
+  - 기존: 외국인/기관 순매수량/금액, 시가총액
+  - **신규**: 종가, 거래량, 거래대금, 유통주식수, 유통비율
 - **Indexes**: 3개 (stock_code+trade_date, trade_date+stock_code, trade_date)
 
 ## [How to Use Database]
+
+### **초기 설정**
 ```bash
 # 1. 데이터베이스 생성
 python -c "from src.database.schema import create_database; create_database()"
@@ -105,21 +127,58 @@ python -c "from src.database.schema import create_database; create_database()"
 # 2. 초기 데이터 로드
 python scripts/load_initial_data.py
 
-# 3. 일별 데이터 추가 (신규!)
-python scripts/load_daily_data.py data/투자자수급_20260209.xlsx data/시가총액_20260209.xlsx
+# 3. 마이그레이션 (5개 컬럼 추가)
+python scripts/migrations/migrate_add_columns.py
+```
 
-# 3-1. 미리보기 모드 (삽입하지 않고 확인만)
-python scripts/load_daily_data.py data/투자자수급_20260209.xlsx data/시가총액_20260209.xlsx --dry-run
+### **데이터 수집 (크롤링)**
+```bash
+# 통합 크롤러 (주가 + 유통주식, 약 26분 소요)
+python scripts/crawl_all_data.py --start 2024-01-01
 
-# 4. 데이터 검증
-python -c "from src.data_loader.validator import validate_data; from src.database.connection import get_connection; conn = get_connection(); validate_data(conn); conn.close()"
+# 또는 개별 실행
+python scripts/crawl_stock_prices.py --start 2024-01-01  # 주가 (12분)
+python scripts/crawl_free_float.py                        # 유통주식 (2분)
+```
 
-# 5. 데이터 조회 (Python)
+### **일별 데이터 업데이트**
+```bash
+# 엑셀 파일 사용
+python scripts/load_daily_data.py data/투자자수급_20260210.xlsx data/시가총액_20260210.xlsx
+
+# 주가/유통주식 포함
+python scripts/load_daily_data.py data/투자자수급_20260210.xlsx data/시가총액_20260210.xlsx \
+    --price-file data/주가_20260210.xlsx --ff-file data/유통주식_20260210.xlsx
+```
+
+### **이상 수급 분석 (Stage 1)**
+```bash
+# 기본 분석 (임계값 2.0, 상위 20개)
+python scripts/analysis/abnormal_supply_detector.py
+
+# 매수 시그널만 (임계값 2.5)
+python scripts/analysis/abnormal_supply_detector.py --direction buy --threshold 2.5 --top 30
+
+# 매도 시그널
+python scripts/analysis/abnormal_supply_detector.py --direction sell
+```
+
+### **Python API 사용**
+```python
+from src.analyzer.normalizer import SupplyNormalizer
 from src.database.connection import get_connection
 import pandas as pd
 
 conn = get_connection()
-df = pd.read_sql("SELECT * FROM investor_flows WHERE stock_code = '005930' ORDER BY trade_date DESC LIMIT 10", conn)
+normalizer = SupplyNormalizer(conn)
+
+# Sff 계산 (유통시총 대비 순매수 비율)
+df_sff = normalizer.calculate_sff(stock_codes=['005930'])
+
+# Z-Score 계산 (이상 수급 탐지)
+df_abnormal = normalizer.get_abnormal_supply(threshold=2.0, top_n=20)
+print(df_abnormal[['stock_name', 'combined_zscore', 'combined_sff']])
+
 conn.close()
 ```
 
@@ -129,7 +188,7 @@ conn.close()
 ## [TODO List] - START
 # 최종 통합 방법론: 수급 레짐 스캐너 (Supply-Demand Regime Scanner)
 
-## ① 1단계: 데이터 정규화 - "진짜 힘(Force) 측정"
+## ✅ ① 1단계: 데이터 정규화 - "진짜 힘(Force) 측정" (완료!)
 
 단순 금액이 아닌, 사용자님이 확보하신 유통물량(Free Float) 데이터를 핵심 분모로 사용합니다.
 

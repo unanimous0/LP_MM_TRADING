@@ -63,6 +63,11 @@ def create_database(db_path: str = 'data/processed/investor_data.db'):
             institution_net_volume BIGINT,
             institution_net_amount BIGINT,
             market_cap BIGINT,
+            close_price REAL,
+            trading_volume BIGINT,
+            trading_value BIGINT,
+            free_float_shares BIGINT,
+            free_float_ratio REAL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
             FOREIGN KEY (stock_code) REFERENCES stocks(stock_code),

@@ -2,3 +2,9 @@ pandas>=2.0.0
 numpy>=1.24.0
 openpyxl>=3.1.0  # 엑셀 파일 처리
 python-dotenv>=1.0.0  # 환경변수 관리
+
+# 크롤링 관련
+finance-datareader>=0.9.50  # 주가 데이터 수집
+requests>=2.31.0  # HTTP 요청
+beautifulsoup4>=4.12.0  # HTML 파싱
+tqdm>=4.66.0  # 진행률 표시

@@ -4,9 +4,18 @@
 사용법:
     python scripts/load_daily_data.py <투자자수급_파일.xlsx> <시가총액_파일.xlsx>
     python scripts/load_daily_data.py <투자자수급_파일.xlsx> <시가총액_파일.xlsx> --dry-run
+    python scripts/load_daily_data.py <투자자수급_파일.xlsx> <시가총액_파일.xlsx> --price-file <주가_파일.xlsx>
+    python scripts/load_daily_data.py <투자자수급_파일.xlsx> <시가총액_파일.xlsx> --price-file <주가_파일.xlsx> --ff-file <유통주식_파일.xlsx>
 
 예시:
+    # 기본 (외국인/기관 수급 + 시가총액)
     python scripts/load_daily_data.py data/투자자수급_20260209.xlsx data/시가총액_20260209.xlsx
+
+    # 주가/거래량 데이터 포함
+    python scripts/load_daily_data.py data/투자자수급_20260209.xlsx data/시가총액_20260209.xlsx --price-file data/주가_20260209.xlsx
+
+    # 전체 데이터 (수급 + 시총 + 주가 + 유통주식)
+    python scripts/load_daily_data.py data/투자자수급_20260209.xlsx data/시가총액_20260209.xlsx --price-file data/주가_20260209.xlsx --ff-file data/유통주식_20260209.xlsx
 """
 
 import argparse
@@ -22,7 +31,7 @@ from src.data_collector.excel_collector import ExcelCollector
 from src.database.connection import get_connection
 
 
-def validate_files(flow_file: str, mcap_file: str) -> bool:
+def validate_files(flow_file: str, mcap_file: str, price_file: str = None, ff_file: str = None) -> bool:
     """입력 파일 검증"""
     if not Path(flow_file).exists():
         print(f"[ERROR] File not found: {flow_file}")
@@ -30,6 +39,14 @@ def validate_files(flow_file: str, mcap_file: str) -> bool:
 
     if not Path(mcap_file).exists():
         print(f"[ERROR] File not found: {mcap_file}")
+        return False
+
+    if price_file and not Path(price_file).exists():
+        print(f"[ERROR] File not found: {price_file}")
+        return False
+
+    if ff_file and not Path(ff_file).exists():
+        print(f"[ERROR] File not found: {ff_file}")
         return False
 
     return True
@@ -96,9 +113,26 @@ def insert_data(df: pd.DataFrame, conn) -> tuple:
     Returns:
         (inserted_count, ignored_count, error_count)
     """
-    # 컬럼 순서 정렬
-    df = df[['trade_date', 'stock_code', 'foreign_net_volume', 'foreign_net_amount',
-             'institution_net_volume', 'institution_net_amount', 'market_cap']]
+    # 필수 컬럼
+    base_cols = ['trade_date', 'stock_code', 'foreign_net_volume', 'foreign_net_amount',
+                 'institution_net_volume', 'institution_net_amount', 'market_cap']
+
+    # 선택 컬럼 (있으면 추가)
+    optional_cols = ['close_price', 'trading_volume', 'trading_value',
+                     'free_float_shares', 'free_float_ratio']
+
+    # 실제 존재하는 컬럼만 선택
+    cols = base_cols + [col for col in optional_cols if col in df.columns]
+    df = df[cols]
+
+    # SQL 생성 (동적)
+    col_names = ', '.join(cols)
+    placeholders = ', '.join(['?'] * len(cols))
+    sql = f"""
+        INSERT OR IGNORE INTO investor_flows
+        ({col_names})
+        VALUES ({placeholders})
+    """
 
     cursor = conn.cursor()
     inserted_count = 0
@@ -107,12 +141,7 @@ def insert_data(df: pd.DataFrame, conn) -> tuple:
 
     for _, row in df.iterrows():
         try:
-            cursor.execute("""
-                INSERT OR IGNORE INTO investor_flows
-                (trade_date, stock_code, foreign_net_volume, foreign_net_amount,
-                 institution_net_volume, institution_net_amount, market_cap)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, tuple(row))
+            cursor.execute(sql, tuple(row))
 
             if cursor.rowcount > 0:
                 inserted_count += 1
@@ -170,6 +199,8 @@ Examples:
 
     parser.add_argument('flow_file', help='Path to investor flow Excel file')
     parser.add_argument('mcap_file', help='Path to market cap Excel file')
+    parser.add_argument('--price-file', help='Path to price/volume Excel file (optional)')
+    parser.add_argument('--ff-file', help='Path to free float Excel file (optional, updates monthly)')
     parser.add_argument('--dry-run', action='store_true',
                        help='Preview data without inserting into database')
 
@@ -180,17 +211,49 @@ Examples:
     print("=" * 70)
 
     # 1. 파일 검증
-    if not validate_files(args.flow_file, args.mcap_file):
+    if not validate_files(args.flow_file, args.mcap_file, args.price_file, args.ff_file):
         sys.exit(1)
 
     # 2. 데이터 로드
-    print("\n[INFO] Loading data from Excel files...")
+    print("\n[INFO] Loading investor flow and market cap data...")
     try:
         df_all = load_and_merge_data(args.flow_file, args.mcap_file)
         print(f"[OK]   Loaded {len(df_all)} records")
     except Exception as e:
         print(f"[ERROR] Failed to load data: {e}")
         sys.exit(1)
+
+    # 2-1. 주가/거래량 데이터 로드 (선택)
+    if args.price_file:
+        print("\n[INFO] Loading price/volume data...")
+        try:
+            collector = ExcelCollector()
+            df_kospi_price = collector.load_stock_prices(args.price_file, 'KOSPI200')
+            df_kosdaq_price = collector.load_stock_prices(args.price_file, 'KOSDAQ150')
+            df_prices = pd.concat([df_kospi_price, df_kosdaq_price], ignore_index=True)
+
+            # Merge with main data
+            df_all = df_all.merge(df_prices, on=['trade_date', 'stock_name'], how='left')
+            print(f"[OK]   Merged price data ({len(df_prices)} records)")
+        except Exception as e:
+            print(f"[ERROR] Failed to load price data: {e}")
+            sys.exit(1)
+
+    # 2-2. 유통주식 데이터 로드 (선택)
+    if args.ff_file:
+        print("\n[INFO] Loading free float data...")
+        try:
+            collector = ExcelCollector()
+            df_kospi_ff = collector.load_free_float(args.ff_file, 'KOSPI200')
+            df_kosdaq_ff = collector.load_free_float(args.ff_file, 'KOSDAQ150')
+            df_ff = pd.concat([df_kospi_ff, df_kosdaq_ff], ignore_index=True)
+
+            # Merge with main data
+            df_all = df_all.merge(df_ff, on='stock_name', how='left')
+            print(f"[OK]   Merged free float data ({len(df_ff)} stocks)")
+        except Exception as e:
+            print(f"[ERROR] Failed to load free float data: {e}")
+            sys.exit(1)
 
     # 3. DB 연결
     conn = get_connection()
