@@ -151,7 +151,7 @@ class TestGetAbnormalSupply:
         if not result.empty:
             # All Z-Scores should be negative (sell signals)
             # Most sell signals should have negative Z-Score
-        assert (result['combined_zscore'] < 0).sum() >= len(result) * 0.7
+            assert (result['combined_zscore'] < 0).sum() >= len(result) * 0.7
 
     def test_get_abnormal_supply_high_threshold(self, normalizer):
         """Get abnormal supply with high threshold"""
