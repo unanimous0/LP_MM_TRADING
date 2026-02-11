@@ -45,3 +45,10 @@ config/secrets.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Output 파일 관리 (최종 결과물만 커밋)
+# Stage 2 최종 결과: heatmap_semi_*.csv/png 만 커밋
+output/*.png
+output/*.csv
+!output/heatmap_semi_*.png
+!output/heatmap_semi_*.csv
