@@ -13,10 +13,10 @@ from typing import Dict, Any, Optional
 # 기본 설정값 (Baseline)
 DEFAULT_CONFIG = {
     # ============================================================================
-    # 8개 기간 정의 (영업일 기준)
+    # 6개 기간 정의 (영업일 기준)
+    # 주의: 1D(1일)는 표준편차 계산 불가로 제외
     # ============================================================================
     'periods': {
-        '1D': 1,
         '1W': 5,
         '1M': 21,
         '3M': 63,
@@ -42,9 +42,13 @@ DEFAULT_CONFIG = {
         'dpi': 150,
 
         # Y축 정렬 기준
-        'sort_by': 'combined_zscore',  # 기본: Z-Score 강도순
+        # 'recent': 최근 기간(1W 또는 1W+1M) 우선 (추천!)
+        # 'momentum': 수급 모멘텀(1W - 2Y) - 전환점 포착
+        # 'weighted': 가중 평균 (최근 높은 가중치)
+        # 'average': 단순 평균 (deprecated, 과거에 강했던 종목 우선)
+        'sort_by': 'recent',
 
-        # 정렬 순서 (True: 내림차순 = 상단에 강한 매수)
+        # 정렬 순서 (True: 내림차순 = 상단에 높은 값)
         'descending': True,
 
         # Z-Score 범위 고정 (colorbar vmin/vmax)
@@ -155,6 +159,7 @@ def _apply_cli_overrides(config: Dict[str, Any], cli_args: Dict[str, Any]) -> No
     - --colormap → visualization.colormap
     - --figsize → visualization.figsize
     - --dpi → visualization.dpi
+    - --sort-by → visualization.sort_by
     - --sector → filtering.sectors
     - --top → filtering.top_n_stocks
     - --min-cap → filtering.min_market_cap
@@ -177,6 +182,10 @@ def _apply_cli_overrides(config: Dict[str, Any], cli_args: Dict[str, Any]) -> No
     # 해상도
     if cli_args.get('dpi'):
         config['visualization']['dpi'] = cli_args['dpi']
+
+    # 정렬 기준
+    if cli_args.get('sort_by'):
+        config['visualization']['sort_by'] = cli_args['sort_by']
 
     # 섹터 필터링
     if cli_args.get('sector'):
@@ -297,10 +306,11 @@ def _validate_config(config: Dict[str, Any]) -> None:
 
     # 7. 정렬 기준 검증
     sort_by = config['visualization'].get('sort_by')
-    if sort_by and sort_by not in ['combined_zscore', 'foreign_zscore', 'institution_zscore']:
+    valid_sort_modes = ['recent', 'momentum', 'weighted', 'average']
+    if sort_by and sort_by not in valid_sort_modes:
         raise ValueError(
             f"Invalid sort_by: '{sort_by}'. "
-            f"Must be one of: combined_zscore, foreign_zscore, institution_zscore"
+            f"Must be one of: {', '.join(valid_sort_modes)}"
         )
 
 

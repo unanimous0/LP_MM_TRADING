@@ -86,6 +86,12 @@ def main():
     )
 
     parser.add_argument(
+        '--direction', choices=['buy', 'sell', 'both'],
+        default='both',
+        help='매수/매도 방향 (buy: 매수 상위, sell: 매도 상위, both: 전체)'
+    )
+
+    parser.add_argument(
         '--min-cap', type=float,
         help='최소 시가총액 (억원 단위)'
     )
@@ -116,6 +122,17 @@ def main():
     parser.add_argument(
         '--dpi', type=int,
         help='해상도 (기본: 150, 고해상도: 300)'
+    )
+
+    parser.add_argument(
+        '--sort-by',
+        choices=['recent', 'momentum', 'weighted', 'average'],
+        default='recent',
+        help='''Y축 정렬 기준:
+  recent: 최근 기간(1W+1M) 우선 (기본, 추천!)
+  momentum: 수급 모멘텀(1W-2Y) - 전환점 포착
+  weighted: 가중 평균 (최근 높은 가중치)
+  average: 단순 평균 (deprecated)'''
     )
 
     # ============================================================================
@@ -177,7 +194,8 @@ def main():
     if args.sector:
         print(f"  - 섹터 필터: {args.sector}")
     if args.top:
-        print(f"  - 상위 종목: {args.top}개")
+        direction_map = {'buy': '매수', 'sell': '매도', 'both': '전체'}
+        print(f"  - 상위 종목: {args.top}개 ({direction_map[args.direction]})")
     if args.min_cap:
         print(f"  - 최소 시총: {args.min_cap}억원")
     if args.market:
@@ -221,12 +239,32 @@ def main():
 
         print(f"[OK] Calculated {len(zscore_matrix)} stocks × {len(selected_periods)} periods")
 
-        # Step 5: 상위 N개 필터링 (옵션)
-        if args.top and len(zscore_matrix) > args.top:
-            # 첫 번째 기간(1D) 기준으로 상위 N개 추출
-            first_period = list(selected_periods.keys())[0]
-            zscore_matrix = zscore_matrix.nlargest(args.top, first_period)
-            print(f"[INFO] Filtered to top {args.top} stocks")
+        # Step 5: 매수/매도 방향 및 상위 N개 필터링 (평균 Z-Score 기준)
+        # 평균 Z-Score 계산 (모든 기간의 평균)
+        zscore_matrix['_avg_zscore'] = zscore_matrix.mean(axis=1)
+
+        # 매수/매도 필터링
+        if args.direction == 'buy':
+            # 매수 상위: 평균 Z-Score 높은 순
+            if args.top:
+                zscore_matrix = zscore_matrix.nlargest(args.top, '_avg_zscore')
+                print(f"[INFO] Filtered to top {args.top} BUY stocks (highest avg Z-Score)")
+        elif args.direction == 'sell':
+            # 매도 상위: 평균 Z-Score 낮은 순
+            if args.top:
+                zscore_matrix = zscore_matrix.nsmallest(args.top, '_avg_zscore')
+                print(f"[INFO] Filtered to top {args.top} SELL stocks (lowest avg Z-Score)")
+        else:  # both
+            # 전체: 평균 절대값 기준 상위
+            if args.top and len(zscore_matrix) > args.top:
+                zscore_matrix['_abs_avg'] = zscore_matrix['_avg_zscore'].abs()
+                zscore_matrix = zscore_matrix.nlargest(args.top, '_abs_avg')
+                zscore_matrix = zscore_matrix.drop(columns=['_abs_avg'])
+                print(f"[INFO] Filtered to top {args.top} stocks (by avg Z-Score)")
+
+        # 평균 컬럼 제거 (히트맵에 표시하지 않음)
+        if '_avg_zscore' in zscore_matrix.columns:
+            zscore_matrix = zscore_matrix.drop(columns=['_avg_zscore'])
 
         # Step 6: 히트맵 렌더링
         print("\n[INFO] Rendering heatmap...")

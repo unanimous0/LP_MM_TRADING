@@ -110,18 +110,74 @@ class HeatmapRenderer:
         if self.config['output']['auto_create_dir']:
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Step 1: Y축 정렬 (Z-Score 강도순)
-        sort_by_column = self._get_sort_column(zscore_matrix)
+        # Step 1: Y축 정렬 (설정에 따라)
+        sort_by = self.vis_config.get('sort_by', 'recent')
+        periods = list(zscore_matrix.columns)
+
+        if sort_by == 'recent':
+            # 최근 기간 우선 (1W 또는 1W+1M 평균)
+            if '1W' in periods and '1M' in periods:
+                zscore_matrix['_sort_key'] = (zscore_matrix['1W'] + zscore_matrix['1M']) / 2
+                sort_label = "recent (1W+1M avg)"
+            elif '1W' in periods:
+                zscore_matrix['_sort_key'] = zscore_matrix['1W']
+                sort_label = "recent (1W)"
+            else:
+                # 가장 왼쪽(최근) 기간 사용
+                zscore_matrix['_sort_key'] = zscore_matrix[periods[0]]
+                sort_label = f"recent ({periods[0]})"
+
+        elif sort_by == 'momentum':
+            # 수급 모멘텀 (1W - 2Y, 양수 = 최근 개선)
+            first_period = periods[0]
+            last_period = periods[-1]
+            zscore_matrix['_sort_key'] = zscore_matrix[first_period] - zscore_matrix[last_period]
+            sort_label = f"momentum ({first_period} - {last_period})"
+
+        elif sort_by == 'weighted':
+            # 가중 평균 (최근에 높은 가중치: 3, 2.5, 2, 1.5, 1, 0.5)
+            weights = [3.0, 2.5, 2.0, 1.5, 1.0, 0.5][:len(periods)]
+            weighted_sum = sum(zscore_matrix[p] * w for p, w in zip(periods, weights))
+            zscore_matrix['_sort_key'] = weighted_sum / sum(weights)
+            sort_label = "weighted avg (recent priority)"
+
+        elif sort_by == 'average':
+            # 단순 평균 (deprecated, 하위 호환성)
+            zscore_matrix['_sort_key'] = zscore_matrix.mean(axis=1)
+            sort_label = "simple average (deprecated)"
+
+        else:
+            # 기본값: recent
+            zscore_matrix['_sort_key'] = zscore_matrix[periods[0]]
+            sort_label = f"default ({periods[0]})"
+
+        # 정렬
         zscore_matrix_sorted = zscore_matrix.sort_values(
-            by=sort_by_column,
+            by='_sort_key',
             ascending=not self.vis_config['descending']  # True면 내림차순
         )
 
-        print(f"[INFO] Sorted by {sort_by_column} ({len(zscore_matrix_sorted)} stocks)")
+        # 정렬 키 컬럼 제거 (히트맵에 표시하지 않음)
+        zscore_matrix_sorted = zscore_matrix_sorted.drop(columns=['_sort_key'])
 
-        # Step 2: Figure 생성
+        n_stocks = len(zscore_matrix_sorted)
+        print(f"[INFO] Sorted by {sort_label} ({n_stocks} stocks)")
+
+        # Step 2: Figure 생성 (종목 수에 따라 세로 크기 조정)
+        figsize = list(self.vis_config['figsize'])  # [width, height]
+
+        # 종목 수에 따른 세로 크기 조정
+        if n_stocks <= 30:
+            figsize[1] = max(figsize[1], n_stocks * 0.4)  # 최소 0.4인치/종목
+        elif n_stocks <= 50:
+            figsize[1] = max(figsize[1], n_stocks * 0.35)  # 50개 = 17.5인치
+        elif n_stocks <= 100:
+            figsize[1] = max(figsize[1], n_stocks * 0.25)  # 100개 = 25인치
+        else:
+            figsize[1] = max(figsize[1], n_stocks * 0.15)  # 345개 = 51인치
+
         fig, ax = plt.subplots(
-            figsize=self.vis_config['figsize'],
+            figsize=tuple(figsize),
             dpi=self.vis_config['dpi']
         )
 
@@ -149,15 +205,26 @@ class HeatmapRenderer:
         ax.set_xticklabels(periods, fontsize=12, fontweight='bold')
         ax.set_xlabel('Period (Lookback Window)', fontsize=14, fontweight='bold')
 
-        # Step 5: Y축 레이블 (종목 수)
+        # Step 5: Y축 레이블 (모든 종목 코드 표시)
         n_stocks = len(zscore_matrix_sorted)
         ax.set_ylabel(f'Stocks (n={n_stocks}, sorted by Z-Score)', fontsize=14, fontweight='bold')
 
-        # Y축 틱: 상/중/하 3개만 표시
-        y_ticks = [0, n_stocks // 2, n_stocks - 1]
-        y_labels = ['Top (Strong Buy)', 'Mid', 'Bottom (Strong Sell)']
+        # Y축 틱: 모든 종목 표시 (폰트 크기만 조정)
+        y_ticks = list(range(n_stocks))
+        y_labels = [f'{code}' for code in zscore_matrix_sorted.index]
+
+        # 종목 수에 따라 폰트 크기 조정
+        if n_stocks <= 30:
+            fontsize = 9
+        elif n_stocks <= 50:
+            fontsize = 7
+        elif n_stocks <= 100:
+            fontsize = 5
+        else:
+            fontsize = 4
+
         ax.set_yticks(y_ticks)
-        ax.set_yticklabels(y_labels, fontsize=10)
+        ax.set_yticklabels(y_labels, fontsize=fontsize)
 
         # Step 6: Colorbar
         cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
@@ -191,14 +258,18 @@ class HeatmapRenderer:
         """
         Y축 정렬 기준 컬럼 결정
 
-        기본: 가장 최근 기간 (1D)
+        기본: 가장 최근 기간 (NULL이 아닌 첫 번째 컬럼)
         설정에서 변경 가능
         """
         sort_by = self.vis_config.get('sort_by', 'combined_zscore')
 
         # 기간 컬럼 중 가장 최근 것 (첫 번째 컬럼)
         if sort_by == 'combined_zscore' and not zscore_matrix.empty:
-            return zscore_matrix.columns[0]  # 첫 번째 기간 (1D)
+            # NULL이 아닌 첫 번째 컬럼 찾기
+            for col in zscore_matrix.columns:
+                if zscore_matrix[col].notna().any():
+                    return col
+            return zscore_matrix.columns[0]  # 모두 NULL이면 첫 번째
 
         return zscore_matrix.columns[0]
 
