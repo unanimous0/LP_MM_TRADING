@@ -20,7 +20,7 @@
 - 61개 테스트 (100% 통과)
 
 **Stage 3: 패턴 기반 분류 시스템** ✅
-- 3개 바구니 자동 분류 (전환돌파형/지속매집형/조정반등형)
+- 3개 바구니 자동 분류 (모멘텀형/지속형/전환형)
 - 추가 시그널 탐지 (MA 골든크로스, 가속도, 동조율)
 - 통합 리포트 생성 (종목별 1줄 요약 카드)
 - 진입/청산 포인트 제시
@@ -82,8 +82,8 @@ python scripts/analysis/heatmap_generator.py --sector "반도체 및 관련장�
 # 기본 실행 (전체 종목, 모든 패턴)
 python scripts/analysis/regime_scanner.py
 
-# 전환돌파형 종목만, 점수 70점 이상
-python scripts/analysis/regime_scanner.py --pattern 전환돌파형 --min-score 70
+# 모멘텀형 종목만, 점수 70점 이상
+python scripts/analysis/regime_scanner.py --pattern 모멘텀형 --min-score 70
 
 # 시그널 2개 이상, 상위 10개, 요약 카드 출력
 python scripts/analysis/regime_scanner.py --min-signals 2 --top 10 --print-cards
@@ -142,9 +142,9 @@ python scripts/analysis/regime_scanner.py --save-csv --watchlist
 
 **주요 메트릭**:
 1. **패턴별 성과**
-   - 전환돌파형: 승률 62%, 평균 수익 +12.3%, 평균 보유일 8일
-   - 지속매집형: 승률 55%, 평균 수익 +18.7%, 평균 보유일 21일
-   - 조정반등형: 승률 48%, 평균 수익 +9.1%, 평균 보유일 14일
+   - 모멘텀형: 승률 62%, 평균 수익 +12.3%, 평균 보유일 8일
+   - 지속형: 승률 55%, 평균 수익 +18.7%, 평균 보유일 21일
+   - 전환형: 승률 48%, 평균 수익 +9.1%, 평균 보유일 14일
 
 2. **시그널 개수별 성과**
    - 시그널 0개: 승률 45%, 평균 수익 +5.2%
@@ -187,7 +187,7 @@ python scripts/analysis/regime_scanner.py --save-csv --watchlist
 python scripts/analysis/backtest_runner.py
 
 # 특정 패턴만 테스트
-python scripts/analysis/backtest_runner.py --pattern 전환돌파형
+python scripts/analysis/backtest_runner.py --pattern 모멘텀형
 
 # 파라미터 최적화 모드
 python scripts/analysis/backtest_runner.py --optimize --iterations 100
@@ -217,9 +217,9 @@ python scripts/analysis/backtest_runner.py --walk-forward --window 90 --step 30
 평균 보유 기간: 14.3일
 
 [패턴별 성과]
-전환돌파형: 승률 62.1% | 평균 +12.3% | 거래 45건
-지속매집형: 승률 54.8% | 평균 +18.7% | 거래 72건
-조정반등형: 승률 47.6% | 평균 +9.1% | 거래 35건
+모멘텀형: 승률 62.1% | 평균 +12.3% | 거래 45건
+지속형: 승률 54.8% | 평균 +18.7% | 거래 72건
+전환형: 승률 47.6% | 평균 +9.1% | 거래 35건
 
 [시그널별 성과]
 시그널 3개: 승률 72.0% | 평균 +18.7% | 거래 25건 ⭐
@@ -234,8 +234,8 @@ python scripts/analysis/backtest_runner.py --walk-forward --window 90 --step 30
 
 [권장 전략]
 ✅ 시그널 2개 이상 종목만 진입 (승률 61%+, 평균 수익 13%+)
-✅ 지속매집형 패턴 우선 (장기 상승 확률 높음)
-⚠️  조정반등형 신중 (승률 낮음, 손절 엄격 필요)
+✅ 지속형 패턴 우선 (장기 상승 확률 높음)
+⚠️  전환형 신중 (승률 낮음, 손절 엄격 필요)
 ================================================================================
 ```
 
@@ -385,7 +385,7 @@ Z-Score = (현재값 - 60일 평균) / 60일 표준편차
 - 4가지 정렬 모드 (투자 스타일별)
 
 ### ③ Stage 3: 패턴 분류 & 시그널 통합
-- **패턴 분류**: 3개 바구니 (전환돌파형/지속매집형/조정반등형)
+- **패턴 분류**: 3개 바구니 (모멘텀형/지속형/전환형)
 - **시그널 탐지**: MA 골든크로스, 수급 가속도, 외인-기관 동조율
 - **통합 리포트**: 종목별 1줄 요약 카드 + 진입/청산 포인트
 

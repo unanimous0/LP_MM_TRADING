@@ -2,7 +2,7 @@
 Pattern-based classification module
 
 Implements Stage 3 pattern classification:
-- 3개 바구니 자동 분류 (지속매집형, 전환돌파형, 조정반등형)
+- 3개 바구니 자동 분류 (모멘텀형, 지속형, 전환형)
 - 4가지 정렬 키 통합 (Recent, Momentum, Weighted, Average)
 - 추가 특성 추출 (변동성, 지속성, 가속도)
 - 패턴 강도 점수 계산 (0~100)
@@ -36,18 +36,18 @@ class PatternClassifier:
         return {
             # 패턴 분류 임계값
             'pattern_thresholds': {
-                # 전환돌파형: 과거 약함 → 최근 강함
-                'momentum_breakout': {
+                # 모멘텀형: 단기 모멘텀 매우 강함
+                'momentum': {
                     'momentum_min': 1.0,      # 1W-2Y > 1.0
                     'recent_min': 0.5,        # (1W+1M)/2 > 0.5
                 },
-                # 지속매집형: 장기간 일관된 매집
-                'sustained_accumulation': {
+                # 지속형: 장기간 일관된 추세
+                'sustained': {
                     'weighted_min': 0.8,      # 가중 평균 > 0.8
                     'persistence_min': 0.7,   # 양수 기간 비율 > 70%
                 },
-                # 조정반등형: 장기 강함 + 최근 약화
-                'pullback_bounce': {
+                # 전환형: 추세 약화, 반대 방향 전환 대기
+                'reversal': {
                     'weighted_min': 0.5,      # 가중 평균 > 0.5
                     'momentum_max': 0,        # 1W-2Y < 0 (최근 약화)
                 }
@@ -161,36 +161,40 @@ class PatternClassifier:
             row: 종목별 데이터 행 (recent, momentum, weighted, persistence 포함)
 
         Returns:
-            str: 패턴명 ('전환돌파형', '지속매집형', '조정반등형', '기타')
+            str: 패턴명 ('모멘텀형', '지속형', '전환형', '기타')
 
         Rules:
-            1. 전환돌파형: momentum > 1.0 AND recent > 0.5
-               → 과거 약했지만 최근 급등 (단기 추격 매수)
+            1. 모멘텀형: momentum > 1.0 AND recent > 0.5
+               → 단기 모멘텀 매우 강함 (추격 매수)
+               → 매수: 급상승 중, 단기 추격 전략
 
-            2. 지속매집형: weighted > 0.8 AND persistence > 0.7
-               → 장기간 일관된 매집 (조정 후 재진입)
+            2. 지속형: weighted > 0.8 AND persistence > 0.7
+               → 장기간 일관된 추세 (조정 후 진입)
+               → 매수: 장기 매집, 5~10% 조정 시 분할 매수
 
-            3. 조정반등형: weighted > 0.5 AND momentum < 0
-               → 장기 강함 + 최근 약화 (저가 매수)
+            3. 전환형: weighted > 0.5 AND momentum < 0
+               → 추세 약화, 반대 방향 전환 대기
+               → 매수: 고점에서 조정 중, 저점 매수 대기 (반등 시그널 확인)
+               → 매도(미래): 저점에서 반등 중, 고점 매도 대기 (조정 시그널 확인)
 
             4. 기타: 위 조건 미충족
         """
         thresholds = self.config['pattern_thresholds']
 
-        # Pattern 1: 전환돌파형
-        if (row['momentum'] > thresholds['momentum_breakout']['momentum_min'] and
-            row['recent'] > thresholds['momentum_breakout']['recent_min']):
-            return '전환돌파형'
+        # Pattern 1: 모멘텀형
+        if (row['momentum'] > thresholds['momentum']['momentum_min'] and
+            row['recent'] > thresholds['momentum']['recent_min']):
+            return '모멘텀형'
 
-        # Pattern 2: 지속매집형
-        if (row['weighted'] > thresholds['sustained_accumulation']['weighted_min'] and
-            row['persistence'] > thresholds['sustained_accumulation']['persistence_min']):
-            return '지속매집형'
+        # Pattern 2: 지속형
+        if (row['weighted'] > thresholds['sustained']['weighted_min'] and
+            row['persistence'] > thresholds['sustained']['persistence_min']):
+            return '지속형'
 
-        # Pattern 3: 조정반등형
-        if (row['weighted'] > thresholds['pullback_bounce']['weighted_min'] and
-            row['momentum'] < thresholds['pullback_bounce']['momentum_max']):
-            return '조정반등형'
+        # Pattern 3: 전환형
+        if (row['weighted'] > thresholds['reversal']['weighted_min'] and
+            row['momentum'] < thresholds['reversal']['momentum_max']):
+            return '전환형'
 
         # Pattern 4: 기타
         return '기타'
@@ -284,7 +288,7 @@ class PatternClassifier:
 
         Returns:
             dict: 패턴별 종목 수
-                {'전환돌파형': 12, '지속매집형': 45, '조정반등형': 33, '기타': 255}
+                {'모멘텀형': 12, '지속형': 45, '전환형': 33, '기타': 255}
         """
         return classified_df['pattern'].value_counts().to_dict()
 
@@ -298,7 +302,7 @@ class PatternClassifier:
 
         Args:
             classified_df: classify_all() 결과
-            pattern: 패턴명 ('전환돌파형', '지속매집형', '조정반등형', '기타')
+            pattern: 패턴명 ('모멘텀형', '지속형', '전환형', '기타')
             min_score: 최소 점수 (0~100)
             top_n: 상위 N개만 반환 (None이면 전체)
 
@@ -306,9 +310,9 @@ class PatternClassifier:
             pd.DataFrame: 필터링된 결과 (점수 내림차순 정렬)
 
         Example:
-            >>> # 전환돌파형 중 점수 70점 이상, 상위 10개
-            >>> df_breakout = classifier.filter_by_pattern(
-            ...     classified_df, '전환돌파형', min_score=70, top_n=10
+            >>> # 모멘텀형 중 점수 70점 이상, 상위 10개
+            >>> df_momentum = classifier.filter_by_pattern(
+            ...     classified_df, '모멘텀형', min_score=70, top_n=10
             ... )
         """
         # 패턴 필터링
@@ -333,22 +337,22 @@ class PatternClassifier:
         패턴별 베스트 픽 추출
 
         Args:
-            classified_df: classify_all() 결과
+            classified_df: classify_all() 결果
             top_n_per_pattern: 패턴당 상위 N개
 
         Returns:
             dict: 패턴별 베스트 픽
                 {
-                    '전환돌파형': DataFrame (top 10),
-                    '지속매집형': DataFrame (top 10),
-                    '조정반등형': DataFrame (top 10)
+                    '모멘텀형': DataFrame (top 10),
+                    '지속형': DataFrame (top 10),
+                    '전환형': DataFrame (top 10)
                 }
 
         Example:
             >>> top_picks = classifier.get_top_picks(classified_df, top_n_per_pattern=10)
-            >>> print(top_picks['전환돌파형'][['stock_code', 'score']])
+            >>> print(top_picks['모멘텀형'][['stock_code', 'score']])
         """
-        patterns = ['전환돌파형', '지속매집형', '조정반등형']
+        patterns = ['모멘텀형', '지속형', '전환형']
         result = {}
 
         for pattern in patterns:

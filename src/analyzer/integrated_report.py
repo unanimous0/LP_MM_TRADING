@@ -41,17 +41,17 @@ class IntegratedReport:
         return {
             # 진입 포인트 규칙
             'entry_rules': {
-                '전환돌파형': {
+                '모멘텀형': {
                     'condition': '현재가 진입 가능',
-                    'description': '단기 추격 매수, 모멘텀 확인 후 진입'
+                    'description': '급상승 중, 단기 추격 매수'
                 },
-                '지속매집형': {
+                '지속형': {
                     'condition': '조정 후 재진입',
                     'description': '5~10% 조정 시 분할 매수'
                 },
-                '조정반등형': {
-                    'condition': '저가 매수',
-                    'description': '현재가 또는 추가 조정 시 진입'
+                '전환형': {
+                    'condition': '저점 매수 대기',
+                    'description': '고점에서 조정 중, 반등 시그널 확인 후 진입'
                 },
                 '기타': {
                     'condition': '관망',
@@ -61,9 +61,9 @@ class IntegratedReport:
 
             # 손절 규칙
             'stop_loss_rules': {
-                '전환돌파형': -5,    # -5% 손절
-                '지속매집형': -10,   # -10% 손절
-                '조정반등형': -7,    # -7% 손절
+                '모멘텀형': -5,    # -5% 손절
+                '지속형': -10,   # -10% 손절
+                '전환형': -7,    # -7% 손절
                 '기타': -5           # -5% 손절
             },
 
@@ -131,14 +131,14 @@ class IntegratedReport:
 
         # 시그널 1개 = 패턴별 전략 + 시그널 참고
         if signal_count == 1:
-            if pattern == '전환돌파형':
+            if pattern == '모멘텀형':
                 entry_point = '현재가 진입 가능 (단기 모멘텀 + 시그널 1개)'
                 stop_loss = '-5% 손절'
-            elif pattern == '지속매집형':
+            elif pattern == '지속형':
                 entry_point = '현재가 또는 소폭 조정 시 진입 (시그널 1개 발생)'
                 stop_loss = '-8% 손절'
-            elif pattern == '조정반등형':
-                entry_point = '단기 반등 진입 (시그널 확인됨)'
+            elif pattern == '전환형':
+                entry_point = '저점 반등 시그널 확인 (추가 하락 주의)'
                 stop_loss = '-7% 손절'
             else:  # 기타
                 entry_point = '신중 진입 (시그널 있으나 패턴 불명확)'
@@ -268,10 +268,10 @@ class IntegratedReport:
             pd.DataFrame: 필터링된 리포트
 
         Example:
-            >>> # 전환돌파형 + 점수 70점 이상 + 시그널 2개 이상, 상위 10개
+            >>> # 모멘텀형 + 점수 70점 이상 + 시그널 2개 이상, 상위 10개
             >>> df_filtered = report.filter_report(
             ...     report_df,
-            ...     pattern='전환돌파형',
+            ...     pattern='모멘텀형',
             ...     min_score=70,
             ...     min_signal_count=2,
             ...     top_n=10
@@ -357,12 +357,12 @@ class IntegratedReport:
             >>> report.print_summary_card(report_df, top_n=5)
 
             ========================================
-            [1] 232140 와이씨 (전환돌파형, 점수: 85)
+            [1] 232140 와이씨 (모멘텀형, 점수: 85)
             ========================================
             섹터: 전기전자
             정렬 키: Recent=0.91, Momentum=1.70, Weighted=0.52, Average=0.32
             시그널: MA크로스, 가속도 1.8배 (2개)
-            진입: 현재가 진입 가능 (단기 추격 매수, 모멘텀 확인 후 진입)
+            진입: 현재가 진입 가능 (급상승 중, 단기 추격 매수)
             손절: -5% 손절
         """
         df_top = report_df.head(top_n)
@@ -446,16 +446,16 @@ class IntegratedReport:
         Returns:
             dict: 패턴별 관심 종목
                 {
-                    '전환돌파형': DataFrame (고점수 + 강시그널),
-                    '지속매집형': DataFrame,
-                    '조정반등형': DataFrame
+                    '모멘텀형': DataFrame (고점수 + 강시그널),
+                    '지속형': DataFrame,
+                    '전환형': DataFrame
                 }
 
         Example:
             >>> watchlist = report.get_watchlist(report_df, min_score=75, min_signal_count=2)
-            >>> print(watchlist['전환돌파형'][['stock_name', 'score', 'signal_count']])
+            >>> print(watchlist['모멘텀형'][['stock_name', 'score', 'signal_count']])
         """
-        patterns = ['전환돌파형', '지속매집형', '조정반등형']
+        patterns = ['모멘텀형', '지속형', '전환형']
         watchlist = {}
 
         for pattern in patterns:

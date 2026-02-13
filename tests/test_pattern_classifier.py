@@ -92,7 +92,7 @@ class TestPatternClassifier:
         })
 
         pattern = classifier.classify_pattern(row)
-        assert pattern == '전환돌파형'
+        assert pattern == '모멘텀형'
 
     def test_classify_pattern_sustained_accumulation(self, classifier):
         """Test sustained accumulation pattern classification"""
@@ -104,7 +104,7 @@ class TestPatternClassifier:
         })
 
         pattern = classifier.classify_pattern(row)
-        assert pattern == '지속매집형'
+        assert pattern == '지속형'
 
     def test_classify_pattern_pullback_bounce(self, classifier):
         """Test pullback bounce pattern classification"""
@@ -116,7 +116,7 @@ class TestPatternClassifier:
         })
 
         pattern = classifier.classify_pattern(row)
-        assert pattern == '조정반등형'
+        assert pattern == '전환형'
 
     def test_classify_pattern_other(self, classifier):
         """Test other pattern classification"""
@@ -164,7 +164,7 @@ class TestPatternClassifier:
         assert len(result) == len(sample_zscore_matrix)
 
         # Check pattern values
-        valid_patterns = ['전환돌파형', '지속매집형', '조정반등형', '기타']
+        valid_patterns = ['모멘텀형', '지속형', '전환형', '기타']
         assert result['pattern'].isin(valid_patterns).all()
 
         # Check score range
@@ -221,7 +221,7 @@ class TestPatternClassifier:
         assert isinstance(top_picks, dict)
 
         # Check patterns
-        expected_patterns = ['전환돌파형', '지속매집형', '조정반등형']
+        expected_patterns = ['모멘텀형', '지속형', '전환형']
         assert all(pattern in top_picks for pattern in expected_patterns)
 
         # Check top N limit

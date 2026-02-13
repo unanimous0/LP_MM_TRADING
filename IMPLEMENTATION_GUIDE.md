@@ -355,11 +355,11 @@ print(classified_df[['stock_code', 'pattern', 'score']].head())
 ```
 
 **패턴 분류 규칙**:
-1. **전환돌파형**: Momentum > 1.0 AND Recent > 0.5
+1. **모멘텀형**: Momentum > 1.0 AND Recent > 0.5
    - 과거 약함 → 최근 급등 (단기 추격 매수)
-2. **지속매집형**: Weighted > 0.8 AND Persistence > 0.7
+2. **지속형**: Weighted > 0.8 AND Persistence > 0.7
    - 장기간 일관된 매집 (조정 후 재진입)
-3. **조정반등형**: Weighted > 0.5 AND Momentum < 0
+3. **전환형**: Weighted > 0.5 AND Momentum < 0
    - 장기 강함 + 최근 약화 (저가 매수)
 
 ---
@@ -413,7 +413,7 @@ report_df = report_gen.generate_report(classified_df, signals_df)
 # 필터링
 filtered = report_gen.filter_report(
     report_df,
-    pattern='전환돌파형',
+    pattern='모멘텀형',
     min_score=70,
     min_signal_count=2,
     top_n=10
@@ -429,7 +429,7 @@ report_gen.export_to_csv(filtered, 'output/regime_report.csv')
 **출력 형식**:
 ```
 ========================================
-[1] 005930 삼성전자 (전환돌파형, 점수: 85)
+[1] 005930 삼성전자 (모멘텀형, 점수: 85)
 ========================================
 섹터: 반도체 및 관련장비
 정렬 키: Recent=0.91, Momentum=1.70, Weighted=0.52, Average=0.32
@@ -448,11 +448,11 @@ report_gen.export_to_csv(filtered, 'output/regime_report.csv')
 # 기본 실행 (전체 종목, 모든 패턴)
 python scripts/analysis/regime_scanner.py
 
-# 전환돌파형 종목만, 점수 70점 이상
-python scripts/analysis/regime_scanner.py --pattern 전환돌파형 --min-score 70
+# 모멘텀형 종목만, 점수 70점 이상
+python scripts/analysis/regime_scanner.py --pattern 모멘텀형 --min-score 70
 
-# 지속매집형 + 시그널 2개 이상, 상위 10개
-python scripts/analysis/regime_scanner.py --pattern 지속매집형 --min-signals 2 --top 10
+# 지속형 + 시그널 2개 이상, 상위 10개
+python scripts/analysis/regime_scanner.py --pattern 지속형 --min-signals 2 --top 10
 
 # 섹터 필터링 (반도체)
 python scripts/analysis/regime_scanner.py --sector "반도체 및 관련장비"
@@ -555,19 +555,19 @@ def classify_pattern(row):
     3개 바구니 자동 분류
 
     Returns:
-        str: '지속매집형', '전환돌파형', '조정반등형'
+        str: '지속형', '모멘텀형', '전환형'
     """
     # Pattern 1: 모멘텀 돌파형
     if row['momentum'] > 1.0 and row['recent'] > 0.5:
-        return '전환돌파형'
+        return '모멘텀형'
 
     # Pattern 2: 지속 매집형
     if row['weighted'] > 0.8 and row['persistence'] > 0.7:
-        return '지속매집형'
+        return '지속형'
 
     # Pattern 3: 조정 반등형
     if row['weighted'] > 0.5 and row['momentum'] < 0:
-        return '조정반등형'
+        return '전환형'
 
     return '기타'
 
@@ -629,7 +629,7 @@ optimizer.calculate_multi_period_zscores(periods)
     │   ├── 패턴 분류 규칙 적용
     │   └── MA 골든크로스, 동조율 추가
     └── 출력: DataFrame
-        ├── pattern: '지속매집형', '전환돌파형', '조정반등형'
+        ├── pattern: '지속형', '모멘텀형', '전환형'
         ├── score: 0~100 (패턴 강도)
         └── signals: ['MA크로스', '가속도', '동조율'] (리스트)
 ```
@@ -723,7 +723,7 @@ average: 1.288 (1위)   ← 전체 일관성 최고!
 {
     'stock_code': '232140',
     'stock_name': '와이씨',
-    'pattern': '전환돌파형',
+    'pattern': '모멘텀형',
     'score': 85,
     'signals': ['MA크로스', '가속도 1.8배', '동조율 72%'],
     'entry_point': '현재가 진입 가능',
