@@ -111,7 +111,7 @@ class IntegratedReport:
         진입/청산 포인트 생성
 
         Args:
-            row: 종목별 데이터 행 (pattern 포함)
+            row: 종목별 데이터 행 (pattern, signal_count 포함)
 
         Returns:
             dict: {
@@ -120,12 +120,39 @@ class IntegratedReport:
             }
         """
         pattern = row['pattern']
+        signal_count = row.get('signal_count', 0)
 
-        # 진입 포인트
+        # 시그널 2개 이상 = 강한 진입 신호 (패턴 무관)
+        if signal_count >= 2:
+            return {
+                'entry_point': f'즉시 진입 가능 (시그널 {signal_count}개, 강한 매수 타이밍)',
+                'stop_loss': '-7% 손절'
+            }
+
+        # 시그널 1개 = 패턴별 전략 + 시그널 참고
+        if signal_count == 1:
+            if pattern == '전환돌파형':
+                entry_point = '현재가 진입 가능 (단기 모멘텀 + 시그널 1개)'
+                stop_loss = '-5% 손절'
+            elif pattern == '지속매집형':
+                entry_point = '현재가 또는 소폭 조정 시 진입 (시그널 1개 발생)'
+                stop_loss = '-8% 손절'
+            elif pattern == '조정반등형':
+                entry_point = '단기 반등 진입 (시그널 확인됨)'
+                stop_loss = '-7% 손절'
+            else:  # 기타
+                entry_point = '신중 진입 (시그널 있으나 패턴 불명확)'
+                stop_loss = '-5% 손절'
+
+            return {
+                'entry_point': entry_point,
+                'stop_loss': stop_loss
+            }
+
+        # 시그널 0개 = 원래 패턴별 전략
         entry_rule = self.config['entry_rules'].get(pattern, self.config['entry_rules']['기타'])
         entry_point = f"{entry_rule['condition']} ({entry_rule['description']})"
 
-        # 손절 포인트
         stop_loss_pct = self.config['stop_loss_rules'].get(pattern, -5)
         stop_loss = f"{stop_loss_pct}% 손절"
 

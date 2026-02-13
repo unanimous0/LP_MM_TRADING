@@ -52,3 +52,7 @@ output/*.png
 output/*.csv
 !output/heatmap_semi_*.png
 !output/heatmap_semi_*.csv
+
+# Excel output files
+output/*.xlsx
+output/~$*.xlsx
