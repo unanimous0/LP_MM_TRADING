@@ -9,6 +9,7 @@ Implements Stage 3 additional signals:
 용도:
     패턴 분류 결과에 추가 시그널을 제공하여
     진입/청산 타이밍과 확신도를 높입니다.
+    -> Find "When"
 """
 
 import pandas as pd

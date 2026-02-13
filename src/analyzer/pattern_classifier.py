@@ -10,6 +10,7 @@ Implements Stage 3 pattern classification:
 용도:
     Stage 2 히트맵 결과(4가지 정렬 키)를 통합하여
     투자 스타일별 종목을 자동 분류하고 패턴 강도를 점수화합니다.
+    -> Find "What"
 """
 
 import pandas as pd
