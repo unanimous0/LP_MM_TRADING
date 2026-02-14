@@ -16,6 +16,8 @@ data/*.json
 
 # Database files
 data/processed/
+data/raw/processed/
+*.backup_*
 
 # Output files (regeneratable)
 output/test_*.png
