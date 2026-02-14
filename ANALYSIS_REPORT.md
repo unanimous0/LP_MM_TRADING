@@ -1,9 +1,9 @@
 # 수급 레짐 스캐너 - 분석 결과 보고서
 
-> **분석 일시**: 2026-02-13
+> **분석 일시**: 2026-02-14
 > **분석 대상**: 338개 종목 (KOSPI200 + KOSDAQ150)
 > **분석 기간**: 2024-01-02 ~ 2026-01-20 (약 2년, 504 거래일)
-> **버전**: v1.2
+> **버전**: v1.4
 
 ---
 
@@ -16,7 +16,8 @@
 5. [방법론 검증](#5-방법론-검증)
 6. [최종 결론 및 평가](#6-최종-결론-및-평가)
 7. [실전 투자 전략](#7-실전-투자-전략)
-8. [업데이트 이력](#8-업데이트-이력)
+8. [HTML 리포트 - Treemap 시각화](#8-html-리포트---treemap-시각화)
+9. [업데이트 이력](#9-업데이트-이력)
 
 ---
 
@@ -749,7 +750,286 @@ Average:  Z = +2.72
 
 ---
 
-## 8. 업데이트 이력
+## 8. HTML 리포트 - Treemap 시각화
+
+### 8-1. 개요
+
+HTML 리포트에 **D3.js Treemap** 시각화를 추가하여 섹터별 종목 분포와 점수를 한눈에 볼 수 있도록 개선했습니다.
+
+**목표**:
+- ✅ 섹터별 수급 집중도를 시각적으로 표현
+- ✅ 종합점수에 비례하는 박스 크기
+- ✅ 직관적인 색상 코딩 (빨강 → 노랑 → 초록)
+- ✅ 인터랙티브 툴팁으로 상세 정보 제공
+
+### 8-2. 구현 과정
+
+#### 1단계: 초기 Grid 히트맵 구현 (2026-02-14)
+
+**구현 내용**:
+- D3.js v7을 사용한 기본 Grid 히트맵
+- X축: 섹터 내 종목들 (순서대로 나열)
+- Y축: 섹터명
+- 색상: YlOrRd 스케일 (40~100점 범위)
+
+**문제점**:
+- 박스 크기가 모두 동일하여 점수 차이 표현 부족
+- 섹터 구분이 명확하지 않음
+- 사용자가 원하는 Treemap 형식이 아님
+
+#### 2단계: Treemap으로 전환 (2026-02-14)
+
+**데이터 구조 변경**:
+```python
+# 계층 구조로 변경
+treemap_data = {
+    'name': 'root',
+    'children': [
+        {
+            'name': '반도체',
+            'children': [
+                {
+                    'name': '삼성전자',
+                    'value': 85.5,  # 박스 크기 결정
+                    'stock_code': '005930',
+                    'combined_score': 85.5,
+                    ...
+                },
+                ...
+            ]
+        },
+        ...
+    ]
+}
+```
+
+**D3 Treemap 레이아웃**:
+```javascript
+// 계층 구조 생성
+const root = d3.hierarchy(treemapData)
+    .sum(d => d.value)  // 박스 크기 = 종합점수
+    .sort((a, b) => b.value - a.value);
+
+// Treemap 레이아웃
+const treemap = d3.treemap()
+    .size([width, height])
+    .padding(1)
+    .paddingTop(24)  // 섹터 이름 공간
+    .round(true);
+```
+
+**주요 특징**:
+- ✅ 박스 크기가 종합점수에 비례
+- ✅ 섹터별로 그룹화된 레이아웃
+- ✅ 색상: 빨강(낮음) → 노랑(중간) → 초록(높음)
+
+#### 3단계: 스타일 개선 (2026-02-14)
+
+**개선사항 1: 텍스트 가독성**
+```javascript
+// 배경색 명도에 따라 글자색 자동 조정
+function getTextColor(bgColor) {
+    const color = d3.color(bgColor);
+    const luminance = 0.299 * color.r + 0.587 * color.g + 0.114 * color.b;
+    return luminance > 140 ? '#1F2937' : '#FFFFFF';
+}
+```
+
+**결과**:
+- 빨강 배경 (낮은 점수) → 흰색 글자
+- 초록 배경 (높은 점수) → 검은색 글자
+- 노랑 배경 (중간 점수) → 검은색 글자
+
+**개선사항 2: 범례 위치**
+- Before: 우측 상단 (섹터명과 겹침)
+- After: 상단 중앙 (깔끔한 배치)
+
+**개선사항 3: 전체 스타일링**
+- 둥근 모서리 (border-radius: 3px)
+- 섹터 레이블에 반투명 검정 배경 추가
+- 테두리 최적화 (1.5px 흰색)
+- 호버 효과 개선 (brightness + stroke 강조)
+- 중앙 정렬 텍스트
+
+### 8-3. 최종 결과
+
+#### 시각적 표현
+- **박스 크기**: 종합점수에 비례 (점수 높을수록 큰 박스)
+- **색상 코딩**:
+  - 빨강 (40~60점): 낮은 점수
+  - 노랑 (60~80점): 중간 점수
+  - 초록 (80~100점): 높은 점수
+- **섹터 구분**: 각 섹터가 하나의 큰 영역으로 묶임
+
+#### 인터랙티브 기능
+- **호버 효과**: 마우스 올리면 밝아지고 테두리 강조
+- **상세 툴팁**: 종목명, 코드, 섹터, 패턴, 점수, 시그널 정보
+- **시각적 피드백**: 부드러운 전환 애니메이션 (150~300ms)
+
+#### 생성 파일
+```
+output/regime_report_final.html  (55KB)
+  ↳ Treemap 시각화 포함
+  ↳ Chart.js 차트 (패턴별 분포, 섹터별 평균 점수)
+  ↳ 종합 추천 순위 TOP 20 테이블
+  ↳ 섹터별 수급 집중도 테이블
+```
+
+### 8-4. 기술 스택
+
+#### 라이브러리
+- **D3.js v7**: Treemap 레이아웃 및 시각화
+- **Tailwind CSS (CDN)**: 반응형 레이아웃
+- **Chart.js (CDN)**: 패턴별/섹터별 차트
+
+#### 주요 D3 API
+```javascript
+d3.hierarchy()         // 계층 구조 생성
+d3.treemap()          // Treemap 레이아웃
+d3.scaleSequential()  // 연속형 색상 스케일
+d3.interpolateRdYlGn  // 빨강-노랑-초록 그라데이션
+```
+
+#### 색상 팔레트
+```javascript
+// 종합점수 스케일 (빨강 → 노랑 → 초록)
+const colorScale = d3.scaleSequential()
+    .domain([40, 100])
+    .interpolator(d3.interpolateRdYlGn);
+
+// 패턴 색상
+const patternColors = {
+    '모멘텀형': '#EF4444',  // 빨강
+    '지속형': '#3B82F6',    // 파랑
+    '전환형': '#F59E0B'     // 주황
+};
+```
+
+### 8-5. 주요 코드 설명
+
+#### 데이터 준비 (Python)
+```python
+# Treemap 데이터 준비 (계층 구조: 섹터 > 종목)
+treemap_data = {'name': 'root', 'children': []}
+
+for _, sector_row in sector_concentration.iterrows():
+    sector = sector_row['sector']
+    sector_stocks = df[df['sector'] == sector].nlargest(10, 'combined_score')
+
+    sector_node = {'name': sector, 'children': []}
+
+    for _, stock in sector_stocks.iterrows():
+        sector_node['children'].append({
+            'name': stock['stock_name'],
+            'value': float(stock['combined_score']),  # 박스 크기
+            'stock_code': stock['stock_code'],
+            'pattern': stock['pattern'],
+            'signal_count': int(stock['signal_count']),
+            ...
+        })
+
+    treemap_data['children'].append(sector_node)
+```
+
+#### Treemap 레이아웃 (JavaScript)
+```javascript
+// 계층 구조 생성
+const root = d3.hierarchy(treemapData)
+    .sum(d => d.value)
+    .sort((a, b) => b.value - a.value);
+
+// Treemap 레이아웃 설정
+const treemap = d3.treemap()
+    .size([width, height - margin.top])
+    .padding(1)
+    .paddingTop(24)
+    .round(true);
+
+treemap(root);
+```
+
+#### 텍스트 색상 자동 조정
+```javascript
+// 배경색의 명도(luminance)를 계산하여 텍스트 색상 결정
+function getTextColor(bgColor) {
+    const color = d3.color(bgColor);
+    const luminance = 0.299 * color.r + 0.587 * color.g + 0.114 * color.b;
+    return luminance > 140 ? '#1F2937' : '#FFFFFF';
+}
+```
+
+### 8-6. 실행 방법
+
+#### 전체 리포트 생성
+```bash
+# 모든 형식 (Excel, CSV, HTML, Markdown) 생성
+bash scripts/analysis/run_all.sh
+```
+
+#### HTML만 생성
+```bash
+# 1. CSV 생성
+python scripts/analysis/regime_scanner.py --save-csv output/regime_report.csv
+
+# 2. HTML 생성
+python scripts/analysis/generate_html_report.py \
+    --input output/regime_report.csv \
+    --output output/regime_report_final.html
+```
+
+#### 브라우저에서 열기
+```bash
+# Mac
+open output/regime_report_final.html
+```
+
+### 8-7. 성능 최적화
+
+#### 데이터 최적화
+- 각 섹터당 상위 10개 종목만 표시
+- 총 100개 내외의 박스로 렌더링 부하 최소화
+
+#### 렌더링 최적화
+- D3 `.round(true)` 옵션으로 정수 좌표 사용
+- 호버 효과 transition 지속시간 최적화 (150~300ms)
+- 불필요한 DOM 조작 최소화
+
+#### 반응형 디자인
+- 고정 크기 (1200x800px) SVG
+- 스크롤 가능한 컨테이너로 작은 화면 대응
+
+### 8-8. Git 커밋 히스토리
+
+```bash
+# 1차 커밋: Treemap 전환
+[HTML 리포트] D3 Grid 히트맵 → Treemap 변경
+- 계층 구조 데이터로 변경 (섹터 > 종목)
+- 박스 크기: 종합점수에 비례
+- 색상: 빨강(낮음) → 노랑(중간) → 초록(높음)
+
+# 2차 커밋: 스타일 개선
+[HTML 리포트] Treemap 스타일 대폭 개선
+- 텍스트 가독성 향상 (배경 명도 기반 자동 색상 조정)
+- 범례 위치 개선 (상단 중앙으로 이동)
+- 전체 스타일링 개선 (둥근 모서리, 섹터 레이블 배경 등)
+```
+
+---
+
+## 9. 업데이트 이력
+
+### v1.4 (2026-02-14)
+- **HTML 리포트 - Treemap 시각화 추가** (섹션 8)
+- D3.js v7 기반 인터랙티브 Treemap 구현:
+  - 섹터별 종목 분포를 시각적으로 표현
+  - 박스 크기: 종합점수에 비례
+  - 색상 코딩: 빨강(낮음) → 노랑(중간) → 초록(높음)
+  - 텍스트 가독성 개선 (배경 명도 기반 자동 색상 조정)
+  - 범례 위치 최적화 (상단 중앙 배치)
+  - 인터랙티브 툴팁 (종목명, 코드, 섹터, 패턴, 점수, 시그널)
+- 구현 과정 3단계 상세 설명 추가
+- 기술 스택 및 주요 코드 설명 추가
+- Git 커밋 히스토리 기록
 
 ### v1.2 (2026-02-13)
 - **패턴 vs 시그널 수식 정의 및 비교 분석** 추가 (섹션 3-4)
@@ -807,5 +1087,5 @@ Average:  Z = +2.72
 
 ---
 
-**마지막 업데이트**: 2026-02-13
+**마지막 업데이트**: 2026-02-14
 **다음 업데이트 예정**: Stage 4 백테스트 완료 후
