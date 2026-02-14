@@ -71,12 +71,30 @@ def generate_html_report(csv_path: str, output_path: str, signal_bonus: int = 5)
     )
     sector_concentration = sector_concentration.nlargest(10, 'sector_score')
 
+    # 히트맵 데이터 준비 (각 섹터의 상위 종목들)
+    heatmap_data = []
+    for _, sector_row in sector_concentration.iterrows():
+        sector = sector_row['sector']
+        sector_stocks = df[df['sector'] == sector].nlargest(10, 'combined_score')
+
+        for _, stock in sector_stocks.iterrows():
+            heatmap_data.append({
+                'sector': sector,
+                'stock_code': stock['stock_code'],
+                'stock_name': stock['stock_name'],
+                'pattern': stock['pattern'],
+                'combined_score': float(stock['combined_score']),
+                'signal_count': int(stock['signal_count']),
+                'signal_list': stock['signal_list'] if pd.notna(stock['signal_list']) else '-'
+            })
+
     # HTML 생성
     html = generate_html_template(
         df_final=df_final,
         pattern_stats=pattern_stats,
         sector_stats=sector_stats,
         sector_concentration=sector_concentration,
+        heatmap_data=heatmap_data,
         total_stocks=len(df),
         signal_bonus=signal_bonus
     )
@@ -88,7 +106,7 @@ def generate_html_report(csv_path: str, output_path: str, signal_bonus: int = 5)
     print(f"✅ HTML report saved: {output_path}")
 
 
-def generate_html_template(df_final, pattern_stats, sector_stats, sector_concentration, total_stocks, signal_bonus):
+def generate_html_template(df_final, pattern_stats, sector_stats, sector_concentration, heatmap_data, total_stocks, signal_bonus):
     """HTML 템플릿 생성"""
 
     # 데이터를 JSON으로 변환
@@ -146,6 +164,30 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
     <title>수급 레짐 스캐너 - 분석 리포트</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        .heatmap-cell {{
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }}
+        .heatmap-cell:hover {{
+            opacity: 0.8;
+            stroke: #000;
+            stroke-width: 2px;
+        }}
+        .tooltip {{
+            position: absolute;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            border-radius: 8px;
+            pointer-events: none;
+            font-size: 14px;
+            line-height: 1.5;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            z-index: 1000;
+        }}
+    </style>
 </head>
 <body class="bg-gray-50">
     <!-- 헤더 -->
@@ -243,6 +285,17 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
                 </table>
             </div>
         </div>
+
+        <!-- 섹터별 히트맵 -->
+        <div class="bg-white rounded-lg shadow mt-8">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-xl font-bold text-gray-900">🗺️ 섹터별 종목 히트맵</h2>
+                <p class="text-sm text-gray-600 mt-1">색상: 종합점수 기준 (진할수록 높은 점수)</p>
+            </div>
+            <div class="p-6">
+                <div id="heatmap"></div>
+            </div>
+        </div>
     </main>
 
     <!-- 푸터 -->
@@ -308,6 +361,144 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
                 }}
             }}
         }});
+
+        // D3 히트맵
+        const heatmapData = {json.dumps(heatmap_data)};
+
+        // 섹터별로 그룹화
+        const sectors = [...new Set(heatmapData.map(d => d.sector))];
+        const maxStocksPerSector = Math.max(...sectors.map(sector =>
+            heatmapData.filter(d => d.sector === sector).length
+        ));
+
+        // 히트맵 설정
+        const margin = {{top: 40, right: 100, bottom: 100, left: 200}};
+        const cellWidth = 60;
+        const cellHeight = 30;
+        const width = cellWidth * maxStocksPerSector + margin.left + margin.right;
+        const height = cellHeight * sectors.length + margin.top + margin.bottom;
+
+        // SVG 생성
+        const svg = d3.select("#heatmap")
+            .append("svg")
+            .attr("width", width)
+            .attr("height", height);
+
+        // 툴팁 생성
+        const tooltip = d3.select("body")
+            .append("div")
+            .attr("class", "tooltip")
+            .style("opacity", 0);
+
+        // 색상 스케일 (종합점수 기반)
+        const colorScale = d3.scaleSequential()
+            .domain([40, 100])
+            .interpolator(d3.interpolateYlOrRd);
+
+        // 패턴 색상 매핑
+        const patternColors = {{
+            '모멘텀형': '#EF4444',
+            '지속형': '#3B82F6',
+            '전환형': '#F59E0B'
+        }};
+
+        // 섹터별 데이터 준비
+        const sectorData = sectors.map(sector => {{
+            const stocks = heatmapData.filter(d => d.sector === sector);
+            return {{ sector, stocks }};
+        }});
+
+        // 히트맵 셀 그리기
+        sectorData.forEach((sectorGroup, sectorIndex) => {{
+            sectorGroup.stocks.forEach((stock, stockIndex) => {{
+                const cell = svg.append("rect")
+                    .attr("class", "heatmap-cell")
+                    .attr("x", margin.left + stockIndex * cellWidth)
+                    .attr("y", margin.top + sectorIndex * cellHeight)
+                    .attr("width", cellWidth - 2)
+                    .attr("height", cellHeight - 2)
+                    .attr("fill", colorScale(stock.combined_score))
+                    .on("mouseover", function(event) {{
+                        d3.select(this).style("opacity", 0.7);
+                        tooltip.transition().duration(200).style("opacity", 1);
+                        tooltip.html(`
+                            <strong style="font-size: 16px;">${{stock.stock_name}}</strong><br/>
+                            <span style="color: #9CA3AF;">종목코드:</span> ${{stock.stock_code}}<br/>
+                            <span style="color: #9CA3AF;">패턴:</span> <span style="color: ${{patternColors[stock.pattern] || '#fff'}}">${{stock.pattern}}</span><br/>
+                            <span style="color: #9CA3AF;">종합점수:</span> <strong style="color: #60A5FA;">${{stock.combined_score.toFixed(1)}}</strong>점<br/>
+                            <span style="color: #9CA3AF;">시그널:</span> ${{stock.signal_count}}개<br/>
+                            <span style="color: #9CA3AF;">내용:</span> ${{stock.signal_list}}
+                        `)
+                            .style("left", (event.pageX + 15) + "px")
+                            .style("top", (event.pageY - 28) + "px");
+                    }})
+                    .on("mouseout", function() {{
+                        d3.select(this).style("opacity", 1);
+                        tooltip.transition().duration(500).style("opacity", 0);
+                    }});
+            }});
+        }});
+
+        // 섹터 레이블 (Y축)
+        svg.selectAll(".sector-label")
+            .data(sectorData)
+            .enter()
+            .append("text")
+            .attr("x", margin.left - 10)
+            .attr("y", (d, i) => margin.top + i * cellHeight + cellHeight / 2)
+            .attr("text-anchor", "end")
+            .attr("dominant-baseline", "middle")
+            .style("font-size", "12px")
+            .style("font-weight", "600")
+            .text(d => d.sector);
+
+        // 범례 추가
+        const legendWidth = 200;
+        const legendHeight = 10;
+        const legendScale = d3.scaleLinear()
+            .domain([40, 100])
+            .range([0, legendWidth]);
+
+        const legend = svg.append("g")
+            .attr("transform", `translate(${{margin.left}}, ${{height - margin.bottom + 40}})`);
+
+        // 그라데이션 정의
+        const defs = svg.append("defs");
+        const linearGradient = defs.append("linearGradient")
+            .attr("id", "legend-gradient");
+
+        linearGradient.selectAll("stop")
+            .data(d3.range(0, 1.1, 0.1))
+            .enter()
+            .append("stop")
+            .attr("offset", d => d)
+            .attr("stop-color", d => colorScale(40 + d * 60));
+
+        legend.append("rect")
+            .attr("width", legendWidth)
+            .attr("height", legendHeight)
+            .style("fill", "url(#legend-gradient)");
+
+        legend.append("text")
+            .attr("x", 0)
+            .attr("y", legendHeight + 20)
+            .style("font-size", "12px")
+            .text("40점");
+
+        legend.append("text")
+            .attr("x", legendWidth)
+            .attr("y", legendHeight + 20)
+            .attr("text-anchor", "end")
+            .style("font-size", "12px")
+            .text("100점");
+
+        legend.append("text")
+            .attr("x", legendWidth / 2)
+            .attr("y", -10)
+            .attr("text-anchor", "middle")
+            .style("font-size", "14px")
+            .style("font-weight", "bold")
+            .text("종합점수");
     </script>
 </body>
 </html>"""
