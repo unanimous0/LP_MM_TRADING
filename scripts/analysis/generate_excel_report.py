@@ -163,7 +163,7 @@ def create_excel_report(csv_path: str, output_path: str, signal_bonus: int = 5):
         # ========================================
         # 시트 4: 패턴별 순위
         # ========================================
-        patterns = ['전환돌파형', '지속매집형', '조정반등형']
+        patterns = ['모멘텀형', '지속형', '전환형']
         df_patterns_list = []
 
         for pattern in patterns:

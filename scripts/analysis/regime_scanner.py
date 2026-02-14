@@ -10,8 +10,8 @@ Usage:
     # 기본 실행 (전체 종목, 모든 패턴)
     python scripts/analysis/regime_scanner.py
 
-    # 전환돌파형 종목만, 점수 70점 이상
-    python scripts/analysis/regime_scanner.py --pattern 전환돌파형 --min-score 70
+    # 모멘텀형 종목만, 점수 70점 이상
+    python scripts/analysis/regime_scanner.py --pattern 모멘텀형 --min-score 70
 
     # 시그널 2개 이상, 상위 10개
     python scripts/analysis/regime_scanner.py --min-signals 2 --top 10
