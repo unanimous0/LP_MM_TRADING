@@ -368,6 +368,7 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
         const treemapData = {json.dumps(treemap_data)};
 
         // Treemap 설정
+        const margin = {{top: 80, right: 10, bottom: 10, left: 10}};
         const width = 1200;
         const height = 800;
 
@@ -395,6 +396,13 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
             '전환형': '#F59E0B'
         }};
 
+        // 배경색에 따라 텍스트 색상 자동 조정
+        function getTextColor(bgColor) {{
+            const color = d3.color(bgColor);
+            const luminance = 0.299 * color.r + 0.587 * color.g + 0.114 * color.b;
+            return luminance > 140 ? '#1F2937' : '#FFFFFF';  // 밝으면 진한 회색, 어두우면 흰색
+        }}
+
         // 계층 구조 생성
         const root = d3.hierarchy(treemapData)
             .sum(d => d.value)
@@ -402,99 +410,120 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
 
         // Treemap 레이아웃
         const treemap = d3.treemap()
-            .size([width, height])
-            .padding(2)
-            .paddingOuter(3)
-            .paddingTop(20)  // 섹터 이름 공간
+            .size([width, height - margin.top])
+            .padding(1)
+            .paddingOuter(2)
+            .paddingTop(24)  // 섹터 이름 공간
             .round(true);
 
         treemap(root);
 
-        // 섹터 그룹 (depth 1)
-        const sectors = svg.selectAll("g")
+        // 메인 그룹 (상단 마진 적용)
+        const mainGroup = svg.append("g")
+            .attr("transform", `translate(0, ${{margin.top}})`);
+
+        // 종목 박스 그리기
+        const leaves = mainGroup.selectAll("g")
             .data(root.leaves())
             .enter()
             .append("g")
             .attr("transform", d => `translate(${{d.x0}},${{d.y0}})`);
 
         // 종목 박스
-        sectors.append("rect")
+        leaves.append("rect")
             .attr("width", d => d.x1 - d.x0)
             .attr("height", d => d.y1 - d.y0)
             .attr("fill", d => colorScale(d.data.combined_score))
-            .attr("stroke", "#fff")
-            .attr("stroke-width", 2)
+            .attr("stroke", "#FFFFFF")
+            .attr("stroke-width", 1.5)
+            .attr("rx", 3)  // 둥근 모서리
             .style("cursor", "pointer")
             .on("mouseover", function(event, d) {{
                 d3.select(this)
-                    .attr("stroke", "#000")
-                    .attr("stroke-width", 3)
-                    .style("opacity", 0.8);
+                    .attr("stroke", "#000000")
+                    .attr("stroke-width", 2.5)
+                    .style("filter", "brightness(1.1)");
 
-                tooltip.transition().duration(200).style("opacity", 1);
+                tooltip.transition().duration(150).style("opacity", 1);
                 tooltip.html(`
-                    <strong style="font-size: 16px;">${{d.data.name}}</strong><br/>
-                    <span style="color: #9CA3AF;">종목코드:</span> ${{d.data.stock_code}}<br/>
-                    <span style="color: #9CA3AF;">섹터:</span> ${{d.parent.data.name}}<br/>
-                    <span style="color: #9CA3AF;">패턴:</span> <span style="color: ${{patternColors[d.data.pattern] || '#fff'}}">${{d.data.pattern}}</span><br/>
-                    <span style="color: #9CA3AF;">종합점수:</span> <strong style="color: #60A5FA;">${{d.data.combined_score.toFixed(1)}}</strong>점<br/>
-                    <span style="color: #9CA3AF;">시그널:</span> ${{d.data.signal_count}}개<br/>
-                    <span style="color: #9CA3AF;">내용:</span> ${{d.data.signal_list}}
+                    <div style="border-bottom: 2px solid #60A5FA; padding-bottom: 8px; margin-bottom: 8px;">
+                        <strong style="font-size: 17px; color: #60A5FA;">${{d.data.name}}</strong>
+                    </div>
+                    <div style="line-height: 1.8;">
+                        <span style="color: #9CA3AF;">종목코드:</span> <strong style="color: #E5E7EB;">${{d.data.stock_code}}</strong><br/>
+                        <span style="color: #9CA3AF;">섹터:</span> <strong style="color: #E5E7EB;">${{d.parent.data.name}}</strong><br/>
+                        <span style="color: #9CA3AF;">패턴:</span> <span style="color: ${{patternColors[d.data.pattern] || '#fff'}}; font-weight: 600;">${{d.data.pattern}}</span><br/>
+                        <span style="color: #9CA3AF;">종합점수:</span> <strong style="color: #34D399; font-size: 16px;">${{d.data.combined_score.toFixed(1)}}점</strong><br/>
+                        <span style="color: #9CA3AF;">시그널:</span> <strong style="color: #FBBF24;">${{d.data.signal_count}}개</strong><br/>
+                        <span style="color: #9CA3AF;">내용:</span> <span style="color: #E5E7EB;">${{d.data.signal_list}}</span>
+                    </div>
                 `)
                     .style("left", (event.pageX + 15) + "px")
                     .style("top", (event.pageY - 28) + "px");
             }})
             .on("mouseout", function() {{
                 d3.select(this)
-                    .attr("stroke", "#fff")
-                    .attr("stroke-width", 2)
-                    .style("opacity", 1);
-                tooltip.transition().duration(500).style("opacity", 0);
+                    .attr("stroke", "#FFFFFF")
+                    .attr("stroke-width", 1.5)
+                    .style("filter", "none");
+                tooltip.transition().duration(300).style("opacity", 0);
             }});
 
-        // 종목명 + 점수 텍스트
-        sectors.append("text")
-            .attr("x", 4)
-            .attr("y", 16)
+        // 종목명 텍스트
+        leaves.append("text")
+            .attr("x", d => (d.x1 - d.x0) / 2)
+            .attr("y", d => {{
+                const height = d.y1 - d.y0;
+                return height > 50 ? (d.y1 - d.y0) / 2 - 5 : (d.y1 - d.y0) / 2;
+            }})
+            .attr("text-anchor", "middle")
+            .attr("dominant-baseline", "middle")
             .text(d => {{
                 const width = d.x1 - d.x0;
                 const height = d.y1 - d.y0;
-                // 박스가 충분히 크면 종목명 + 점수, 작으면 생략
-                if (width > 80 && height > 40) {{
-                    return `${{d.data.name}}`;
-                }} else if (width > 50 && height > 25) {{
-                    return d.data.name.length > 6 ? d.data.name.substring(0, 5) + '...' : d.data.name;
-                }} else {{
-                    return '';
+                // 박스가 충분히 크면 종목명 표시
+                if (width > 70 && height > 35) {{
+                    return d.data.name.length > 8 ? d.data.name.substring(0, 7) + '...' : d.data.name;
+                }} else if (width > 45 && height > 25) {{
+                    return d.data.name.length > 5 ? d.data.name.substring(0, 4) + '...' : d.data.name;
                 }}
+                return '';
             }})
             .attr("font-size", d => {{
                 const width = d.x1 - d.x0;
-                return width > 100 ? "13px" : width > 60 ? "11px" : "9px";
+                if (width > 120) return "14px";
+                if (width > 80) return "12px";
+                if (width > 50) return "10px";
+                return "8px";
             }})
-            .attr("font-weight", "600")
-            .attr("fill", "#fff")
-            .style("pointer-events", "none")
-            .style("text-shadow", "1px 1px 2px rgba(0,0,0,0.8)");
+            .attr("font-weight", "700")
+            .attr("fill", d => getTextColor(colorScale(d.data.combined_score)))
+            .style("pointer-events", "none");
 
         // 점수 텍스트
-        sectors.append("text")
-            .attr("x", 4)
-            .attr("y", 32)
+        leaves.append("text")
+            .attr("x", d => (d.x1 - d.x0) / 2)
+            .attr("y", d => {{
+                const height = d.y1 - d.y0;
+                return height > 50 ? (d.y1 - d.y0) / 2 + 14 : (d.y1 - d.y0) / 2 + 12;
+            }})
+            .attr("text-anchor", "middle")
+            .attr("dominant-baseline", "middle")
             .text(d => {{
                 const width = d.x1 - d.x0;
                 const height = d.y1 - d.y0;
-                if (width > 80 && height > 40) {{
+                if (width > 70 && height > 45) {{
                     return `${{d.data.combined_score.toFixed(1)}}점`;
                 }}
                 return '';
             }})
             .attr("font-size", "11px")
-            .attr("fill", "#fff")
+            .attr("font-weight", "600")
+            .attr("fill", d => getTextColor(colorScale(d.data.combined_score)))
             .style("pointer-events", "none")
-            .style("text-shadow", "1px 1px 2px rgba(0,0,0,0.8)");
+            .style("opacity", 0.9);
 
-        // 섹터 레이블 (각 섹터 영역 상단)
+        // 섹터 레이블 (각 섹터 영역 내부 좌상단)
         const sectorGroups = root.children;
         sectorGroups.forEach(sector => {{
             const sectorLeaves = sector.leaves();
@@ -503,66 +532,100 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
             // 섹터 영역의 x0, y0 계산
             const x0 = Math.min(...sectorLeaves.map(d => d.x0));
             const y0 = Math.min(...sectorLeaves.map(d => d.y0));
+            const x1 = Math.max(...sectorLeaves.map(d => d.x1));
 
-            svg.append("text")
-                .attr("x", x0 + 4)
-                .attr("y", y0 - 5)
+            // 섹터 배경 박스
+            const labelWidth = Math.min(sector.data.name.length * 10 + 16, x1 - x0);
+            mainGroup.append("rect")
+                .attr("x", x0)
+                .attr("y", y0)
+                .attr("width", labelWidth)
+                .attr("height", 22)
+                .attr("fill", "rgba(31, 41, 55, 0.85)")
+                .attr("rx", 4)
+                .style("pointer-events", "none");
+
+            // 섹터 텍스트
+            mainGroup.append("text")
+                .attr("x", x0 + 8)
+                .attr("y", y0 + 14)
                 .text(sector.data.name)
-                .attr("font-size", "14px")
-                .attr("font-weight", "bold")
-                .attr("fill", "#1F2937")
+                .attr("font-size", "12px")
+                .attr("font-weight", "700")
+                .attr("fill", "#FFFFFF")
                 .style("pointer-events", "none");
         }});
 
-        // 범례 추가
-        const legendWidth = 300;
-        const legendHeight = 15;
+        // 범례 추가 (상단 중앙)
+        const legendWidth = 400;
+        const legendHeight = 20;
 
         const legend = svg.append("g")
-            .attr("transform", `translate(${{width - legendWidth - 20}}, 20)`);
+            .attr("transform", `translate(${{(width - legendWidth) / 2}}, 20)`);
+
+        // 타이틀
+        legend.append("text")
+            .attr("x", legendWidth / 2)
+            .attr("y", 0)
+            .attr("text-anchor", "middle")
+            .style("font-size", "16px")
+            .style("font-weight", "700")
+            .attr("fill", "#1F2937")
+            .text("종합점수");
 
         // 그라데이션 정의
         const defs = svg.append("defs");
         const linearGradient = defs.append("linearGradient")
-            .attr("id", "legend-gradient");
+            .attr("id", "legend-gradient")
+            .attr("x1", "0%")
+            .attr("x2", "100%");
 
         linearGradient.selectAll("stop")
             .data(d3.range(0, 1.1, 0.1))
             .enter()
             .append("stop")
-            .attr("offset", d => d)
+            .attr("offset", d => `${{d * 100}}%`)
             .attr("stop-color", d => colorScale(40 + d * 60));
 
+        // 그라데이션 바
         legend.append("rect")
+            .attr("y", 15)
             .attr("width", legendWidth)
             .attr("height", legendHeight)
             .style("fill", "url(#legend-gradient)")
-            .attr("stroke", "#ccc")
-            .attr("stroke-width", 1);
+            .attr("stroke", "#D1D5DB")
+            .attr("stroke-width", 1)
+            .attr("rx", 4);
 
+        // 레이블 (낮음)
         legend.append("text")
             .attr("x", 0)
-            .attr("y", legendHeight + 20)
-            .style("font-size", "12px")
-            .attr("fill", "#666")
+            .attr("y", legendHeight + 35)
+            .attr("text-anchor", "start")
+            .style("font-size", "13px")
+            .style("font-weight", "600")
+            .attr("fill", "#DC2626")
             .text("낮음 (40점)");
 
-        legend.append("text")
-            .attr("x", legendWidth)
-            .attr("y", legendHeight + 20)
-            .attr("text-anchor", "end")
-            .style("font-size", "12px")
-            .attr("fill", "#666")
-            .text("높음 (100점)");
-
+        // 레이블 (중간)
         legend.append("text")
             .attr("x", legendWidth / 2)
-            .attr("y", -5)
+            .attr("y", legendHeight + 35)
             .attr("text-anchor", "middle")
-            .style("font-size", "14px")
-            .style("font-weight", "bold")
-            .attr("fill", "#333")
-            .text("종합점수");
+            .style("font-size", "13px")
+            .style("font-weight", "600")
+            .attr("fill", "#F59E0B")
+            .text("중간");
+
+        // 레이블 (높음)
+        legend.append("text")
+            .attr("x", legendWidth)
+            .attr("y", legendHeight + 35)
+            .attr("text-anchor", "end")
+            .style("font-size", "13px")
+            .style("font-weight", "600")
+            .attr("fill", "#059669")
+            .text("높음 (100점)");
     </script>
 </body>
 </html>"""
