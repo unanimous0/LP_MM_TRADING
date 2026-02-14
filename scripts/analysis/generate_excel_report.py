@@ -94,11 +94,12 @@ def create_excel_report(csv_path: str, output_path: str, signal_bonus: int = 5):
         output_path: 출력 엑셀 파일 경로
         signal_bonus: 시그널 1개당 보너스 점수
     """
-    # CSV 읽기
-    df = pd.read_csv(csv_path, encoding='utf-8-sig')
+    # CSV 읽기 (종목코드를 문자열로 읽어 앞의 0 보존)
+    df = pd.read_csv(csv_path, encoding='utf-8-sig', dtype={'stock_code': str})
 
-    # 종목코드 앞에 'A' 붙이기 (엑셀에서 0으로 시작하는 코드 보호)
-    df['stock_code'] = 'A' + df['stock_code'].astype(str)
+    # 종목코드 6자리로 패딩 후 'A' 붙이기 (엑셀에서 0으로 시작하는 코드 보호)
+    df['stock_code'] = df['stock_code'].str.zfill(6)  # 6자리로 패딩 (예: 5930 → 005930)
+    df['stock_code'] = 'A' + df['stock_code']  # A 접두사 추가 (예: 005930 → A005930)
 
     # 종합 점수 계산
     df = calculate_combined_score(df, signal_bonus)
