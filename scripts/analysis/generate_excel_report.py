@@ -429,7 +429,7 @@ def create_excel_report(csv_path: str, output_path: str, signal_bonus: int = 5):
 
             # 해당 섹터 상위 5개 종목
             top_stocks = df[df['sector'] == sector].nlargest(5, 'combined_score')[[
-                'stock_code', 'stock_name', 'pattern', 'score', 'signal_count', 'combined_score'
+                'stock_code', 'stock_name', 'pattern', 'signal_list', 'combined_score'
             ]].copy()
 
             for _, stock in top_stocks.iterrows():
@@ -438,7 +438,7 @@ def create_excel_report(csv_path: str, output_path: str, signal_bonus: int = 5):
                     stock['stock_code'],
                     stock['stock_name'],
                     stock['pattern'],
-                    int(stock['signal_count']),
+                    stock['signal_list'] if stock['signal_list'] else '-',
                     f"{stock['combined_score']:.1f}"
                 ]
                 sector_detail_list.append(stock_row)
@@ -447,7 +447,7 @@ def create_excel_report(csv_path: str, output_path: str, signal_bonus: int = 5):
             sector_detail_list.append(['', '', '', '', '', ''])
 
         df_sector_detail = pd.DataFrame(sector_detail_list,
-                                        columns=['섹터', '종목코드', '종목명', '패턴', '시그널', '점수'])
+                                        columns=['섹터', '종목코드', '종목명', '패턴', '시그널내용', '점수'])
 
         df_sector_detail.to_excel(writer, sheet_name='6.섹터수급집중도', index=False)
         format_excel_sheet(writer.sheets['6.섹터수급집중도'], df_sector_detail,
