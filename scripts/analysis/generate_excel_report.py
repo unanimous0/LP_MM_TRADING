@@ -422,6 +422,7 @@ def create_excel_report(csv_path: str, output_path: str, signal_bonus: int = 5):
                 f"평균: {sector_info['평균점수']:.1f}점",
                 f"종목: {int(sector_info['종목수'])}개",
                 f"고득점: {int(sector_info['고득점종목수'])}개",
+                '',
                 ''
             ]
             sector_detail_list.append(header_row)
@@ -437,15 +438,16 @@ def create_excel_report(csv_path: str, output_path: str, signal_bonus: int = 5):
                     stock['stock_code'],
                     stock['stock_name'],
                     stock['pattern'],
+                    int(stock['signal_count']),
                     f"{stock['combined_score']:.1f}"
                 ]
                 sector_detail_list.append(stock_row)
 
             # 구분선
-            sector_detail_list.append(['', '', '', '', ''])
+            sector_detail_list.append(['', '', '', '', '', ''])
 
         df_sector_detail = pd.DataFrame(sector_detail_list,
-                                        columns=['섹터', '종목코드', '종목명', '패턴', '점수'])
+                                        columns=['섹터', '종목코드', '종목명', '패턴', '시그널', '점수'])
 
         df_sector_detail.to_excel(writer, sheet_name='6.섹터수급집중도', index=False)
         format_excel_sheet(writer.sheets['6.섹터수급집중도'], df_sector_detail,
