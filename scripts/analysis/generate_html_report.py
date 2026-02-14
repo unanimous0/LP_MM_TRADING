@@ -23,8 +23,25 @@ def generate_html_report(csv_path: str, output_path: str, signal_bonus: int = 5)
     """HTML 리포트 생성"""
 
     # CSV 읽기
-    df = pd.read_csv(csv_path, encoding='utf-8-sig', dtype={'stock_code': str})
-    df['stock_code'] = df['stock_code'].str.zfill(6)
+    df = pd.read_csv(csv_path, encoding='utf-8-sig')
+
+    # 컬럼명 매핑 (한글 → 영문)
+    column_mapping = {
+        '종목코드': 'stock_code',
+        '종목명': 'stock_name',
+        '섹터': 'sector',
+        '패턴': 'pattern',
+        '점수': 'score',
+        '시그널': 'signal_count',
+        '시그널내용': 'signal_list',
+        '진입전략': 'entry_point',
+        '손절': 'stop_loss',
+        '종합점수': 'combined_score'
+    }
+    df = df.rename(columns=column_mapping)
+
+    # 종목코드 형식 맞추기
+    df['stock_code'] = df['stock_code'].astype(str).str.zfill(6)
 
     # 종합 점수 계산
     df = calculate_combined_score(df, signal_bonus)
