@@ -383,7 +383,76 @@ def create_excel_report(csv_path: str, output_path: str, signal_bonus: int = 5):
                           "🏢 섹터별 상위 종목 (섹터당 TOP 3)")
 
         # ========================================
-        # 시트 6: 전체 데이터
+        # 시트 6: 섹터별 수급 집중도 (NEW)
+        # ========================================
+        # 섹터별 집계
+        sector_stats = df.groupby('sector').agg({
+            'combined_score': ['mean', 'max'],
+            'score': 'mean',
+            'signal_count': 'mean',
+            'stock_code': 'count'
+        }).reset_index()
+
+        # 컬럼명 정리
+        sector_stats.columns = ['섹터', '평균점수', '최고점수', '평균패턴점수', '평균시그널', '종목수']
+
+        # 고득점 종목 수 계산 (70점 이상)
+        high_score_counts = df[df['combined_score'] >= 70].groupby('sector').size().reset_index(name='고득점종목수')
+        high_score_counts.columns = ['섹터', '고득점종목수']
+        sector_stats = sector_stats.merge(high_score_counts, on='섹터', how='left')
+        sector_stats['고득점종목수'] = sector_stats['고득점종목수'].fillna(0).astype(int)
+
+        # 섹터 점수 계산 (평균점수 × 고득점종목수 비율)
+        sector_stats['섹터점수'] = sector_stats['평균점수'] * (1 + sector_stats['고득점종목수'] / sector_stats['종목수'])
+
+        # 섹터점수 기준으로 정렬
+        sector_stats = sector_stats.sort_values('섹터점수', ascending=False)
+
+        # 상위 20개 섹터만
+        top_sectors = sector_stats.head(20)['섹터'].tolist()
+
+        # 각 섹터의 대표 종목 TOP 5
+        sector_detail_list = []
+        for idx, sector in enumerate(top_sectors, 1):
+            sector_info = sector_stats[sector_stats['섹터'] == sector].iloc[0]
+
+            # 섹터 헤더
+            header_row = [
+                f"#{idx} {sector}",
+                f"평균: {sector_info['평균점수']:.1f}점",
+                f"종목: {int(sector_info['종목수'])}개",
+                f"고득점: {int(sector_info['고득점종목수'])}개",
+                ''
+            ]
+            sector_detail_list.append(header_row)
+
+            # 해당 섹터 상위 5개 종목
+            top_stocks = df[df['sector'] == sector].nlargest(5, 'combined_score')[[
+                'stock_code', 'stock_name', 'pattern', 'score', 'signal_count', 'combined_score'
+            ]].copy()
+
+            for _, stock in top_stocks.iterrows():
+                stock_row = [
+                    '',
+                    stock['stock_code'],
+                    stock['stock_name'],
+                    stock['pattern'],
+                    f"{stock['combined_score']:.1f}"
+                ]
+                sector_detail_list.append(stock_row)
+
+            # 구분선
+            sector_detail_list.append(['', '', '', '', ''])
+
+        df_sector_detail = pd.DataFrame(sector_detail_list,
+                                        columns=['섹터', '종목코드', '종목명', '패턴', '점수'])
+
+        df_sector_detail.to_excel(writer, sheet_name='6.섹터수급집중도', index=False)
+        format_excel_sheet(writer.sheets['6.섹터수급집중도'], df_sector_detail,
+                          "🔥 섹터별 수급 집중도 (섹터 점수 기준 TOP 20)")
+
+        # ========================================
+        # 시트 7: 전체 데이터
         # ========================================
         df_all = df.sort_values('combined_score', ascending=False).copy()
         df_all.insert(0, '순위', range(1, len(df_all) + 1))
@@ -408,8 +477,8 @@ def create_excel_report(csv_path: str, output_path: str, signal_bonus: int = 5):
 
         df_all = df_all.rename(columns=column_mapping)
 
-        df_all.to_excel(writer, sheet_name='6.전체데이터', index=False)
-        format_excel_sheet(writer.sheets['6.전체데이터'], df_all,
+        df_all.to_excel(writer, sheet_name='7.전체데이터', index=False)
+        format_excel_sheet(writer.sheets['7.전체데이터'], df_all,
                           f"📋 전체 데이터 ({len(df_all)}개 종목)")
 
     print(f"✅ Excel report saved: {output_path}")
@@ -419,8 +488,9 @@ def create_excel_report(csv_path: str, output_path: str, signal_bonus: int = 5):
     print(f"  2. 점수순위 - 종목의 질 TOP 30")
     print(f"  3. 시그널순위 - 진입 타이밍 TOP 30")
     print(f"  4. 패턴별순위 - 패턴별 TOP 10")
-    print(f"  5. 섹터별상위 - 섹터별 TOP 3")
-    print(f"  6. 전체데이터 - 전체 {len(df_all)}개 종목")
+    print(f"  5. 섹터별상위 - 섹터별 TOP 3 (종목 점수 기준)")
+    print(f"  6. 섹터수급집중도 - 섹터별 수급 몰림 현황 (섹터 점수 기준)")
+    print(f"  7. 전체데이터 - 전체 {len(df_all)}개 종목")
 
     # ========================================
     # CSV 파일도 함께 저장
