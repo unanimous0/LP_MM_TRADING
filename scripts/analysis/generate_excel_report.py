@@ -78,11 +78,26 @@ def format_excel_sheet(ws, df, title=None):
         adjusted_width = min(max_length + 2, 50) if max_length > 0 else 12
         ws.column_dimensions[column_letter].width = adjusted_width
 
-    # 숫자 정렬 (점수 관련 컬럼)
-    for row in ws.iter_rows(min_row=start_row+1):
-        for cell in row:
+    # 숫자 포맷팅 및 정렬
+    for row_idx, row in enumerate(ws.iter_rows(min_row=start_row+1), start=start_row+1):
+        for col_idx, cell in enumerate(row, start=1):
             if isinstance(cell.value, (int, float)):
+                # 오른쪽 정렬
                 cell.alignment = Alignment(horizontal='right')
+
+                # 컬럼명 가져오기
+                header_cell = ws.cell(row=start_row, column=col_idx)
+                header = str(header_cell.value) if header_cell.value else ''
+
+                # 정수로 표시할 컬럼 (순위, 시그널, 종목수 등)
+                integer_columns = ['순위', '시그널', '종목수', '종목 수']
+
+                if any(int_col in header for int_col in integer_columns):
+                    # 정수 포맷 (소수점 없음)
+                    cell.number_format = '0'
+                else:
+                    # 실수 포맷 (소수점 둘째자리)
+                    cell.number_format = '0.00'
 
 
 def create_excel_report(csv_path: str, output_path: str, signal_bonus: int = 5):
