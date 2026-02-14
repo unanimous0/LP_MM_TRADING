@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>수급 레짐 스캐너 - 분석 리포트</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-50">
+    <!-- 헤더 -->
+    <header class="bg-gradient-to-r from-blue-600 to-blue-800 text-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 py-6">
+            <h1 class="text-3xl font-bold">📊 수급 레짐 스캐너</h1>
+            <p class="text-blue-100 mt-2">외국인/기관 투자자 수급 분석 리포트</p>
+            <p class="text-blue-200 text-sm mt-1">생성일: 2026-02-14 20:16</p>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 py-8">
+        <!-- 요약 카드 -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="text-sm text-gray-500 mb-1">전체 종목</div>
+                <div class="text-3xl font-bold text-gray-900">338</div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="text-sm text-gray-500 mb-1">모멘텀형</div>
+                <div class="text-3xl font-bold text-red-600">21</div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="text-sm text-gray-500 mb-1">지속형</div>
+                <div class="text-3xl font-bold text-blue-600">120</div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="text-sm text-gray-500 mb-1">전환형</div>
+                <div class="text-3xl font-bold text-yellow-600">15</div>
+            </div>
+        </div>
+
+        <!-- 차트 섹션 -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+            <!-- 패턴별 분포 -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-bold text-gray-900 mb-4">패턴별 분포</h2>
+                <canvas id="patternChart"></canvas>
+            </div>
+
+            <!-- 섹터별 평균 점수 -->
+            <div class="bg-white rounded-lg shadow p-6">
+                <h2 class="text-xl font-bold text-gray-900 mb-4">섹터별 평균 점수 (TOP 10)</h2>
+                <canvas id="sectorChart"></canvas>
+            </div>
+        </div>
+
+        <!-- 최종 결론 테이블 -->
+        <div class="bg-white rounded-lg shadow mb-8">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-xl font-bold text-gray-900">🎯 종합 추천 순위 TOP 20</h2>
+                <p class="text-sm text-gray-600 mt-1">종합점수 = 패턴 점수 + (시그널 개수 × 5점)</p>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">종목코드</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">종목명</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">섹터</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">패턴</th>
+                            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">점수</th>
+                            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">시그널</th>
+                            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">종합점수</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">시그널내용</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">028670</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">팬오션</td>
+            <td class="px-4 py-3 text-sm text-gray-600">해상운수</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">82.6</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">1</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">87.6</td>
+            <td class="px-4 py-3 text-sm text-gray-600">['가속도 9.5배']</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">241710</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">코스메카코리아</td>
+            <td class="px-4 py-3 text-sm text-gray-600">개인생활용품</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">77.5</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">2</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">87.5</td>
+            <td class="px-4 py-3 text-sm text-gray-600">['MA크로스', '가속도 1104.2배']</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">036460</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">한국가스공사</td>
+            <td class="px-4 py-3 text-sm text-gray-600">가스</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">85.8</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">0</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">85.8</td>
+            <td class="px-4 py-3 text-sm text-gray-600">[]</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">056190</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">에스에프에이</td>
+            <td class="px-4 py-3 text-sm text-gray-600">기계</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">85.8</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">0</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">85.8</td>
+            <td class="px-4 py-3 text-sm text-gray-600">[]</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">055550</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">신한지주</td>
+            <td class="px-4 py-3 text-sm text-gray-600">상업은행</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">79.7</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">1</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">84.7</td>
+            <td class="px-4 py-3 text-sm text-gray-600">['MA크로스']</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">257720</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">실리콘투</td>
+            <td class="px-4 py-3 text-sm text-gray-600">온라인쇼핑</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">79.3</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">1</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">84.3</td>
+            <td class="px-4 py-3 text-sm text-gray-600">['MA크로스']</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">316140</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">우리금융지주</td>
+            <td class="px-4 py-3 text-sm text-gray-600">상업은행</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">81.9</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">0</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">81.9</td>
+            <td class="px-4 py-3 text-sm text-gray-600">[]</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">251270</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">넷마블</td>
+            <td class="px-4 py-3 text-sm text-gray-600">게임 소프트웨어</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-800">
+                    모멘텀형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">76.7</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">1</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">81.7</td>
+            <td class="px-4 py-3 text-sm text-gray-600">['MA크로스']</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">069620</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">대웅제약</td>
+            <td class="px-4 py-3 text-sm text-gray-600">제약</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">71.2</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">2</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">81.2</td>
+            <td class="px-4 py-3 text-sm text-gray-600">['MA크로스', '가속도 3.3배']</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">011200</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">HMM</td>
+            <td class="px-4 py-3 text-sm text-gray-600">해상운수</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">80.4</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">0</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">80.4</td>
+            <td class="px-4 py-3 text-sm text-gray-600">[]</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">071320</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">지역난방공사</td>
+            <td class="px-4 py-3 text-sm text-gray-600">전력</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">79.4</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">0</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">79.4</td>
+            <td class="px-4 py-3 text-sm text-gray-600">[]</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">005830</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">DB손해보험</td>
+            <td class="px-4 py-3 text-sm text-gray-600">보험</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">78.8</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">0</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">78.8</td>
+            <td class="px-4 py-3 text-sm text-gray-600">[]</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">028260</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">삼성물산</td>
+            <td class="px-4 py-3 text-sm text-gray-600">복합 산업</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">73.7</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">1</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">78.7</td>
+            <td class="px-4 py-3 text-sm text-gray-600">['가속도 1.7배']</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">008930</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">한미사이언스</td>
+            <td class="px-4 py-3 text-sm text-gray-600">제약</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">73.7</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">1</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">78.7</td>
+            <td class="px-4 py-3 text-sm text-gray-600">['MA크로스']</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">014680</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">한솔케미칼</td>
+            <td class="px-4 py-3 text-sm text-gray-600">화학</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">78.5</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">0</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">78.5</td>
+            <td class="px-4 py-3 text-sm text-gray-600">[]</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">450080</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">에코프로머티</td>
+            <td class="px-4 py-3 text-sm text-gray-600">전자 장비 및 기기</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">78.4</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">0</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">78.4</td>
+            <td class="px-4 py-3 text-sm text-gray-600">[]</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">025900</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">동화기업</td>
+            <td class="px-4 py-3 text-sm text-gray-600">건축자재</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">78.3</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">0</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">78.3</td>
+            <td class="px-4 py-3 text-sm text-gray-600">[]</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">032190</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">다우데이타</td>
+            <td class="px-4 py-3 text-sm text-gray-600">증권</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">73.2</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">1</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">78.2</td>
+            <td class="px-4 py-3 text-sm text-gray-600">['MA크로스']</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">001440</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">대한전선</td>
+            <td class="px-4 py-3 text-sm text-gray-600">전기장비</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">73.1</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">1</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">78.1</td>
+            <td class="px-4 py-3 text-sm text-gray-600">['MA크로스']</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">096530</td>
+            <td class="px-4 py-3 text-sm text-gray-900 font-semibold">씨젠</td>
+            <td class="px-4 py-3 text-sm text-gray-600">의료 장비 및 서비스</td>
+            <td class="px-4 py-3">
+                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                    지속형
+                </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">72.5</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-center">1</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-semibold text-right">77.5</td>
+            <td class="px-4 py-3 text-sm text-gray-600">['MA크로스']</td>
+        </tr>
+        
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 섹터별 수급 집중도 -->
+        <div class="bg-white rounded-lg shadow">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h2 class="text-xl font-bold text-gray-900">🔥 섹터별 수급 집중도 (TOP 10)</h2>
+                <p class="text-sm text-gray-600 mt-1">섹터점수 = 평균점수 × (1 + 고득점종목수/전체종목수)</p>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">섹터</th>
+                            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">평균 점수</th>
+                            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">종목 수</th>
+                            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">고득점 종목</th>
+                            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">섹터 점수</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">가스</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">85.8</td>
+            <td class="px-4 py-3 text-sm text-gray-600 text-center">1</td>
+            <td class="px-4 py-3 text-sm text-green-600 font-semibold text-center">1</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-bold text-right">171.7</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">온라인쇼핑</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">84.3</td>
+            <td class="px-4 py-3 text-sm text-gray-600 text-center">1</td>
+            <td class="px-4 py-3 text-sm text-green-600 font-semibold text-center">1</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-bold text-right">168.6</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">해상운수</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">84.0</td>
+            <td class="px-4 py-3 text-sm text-gray-600 text-center">2</td>
+            <td class="px-4 py-3 text-sm text-green-600 font-semibold text-center">2</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-bold text-right">168.0</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">창업투자 및 종금</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">75.7</td>
+            <td class="px-4 py-3 text-sm text-gray-600 text-center">1</td>
+            <td class="px-4 py-3 text-sm text-green-600 font-semibold text-center">1</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-bold text-right">151.4</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">상업은행</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">75.2</td>
+            <td class="px-4 py-3 text-sm text-gray-600 text-center">8</td>
+            <td class="px-4 py-3 text-sm text-green-600 font-semibold text-center">7</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-bold text-right">141.0</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">전력</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">72.1</td>
+            <td class="px-4 py-3 text-sm text-gray-600 text-center">3</td>
+            <td class="px-4 py-3 text-sm text-green-600 font-semibold text-center">2</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-bold text-right">120.2</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">일반 소프트웨어</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">69.6</td>
+            <td class="px-4 py-3 text-sm text-gray-600 text-center">3</td>
+            <td class="px-4 py-3 text-sm text-green-600 font-semibold text-center">2</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-bold text-right">116.1</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">건축자재</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">70.1</td>
+            <td class="px-4 py-3 text-sm text-gray-600 text-center">2</td>
+            <td class="px-4 py-3 text-sm text-green-600 font-semibold text-center">1</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-bold text-right">105.2</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">음료</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">68.0</td>
+            <td class="px-4 py-3 text-sm text-gray-600 text-center">2</td>
+            <td class="px-4 py-3 text-sm text-green-600 font-semibold text-center">1</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-bold text-right">102.0</td>
+        </tr>
+        
+        <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">소비자 금융</td>
+            <td class="px-4 py-3 text-sm text-gray-900 text-right">63.9</td>
+            <td class="px-4 py-3 text-sm text-gray-600 text-center">2</td>
+            <td class="px-4 py-3 text-sm text-green-600 font-semibold text-center">1</td>
+            <td class="px-4 py-3 text-sm text-blue-600 font-bold text-right">95.9</td>
+        </tr>
+        
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- 푸터 -->
+    <footer class="bg-gray-800 text-white mt-12">
+        <div class="max-w-7xl mx-auto px-4 py-6 text-center">
+            <p class="text-gray-400">수급 레짐 스캐너 v3.1 | Stage 3 완료</p>
+            <p class="text-gray-500 text-sm mt-2">KOSPI200 + KOSDAQ150 (345개 종목) | 2024-01-02 ~ 2026-01-20</p>
+        </div>
+    </footer>
+
+    <!-- Chart.js 스크립트 -->
+    <script>
+        // 패턴별 분포 차트
+        const patternCtx = document.getElementById('patternChart').getContext('2d');
+        new Chart(patternCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ["\uae30\ud0c0", "\ubaa8\uba58\ud140\ud615", "\uc804\ud658\ud615", "\uc9c0\uc18d\ud615"],
+                datasets: [{
+                    data: [182, 21, 15, 120],
+                    backgroundColor: ['#EF4444', '#3B82F6', '#F59E0B'],
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom'
+                    }
+                }
+            }
+        });
+
+        // 섹터별 평균 점수 차트
+        const sectorCtx = document.getElementById('sectorChart').getContext('2d');
+        new Chart(sectorCtx, {
+            type: 'bar',
+            data: {
+                labels: ["\uac00\uc2a4", "\uc628\ub77c\uc778\uc1fc\ud551", "\ud574\uc0c1\uc6b4\uc218", "\ucc3d\uc5c5\ud22c\uc790 \ubc0f \uc885\uae08", "\uc0c1\uc5c5\uc740\ud589", "\uc804\ub825", "\uac74\ucd95\uc790\uc7ac", "\uc77c\ubc18 \uc18c\ud504\ud2b8\uc6e8\uc5b4", "\uc74c\ub8cc", "\ubb34\uc120\ud1b5\uc2e0"],
+                datasets: [{
+                    label: '평균 점수',
+                    data: [85.83755135394684, 84.31757602265344, 84.013063550493, 75.71748594126345, 75.1781285169665, 72.09917027676732, 70.10723673371365, 69.63832270394421, 68.03011632028623, 66.36348684090613],
+                    backgroundColor: '#3B82F6',
+                    borderColor: '#2563EB',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                indexAxis: 'y',
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    x: {
+                        beginAtZero: true,
+                        max: 100
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
