@@ -63,19 +63,38 @@ def format_excel_sheet(ws, df, title=None):
         cell.font = header_font
         cell.alignment = Alignment(horizontal='center', vertical='center')
 
-    # 열 너비 자동 조정
+    # 열 너비 자동 조정 (한글 고려)
+    def get_text_width(text):
+        """텍스트 너비 계산 (한글은 2배, 영문은 1배)"""
+        if text is None:
+            return 0
+        width = 0
+        for char in str(text):
+            # 한글, 한자, 일본어 등 (유니코드 범위)
+            if '\uac00' <= char <= '\ud7a3' or '\u4e00' <= char <= '\u9fff':
+                width += 2  # 한글/한자는 2배 너비
+            else:
+                width += 1  # 영문/숫자는 1배 너비
+        return width
+
     for col_idx, column in enumerate(ws.columns, 1):
-        max_length = 0
+        max_width = 0
         column_letter = chr(64 + col_idx)  # A, B, C, ...
         for cell in column:
             try:
+                # 제목 행(병합된 셀) 스킵 - 헤더 행부터 계산
+                if title and cell.row < start_row:
+                    continue
+
                 # MergedCell 스킵
                 if hasattr(cell, 'value') and cell.value is not None:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
+                    cell_width = get_text_width(cell.value)
+                    if cell_width > max_width:
+                        max_width = cell_width
             except:
                 pass
-        adjusted_width = min(max_length + 2, 50) if max_length > 0 else 12
+        # 여유 공간 추가 (+3) 및 최대 너비 제한 (70)
+        adjusted_width = min(max_width + 3, 70) if max_width > 0 else 12
         ws.column_dimensions[column_letter].width = adjusted_width
 
     # 숫자 포맷팅 및 정렬
