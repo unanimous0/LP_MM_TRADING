@@ -346,6 +346,12 @@ LP_MM_TRADING/
 
 ## [Progress History]
 
+### 2026-02-14 (문서 중복 제거)
+- ✅ IMPLEMENTATION_GUIDE.md 중복 제거 (95줄 → 654줄, 13% 감소)
+- ✅ CLAUDE.md 중복 제거 (37줄 → 392줄, 9% 감소)
+- ✅ 문서 역할 명확화 (README/IMPLEMENTATION_GUIDE/ANALYSIS_GUIDE/CLAUDE.md)
+- ✅ D3.js Treemap 히트맵 추가 (HTML 리포트)
+
 ### 2026-02-13 (Stage 3 버그 수정)
 - ✅ 엣지 케이스 처리 (빈 DataFrame, 잘못된 입력)
 - ✅ 테스트 완성도 향상 (105개 테스트 100% 통과)
