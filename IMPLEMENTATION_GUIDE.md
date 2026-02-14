@@ -38,26 +38,7 @@
 ### 목표
 단순 금액 대신 **유통시총 대비 비율(Sff)**과 **변동성 보정(Z-Score)**으로 "진짜 힘" 측정
 
-### 핵심 공식
-
-#### 1) Sff (Supply Float Factor)
-```
-Sff = (순매수 금액 / 유통시총) × 100
-```
-
-**효과**:
-- 시총 5조 종목과 1000억 종목을 동일 선상에서 비교
-- 유통물량이 적은 종목의 수급 왜곡 포착
-
-#### 2) Z-Score
-```
-Z-Score = (현재값 - 60일 평균) / 60일 표준편차
-```
-
-**해석**:
-- Z > 2.0: 이상 매수 (강한 매수세)
-- -2.0 < Z < 2.0: 중립
-- Z < -2.0: 이상 매도 (강한 매도세)
+> **이론 설명**: ANALYSIS_GUIDE.md의 "3. 지표 및 수식 정의" 참조
 
 ### 구현
 
@@ -212,47 +193,7 @@ output/heatmap_semi_weighted.csv    # Weighted 모드
 output/heatmap_semi_average.csv     # Average 모드
 ```
 
-### 4가지 정렬 모드 분석
-
-#### Pattern 1: 모멘텀 돌파형 (Momentum 높음)
-```
-종목코드  recent  momentum  weighted  average
-232140   0.906   1.696      0.519     0.315   ← 과거 약함, 최근 급등
-101490  -0.764   1.541     -1.266    -1.525   ← 극강 전환 (매도→매수)
-253590   0.601   1.226      0.374     0.248   ← 수급 개선 중
-```
-
-**특징**: 1W-2Y 값이 크다 = 과거엔 약했지만 최근 강해짐
-
-**활용**: "전환점 포착", 단기 추격 매수 타겟
-
----
-
-#### Pattern 2: 지속 매집형 (Weighted/Average 높음)
-```
-종목코드  recent  momentum  weighted  average
-357780   0.880  -1.103      1.113     1.288   ← 장기 일관 매집
-31980    0.529  -1.273      1.034     1.231   ← 전 기간 강세
-131290   0.910  -0.500      0.972     1.036   ← 안정적 매집
-```
-
-**특징**: Weighted/Average 높음 + Momentum 낮음 = 장기간 일관된 매수세
-
-**활용**: "저가 매수", 조정 후 재진입 타겟
-
----
-
-#### Pattern 3: 최근 강도형 (Recent 높음)
-```
-종목코드  recent  momentum  weighted  average
-348210   1.004   0.000      0.784     0.802   ← 최근 1W~1M 강함
-131290   0.910  -0.500      0.972     1.036   ← 현재 매수세 강함
-232140   0.906   1.696      0.519     0.315   ← 단기 급등
-```
-
-**특징**: (1W+1M)/2 높음 = 현재 매수세 강함
-
-**활용**: "지금 강한 종목", 현재 수급 모니터링
+> **활용 가이드**: ANALYSIS_GUIDE.md의 "3.3 정렬 키 상세" 및 "6. 점수 해석 가이드" 참조
 
 ---
 
@@ -303,27 +244,7 @@ df['rolling_mean'] = df.groupby('stock_code')['combined_sff'].transform(
 - 목표: 23초
 - **실제: 1.5초** (93% 초과 달성!)
 
----
-
-### CLI 사용법
-
-```bash
-# 기본 실행 (전체 6개 기간)
-python scripts/analysis/heatmap_generator.py
-
-# 정렬 모드 선택
-python scripts/analysis/heatmap_generator.py --sort-by recent
-python scripts/analysis/heatmap_generator.py --sort-by momentum
-
-# 섹터 필터링
-python scripts/analysis/heatmap_generator.py --sector "반도체 및 관련장비"
-
-# 상위 50개만
-python scripts/analysis/heatmap_generator.py --top 50
-
-# CSV 동시 저장
-python scripts/analysis/heatmap_generator.py --save-csv
-```
+> **CLI 사용법**: README.md의 "빠른 시작" 및 ANALYSIS_GUIDE.md의 "7.4 필터링 옵션" 참조
 
 ---
 
@@ -356,11 +277,10 @@ print(classified_df[['stock_code', 'pattern', 'score']].head())
 
 **패턴 분류 규칙**:
 1. **모멘텀형**: Momentum > 1.0 AND Recent > 0.5
-   - 과거 약함 → 최근 급등 (단기 추격 매수)
 2. **지속형**: Weighted > 0.8 AND Persistence > 0.7
-   - 장기간 일관된 매집 (조정 후 재진입)
 3. **전환형**: Weighted > 0.5 AND Momentum < 0
-   - 장기 강함 + 최근 약화 (저가 매수)
+
+> **투자 전략**: ANALYSIS_GUIDE.md의 "4. 패턴 분류 체계" 참조
 
 ---
 
