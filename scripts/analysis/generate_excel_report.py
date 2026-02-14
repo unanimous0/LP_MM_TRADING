@@ -402,6 +402,9 @@ def create_excel_report(csv_path: str, output_path: str, signal_bonus: int = 5):
         sector_stats = sector_stats.merge(high_score_counts, on='섹터', how='left')
         sector_stats['고득점종목수'] = sector_stats['고득점종목수'].fillna(0).astype(int)
 
+        # 최소 종목 수 필터링 (5개 이상 섹터만)
+        sector_stats = sector_stats[sector_stats['종목수'] >= 5]
+
         # 섹터 점수 계산 (평균점수 × 고득점종목수 비율)
         sector_stats['섹터점수'] = sector_stats['평균점수'] * (1 + sector_stats['고득점종목수'] / sector_stats['종목수'])
 

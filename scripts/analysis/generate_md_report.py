@@ -62,6 +62,10 @@ def generate_markdown_content(df, signal_bonus):
     sector_concentration.columns = ['sector', 'avg_score', 'total_count']
     sector_concentration = sector_concentration.merge(high_score_counts, on='sector', how='left')
     sector_concentration['high_score_count'] = sector_concentration['high_score_count'].fillna(0).astype(int)
+
+    # 최소 종목 수 필터링 (5개 이상)
+    sector_concentration = sector_concentration[sector_concentration['total_count'] >= 5]
+
     sector_concentration['sector_score'] = sector_concentration['avg_score'] * (
         1 + sector_concentration['high_score_count'] / sector_concentration['total_count']
     )

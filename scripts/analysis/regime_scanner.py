@@ -291,8 +291,9 @@ def main():
             output_path = Path(args.save_csv)
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
-            report_gen.export_to_csv(df_filtered, str(output_path), include_all_columns=True)
-            print(f"💾 CSV 저장 완료: {output_path}\n")
+            # 전체 데이터 저장 (필터링 전 데이터)
+            report_gen.export_to_csv(report_df, str(output_path), include_all_columns=True)
+            print(f"💾 CSV 저장 완료: {output_path} ({len(report_df)} 종목)\n")
 
         # ============================================================================
         # 9. 요약 정보
