@@ -56,43 +56,7 @@ python scripts/crawlers/crawl_all_data.py --start 2024-01-01
 
 ### 분석 실행
 
-#### Stage 1: 이상 수급 탐지
-```bash
-# 기본 분석 (임계값 2.0, 상위 20개)
-python scripts/analysis/abnormal_supply_detector.py
-
-# 매수 시그널만
-python scripts/analysis/abnormal_supply_detector.py --direction buy --threshold 2.5
-```
-
-#### Stage 2: 히트맵 생성
-```bash
-# 기본 실행 (6개 기간, Recent 모드)
-python scripts/analysis/heatmap_generator.py
-
-# 정렬 모드 선택
-python scripts/analysis/heatmap_generator.py --sort-by momentum
-
-# 섹터 필터링 + CSV 저장
-python scripts/analysis/heatmap_generator.py --sector "반도체 및 관련장비" --save-csv
-```
-
-#### Stage 3: 통합 레짐 스캐너
-```bash
-# 기본 실행 (전체 종목, 모든 패턴)
-python scripts/analysis/regime_scanner.py
-
-# 모멘텀형 종목만, 점수 70점 이상
-python scripts/analysis/regime_scanner.py --pattern 모멘텀형 --min-score 70
-
-# 시그널 2개 이상, 상위 10개, 요약 카드 출력
-python scripts/analysis/regime_scanner.py --min-signals 2 --top 10 --print-cards
-
-# CSV 저장 + 관심 종목 리스트
-python scripts/analysis/regime_scanner.py --save-csv --watchlist
-```
-
-**자세한 내용**: `IMPLEMENTATION_GUIDE.md` 참조
+**상세 사용법**: `README.md` 및 `ANALYSIS_GUIDE.md` 참조
 
 ---
 
@@ -343,23 +307,7 @@ LP_MM_TRADING/
 
 ## [Key Concepts]
 
-### Sff (Supply Float Factor)
-```
-Sff = (순매수 금액 / 유통시총) × 100
-```
-→ 시총 왜곡 제거, 유통물량 대비 비율로 정규화
-
-### Z-Score
-```
-Z-Score = (현재값 - 60일 평균) / 60일 표준편차
-```
-→ 변동성 보정, 이상 수급 탐지 (|Z| > 2.0)
-
-### 4가지 정렬 모드
-- **Recent**: (1W+1M)/2 - 현재 강도
-- **Momentum**: 1W-2Y - 수급 개선도 (전환점 포착)
-- **Weighted**: 가중 평균 - 중장기 트렌드
-- **Average**: 단순 평균 - 전체 일관성
+자세한 내용은 **ANALYSIS_GUIDE.md** 참조
 
 ---
 
