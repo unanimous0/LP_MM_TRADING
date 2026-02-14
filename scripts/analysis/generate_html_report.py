@@ -71,22 +71,33 @@ def generate_html_report(csv_path: str, output_path: str, signal_bonus: int = 5)
     )
     sector_concentration = sector_concentration.nlargest(10, 'sector_score')
 
-    # 히트맵 데이터 준비 (각 섹터의 상위 종목들)
-    heatmap_data = []
+    # Treemap 데이터 준비 (계층 구조: 섹터 > 종목)
+    treemap_data = {
+        'name': 'root',
+        'children': []
+    }
+
     for _, sector_row in sector_concentration.iterrows():
         sector = sector_row['sector']
         sector_stocks = df[df['sector'] == sector].nlargest(10, 'combined_score')
 
+        sector_node = {
+            'name': sector,
+            'children': []
+        }
+
         for _, stock in sector_stocks.iterrows():
-            heatmap_data.append({
-                'sector': sector,
+            sector_node['children'].append({
+                'name': stock['stock_name'],
+                'value': float(stock['combined_score']),
                 'stock_code': stock['stock_code'],
-                'stock_name': stock['stock_name'],
                 'pattern': stock['pattern'],
                 'combined_score': float(stock['combined_score']),
                 'signal_count': int(stock['signal_count']),
                 'signal_list': stock['signal_list'] if pd.notna(stock['signal_list']) else '-'
             })
+
+        treemap_data['children'].append(sector_node)
 
     # HTML 생성
     html = generate_html_template(
@@ -94,7 +105,7 @@ def generate_html_report(csv_path: str, output_path: str, signal_bonus: int = 5)
         pattern_stats=pattern_stats,
         sector_stats=sector_stats,
         sector_concentration=sector_concentration,
-        heatmap_data=heatmap_data,
+        treemap_data=treemap_data,
         total_stocks=len(df),
         signal_bonus=signal_bonus
     )
@@ -106,7 +117,7 @@ def generate_html_report(csv_path: str, output_path: str, signal_bonus: int = 5)
     print(f"✅ HTML report saved: {output_path}")
 
 
-def generate_html_template(df_final, pattern_stats, sector_stats, sector_concentration, heatmap_data, total_stocks, signal_bonus):
+def generate_html_template(df_final, pattern_stats, sector_stats, sector_concentration, treemap_data, total_stocks, signal_bonus):
     """HTML 템플릿 생성"""
 
     # 데이터를 JSON으로 변환
@@ -166,15 +177,6 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <style>
-        .heatmap-cell {{
-            cursor: pointer;
-            transition: opacity 0.2s;
-        }}
-        .heatmap-cell:hover {{
-            opacity: 0.8;
-            stroke: #000;
-            stroke-width: 2px;
-        }}
         .tooltip {{
             position: absolute;
             padding: 12px;
@@ -286,14 +288,14 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
             </div>
         </div>
 
-        <!-- 섹터별 히트맵 -->
+        <!-- 섹터별 Treemap -->
         <div class="bg-white rounded-lg shadow mt-8">
             <div class="px-6 py-4 border-b border-gray-200">
-                <h2 class="text-xl font-bold text-gray-900">🗺️ 섹터별 종목 히트맵</h2>
-                <p class="text-sm text-gray-600 mt-1">색상: 종합점수 기준 (진할수록 높은 점수)</p>
+                <h2 class="text-xl font-bold text-gray-900">🗺️ 섹터별 종목 Treemap</h2>
+                <p class="text-sm text-gray-600 mt-1">박스 크기: 종합점수 비례 | 색상: 빨강(낮음) → 노랑(중간) → 초록(높음)</p>
             </div>
             <div class="p-6">
-                <div id="heatmap"></div>
+                <div id="heatmap" style="overflow-x: auto;"></div>
             </div>
         </div>
     </main>
@@ -362,21 +364,12 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
             }}
         }});
 
-        // D3 히트맵
-        const heatmapData = {json.dumps(heatmap_data)};
+        // D3 Treemap
+        const treemapData = {json.dumps(treemap_data)};
 
-        // 섹터별로 그룹화
-        const sectors = [...new Set(heatmapData.map(d => d.sector))];
-        const maxStocksPerSector = Math.max(...sectors.map(sector =>
-            heatmapData.filter(d => d.sector === sector).length
-        ));
-
-        // 히트맵 설정
-        const margin = {{top: 40, right: 100, bottom: 100, left: 200}};
-        const cellWidth = 60;
-        const cellHeight = 30;
-        const width = cellWidth * maxStocksPerSector + margin.left + margin.right;
-        const height = cellHeight * sectors.length + margin.top + margin.bottom;
+        // Treemap 설정
+        const width = 1200;
+        const height = 800;
 
         // SVG 생성
         const svg = d3.select("#heatmap")
@@ -390,10 +383,10 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
             .attr("class", "tooltip")
             .style("opacity", 0);
 
-        // 색상 스케일 (종합점수 기반)
+        // 색상 스케일 (종합점수 기반: 빨강 → 노랑 → 초록)
         const colorScale = d3.scaleSequential()
             .domain([40, 100])
-            .interpolator(d3.interpolateYlOrRd);
+            .interpolator(d3.interpolateRdYlGn);
 
         // 패턴 색상 매핑
         const patternColors = {{
@@ -402,65 +395,131 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
             '전환형': '#F59E0B'
         }};
 
-        // 섹터별 데이터 준비
-        const sectorData = sectors.map(sector => {{
-            const stocks = heatmapData.filter(d => d.sector === sector);
-            return {{ sector, stocks }};
-        }});
+        // 계층 구조 생성
+        const root = d3.hierarchy(treemapData)
+            .sum(d => d.value)
+            .sort((a, b) => b.value - a.value);
 
-        // 히트맵 셀 그리기
-        sectorData.forEach((sectorGroup, sectorIndex) => {{
-            sectorGroup.stocks.forEach((stock, stockIndex) => {{
-                const cell = svg.append("rect")
-                    .attr("class", "heatmap-cell")
-                    .attr("x", margin.left + stockIndex * cellWidth)
-                    .attr("y", margin.top + sectorIndex * cellHeight)
-                    .attr("width", cellWidth - 2)
-                    .attr("height", cellHeight - 2)
-                    .attr("fill", colorScale(stock.combined_score))
-                    .on("mouseover", function(event) {{
-                        d3.select(this).style("opacity", 0.7);
-                        tooltip.transition().duration(200).style("opacity", 1);
-                        tooltip.html(`
-                            <strong style="font-size: 16px;">${{stock.stock_name}}</strong><br/>
-                            <span style="color: #9CA3AF;">종목코드:</span> ${{stock.stock_code}}<br/>
-                            <span style="color: #9CA3AF;">패턴:</span> <span style="color: ${{patternColors[stock.pattern] || '#fff'}}">${{stock.pattern}}</span><br/>
-                            <span style="color: #9CA3AF;">종합점수:</span> <strong style="color: #60A5FA;">${{stock.combined_score.toFixed(1)}}</strong>점<br/>
-                            <span style="color: #9CA3AF;">시그널:</span> ${{stock.signal_count}}개<br/>
-                            <span style="color: #9CA3AF;">내용:</span> ${{stock.signal_list}}
-                        `)
-                            .style("left", (event.pageX + 15) + "px")
-                            .style("top", (event.pageY - 28) + "px");
-                    }})
-                    .on("mouseout", function() {{
-                        d3.select(this).style("opacity", 1);
-                        tooltip.transition().duration(500).style("opacity", 0);
-                    }});
-            }});
-        }});
+        // Treemap 레이아웃
+        const treemap = d3.treemap()
+            .size([width, height])
+            .padding(2)
+            .paddingOuter(3)
+            .paddingTop(20)  // 섹터 이름 공간
+            .round(true);
 
-        // 섹터 레이블 (Y축)
-        svg.selectAll(".sector-label")
-            .data(sectorData)
+        treemap(root);
+
+        // 섹터 그룹 (depth 1)
+        const sectors = svg.selectAll("g")
+            .data(root.leaves())
             .enter()
-            .append("text")
-            .attr("x", margin.left - 10)
-            .attr("y", (d, i) => margin.top + i * cellHeight + cellHeight / 2)
-            .attr("text-anchor", "end")
-            .attr("dominant-baseline", "middle")
-            .style("font-size", "12px")
-            .style("font-weight", "600")
-            .text(d => d.sector);
+            .append("g")
+            .attr("transform", d => `translate(${{d.x0}},${{d.y0}})`);
+
+        // 종목 박스
+        sectors.append("rect")
+            .attr("width", d => d.x1 - d.x0)
+            .attr("height", d => d.y1 - d.y0)
+            .attr("fill", d => colorScale(d.data.combined_score))
+            .attr("stroke", "#fff")
+            .attr("stroke-width", 2)
+            .style("cursor", "pointer")
+            .on("mouseover", function(event, d) {{
+                d3.select(this)
+                    .attr("stroke", "#000")
+                    .attr("stroke-width", 3)
+                    .style("opacity", 0.8);
+
+                tooltip.transition().duration(200).style("opacity", 1);
+                tooltip.html(`
+                    <strong style="font-size: 16px;">${{d.data.name}}</strong><br/>
+                    <span style="color: #9CA3AF;">종목코드:</span> ${{d.data.stock_code}}<br/>
+                    <span style="color: #9CA3AF;">섹터:</span> ${{d.parent.data.name}}<br/>
+                    <span style="color: #9CA3AF;">패턴:</span> <span style="color: ${{patternColors[d.data.pattern] || '#fff'}}">${{d.data.pattern}}</span><br/>
+                    <span style="color: #9CA3AF;">종합점수:</span> <strong style="color: #60A5FA;">${{d.data.combined_score.toFixed(1)}}</strong>점<br/>
+                    <span style="color: #9CA3AF;">시그널:</span> ${{d.data.signal_count}}개<br/>
+                    <span style="color: #9CA3AF;">내용:</span> ${{d.data.signal_list}}
+                `)
+                    .style("left", (event.pageX + 15) + "px")
+                    .style("top", (event.pageY - 28) + "px");
+            }})
+            .on("mouseout", function() {{
+                d3.select(this)
+                    .attr("stroke", "#fff")
+                    .attr("stroke-width", 2)
+                    .style("opacity", 1);
+                tooltip.transition().duration(500).style("opacity", 0);
+            }});
+
+        // 종목명 + 점수 텍스트
+        sectors.append("text")
+            .attr("x", 4)
+            .attr("y", 16)
+            .text(d => {{
+                const width = d.x1 - d.x0;
+                const height = d.y1 - d.y0;
+                // 박스가 충분히 크면 종목명 + 점수, 작으면 생략
+                if (width > 80 && height > 40) {{
+                    return `${{d.data.name}}`;
+                }} else if (width > 50 && height > 25) {{
+                    return d.data.name.length > 6 ? d.data.name.substring(0, 5) + '...' : d.data.name;
+                }} else {{
+                    return '';
+                }}
+            }})
+            .attr("font-size", d => {{
+                const width = d.x1 - d.x0;
+                return width > 100 ? "13px" : width > 60 ? "11px" : "9px";
+            }})
+            .attr("font-weight", "600")
+            .attr("fill", "#fff")
+            .style("pointer-events", "none")
+            .style("text-shadow", "1px 1px 2px rgba(0,0,0,0.8)");
+
+        // 점수 텍스트
+        sectors.append("text")
+            .attr("x", 4)
+            .attr("y", 32)
+            .text(d => {{
+                const width = d.x1 - d.x0;
+                const height = d.y1 - d.y0;
+                if (width > 80 && height > 40) {{
+                    return `${{d.data.combined_score.toFixed(1)}}점`;
+                }}
+                return '';
+            }})
+            .attr("font-size", "11px")
+            .attr("fill", "#fff")
+            .style("pointer-events", "none")
+            .style("text-shadow", "1px 1px 2px rgba(0,0,0,0.8)");
+
+        // 섹터 레이블 (각 섹터 영역 상단)
+        const sectorGroups = root.children;
+        sectorGroups.forEach(sector => {{
+            const sectorLeaves = sector.leaves();
+            if (sectorLeaves.length === 0) return;
+
+            // 섹터 영역의 x0, y0 계산
+            const x0 = Math.min(...sectorLeaves.map(d => d.x0));
+            const y0 = Math.min(...sectorLeaves.map(d => d.y0));
+
+            svg.append("text")
+                .attr("x", x0 + 4)
+                .attr("y", y0 - 5)
+                .text(sector.data.name)
+                .attr("font-size", "14px")
+                .attr("font-weight", "bold")
+                .attr("fill", "#1F2937")
+                .style("pointer-events", "none");
+        }});
 
         // 범례 추가
-        const legendWidth = 200;
-        const legendHeight = 10;
-        const legendScale = d3.scaleLinear()
-            .domain([40, 100])
-            .range([0, legendWidth]);
+        const legendWidth = 300;
+        const legendHeight = 15;
 
         const legend = svg.append("g")
-            .attr("transform", `translate(${{margin.left}}, ${{height - margin.bottom + 40}})`);
+            .attr("transform", `translate(${{width - legendWidth - 20}}, 20)`);
 
         // 그라데이션 정의
         const defs = svg.append("defs");
@@ -477,27 +536,32 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
         legend.append("rect")
             .attr("width", legendWidth)
             .attr("height", legendHeight)
-            .style("fill", "url(#legend-gradient)");
+            .style("fill", "url(#legend-gradient)")
+            .attr("stroke", "#ccc")
+            .attr("stroke-width", 1);
 
         legend.append("text")
             .attr("x", 0)
             .attr("y", legendHeight + 20)
             .style("font-size", "12px")
-            .text("40점");
+            .attr("fill", "#666")
+            .text("낮음 (40점)");
 
         legend.append("text")
             .attr("x", legendWidth)
             .attr("y", legendHeight + 20)
             .attr("text-anchor", "end")
             .style("font-size", "12px")
-            .text("100점");
+            .attr("fill", "#666")
+            .text("높음 (100점)");
 
         legend.append("text")
             .attr("x", legendWidth / 2)
-            .attr("y", -10)
+            .attr("y", -5)
             .attr("text-anchor", "middle")
             .style("font-size", "14px")
             .style("font-weight", "bold")
+            .attr("fill", "#333")
             .text("종합점수");
     </script>
 </body>
