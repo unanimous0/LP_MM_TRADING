@@ -100,6 +100,7 @@ def generate_html_report(csv_path: str, output_path: str, signal_bonus: int = 5)
 
         sector_node = {
             'name': sector,
+            'sector_score': float(sector_row['sector_score']),
             'children': []
         }
 
@@ -551,8 +552,9 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
             const y0 = Math.min(...sectorLeaves.map(d => d.y0));
             const x1 = Math.max(...sectorLeaves.map(d => d.x1));
 
-            // 섹터 배경 박스
-            const labelWidth = Math.min(sector.data.name.length * 10 + 16, x1 - x0);
+            // 섹터 배경 박스 (점수 포함한 너비)
+            const labelText = `${{sector.data.name}} (${{sector.data.sector_score.toFixed(1)}})`;
+            const labelWidth = Math.min(labelText.length * 8 + 16, x1 - x0);
             mainGroup.append("rect")
                 .attr("x", x0)
                 .attr("y", y0)
@@ -562,11 +564,11 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
                 .attr("rx", 4)
                 .style("pointer-events", "none");
 
-            // 섹터 텍스트
+            // 섹터 텍스트 (이름 + 점수)
             mainGroup.append("text")
                 .attr("x", x0 + 8)
                 .attr("y", y0 + 14)
-                .text(sector.data.name)
+                .text(`${{sector.data.name}} (${{sector.data.sector_score.toFixed(1)}})`)
                 .attr("font-size", "12px")
                 .attr("font-weight", "700")
                 .attr("fill", "#FFFFFF")
