@@ -291,3 +291,70 @@ class TestPatternClassifier:
         # Check config applied
         assert classifier.config['pattern_thresholds']['momentum_breakout']['momentum_min'] == 2.0
         assert classifier.config['score_weights']['recent'] == 0.3
+
+    def test_classify_all_short_direction(self, classifier):
+        """Test classify_all with short direction (순매도 탐지)"""
+        # Negative Z-Score data (순매도)
+        data = {
+            'stock_code': ['005930', '000660', '035720'],
+            '1W': [-1.5, -0.5, -2.0],  # 음수 = 순매도
+            '1M': [-1.2, -0.3, -0.1],
+            '3M': [-0.8, -0.2, 0.0],
+            '6M': [-0.5, 0.0, 0.1],
+            '1Y': [-0.3, 0.2, 0.2],
+            '2Y': [-0.1, 0.3, 0.3],
+        }
+        df = pd.DataFrame(data)
+
+        # Short direction 분류
+        result = classifier.classify_all(df, direction='short')
+
+        assert 'direction' in result.columns
+        assert (result['direction'] == 'short').all()
+        assert 'pattern' in result.columns
+        assert 'score' in result.columns
+
+        # Short일 때도 패턴 이름은 동일 (모멘텀형/지속형/전환형/기타)
+        assert result['pattern'].isin(['모멘텀형', '지속형', '전환형', '기타']).all()
+
+    def test_classify_all_long_vs_short_same_pattern_names(self, classifier):
+        """Test that long and short use same pattern names (모멘텀형/지속형/전환형)"""
+        # Same absolute values, opposite signs
+        long_data = {
+            'stock_code': ['005930'],
+            '1W': [1.5],
+            '1M': [1.2],
+            '3M': [0.8],
+            '6M': [0.5],
+            '1Y': [0.3],
+            '2Y': [0.1],
+        }
+
+        short_data = {
+            'stock_code': ['000660'],
+            '1W': [-1.5],
+            '1M': [-1.2],
+            '3M': [-0.8],
+            '6M': [-0.5],
+            '1Y': [-0.3],
+            '2Y': [-0.1],
+        }
+
+        long_df = pd.DataFrame(long_data)
+        short_df = pd.DataFrame(short_data)
+
+        long_result = classifier.classify_all(long_df, direction='long')
+        short_result = classifier.classify_all(short_df, direction='short')
+
+        # 패턴 이름이 동일해야 함 (부호만 다름)
+        # Z-Score 절댓값이 같으면 같은 패턴으로 분류되어야 함
+        assert long_result.iloc[0]['pattern'] == short_result.iloc[0]['pattern']
+
+        # direction만 다름
+        assert long_result.iloc[0]['direction'] == 'long'
+        assert short_result.iloc[0]['direction'] == 'short'
+
+    def test_classify_all_invalid_direction(self, classifier, sample_zscore_matrix):
+        """Test invalid direction parameter"""
+        with pytest.raises(ValueError, match="direction must be 'long' or 'short'"):
+            classifier.classify_all(sample_zscore_matrix, direction='invalid')

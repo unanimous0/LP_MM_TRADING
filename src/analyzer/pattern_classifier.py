@@ -231,12 +231,14 @@ class PatternClassifier:
         # 클리핑 (0~100 범위)
         return np.clip(score, 0, 100)
 
-    def classify_all(self, zscore_matrix: pd.DataFrame) -> pd.DataFrame:
+    def classify_all(self, zscore_matrix: pd.DataFrame,
+                     direction: str = 'long') -> pd.DataFrame:
         """
         전체 종목 패턴 분류 (메인 메서드)
 
         Args:
             zscore_matrix: Stage 2 출력 (stock_code, 1W~2Y)
+            direction: 'long' (순매수, Z>0) 또는 'short' (순매도, Z<0)
 
         Returns:
             pd.DataFrame: 패턴 분류 결과
@@ -244,16 +246,37 @@ class PatternClassifier:
                 - 1W~2Y: 6개 기간 Z-Score
                 - recent, momentum, weighted, average: 4가지 정렬 키
                 - volatility, persistence, sl_ratio: 추가 특성
-                - pattern: 패턴명
+                - pattern: 패턴명 (모멘텀형/지속형/전환형/기타)
                 - score: 패턴 강도 점수 (0~100)
+                - direction: 'long' 또는 'short'
+
+        Note:
+            - direction='long': 양수 Z-Score 분석 (순매수)
+            - direction='short': 음수 Z-Score 분석 (순매도)
+            - 패턴 이름은 방향과 무관하게 동일 (모멘텀형/지속형/전환형)
+            - short일 때 Z-Score 부호 반전하여 분석
 
         Example:
             >>> classifier = PatternClassifier()
-            >>> result = classifier.classify_all(zscore_matrix)
-            >>> print(result[['stock_code', 'pattern', 'score']])
+            >>> # 순매수 패턴
+            >>> long_result = classifier.classify_all(zscore_matrix, direction='long')
+            >>> # 순매도 패턴 (Z-Score 음수)
+            >>> short_result = classifier.classify_all(zscore_matrix, direction='short')
         """
+        if direction not in ['long', 'short']:
+            raise ValueError(f"direction must be 'long' or 'short', got: {direction}")
+
+        df = zscore_matrix.copy()
+
+        # Short 전략: Z-Score 부호 반전 (음수 → 양수 변환하여 패턴 분류)
+        if direction == 'short':
+            period_cols = ['1W', '1M', '3M', '6M', '1Y', '2Y']
+            for col in period_cols:
+                if col in df.columns:
+                    df[col] = -df[col]
+
         # 1. 4가지 정렬 키 계산
-        df = self.calculate_sort_keys(zscore_matrix)
+        df = self.calculate_sort_keys(df)
 
         # 2. 추가 특성 계산
         df = self.calculate_features(df)
@@ -264,12 +287,22 @@ class PatternClassifier:
         # 4. 패턴 강도 점수 계산
         df['score'] = df.apply(self.calculate_pattern_score, axis=1)
 
-        # 5. 컬럼 순서 정리
+        # 5. direction 컬럼 추가
+        df['direction'] = direction
+
+        # Short인 경우 원본 Z-Score 복원 (출력용)
+        if direction == 'short':
+            period_cols = ['1W', '1M', '3M', '6M', '1Y', '2Y']
+            for col in period_cols:
+                if col in df.columns:
+                    df[col] = -df[col]
+
+        # 6. 컬럼 순서 정리
         base_cols = ['stock_code']
         period_cols = ['1W', '1M', '3M', '6M', '1Y', '2Y']
         sort_key_cols = ['recent', 'momentum', 'weighted', 'average']
         feature_cols = ['volatility', 'persistence', 'sl_ratio']
-        result_cols = ['pattern', 'score']
+        result_cols = ['pattern', 'score', 'direction']
 
         # 존재하는 컬럼만 선택 (유연성)
         output_cols = []
