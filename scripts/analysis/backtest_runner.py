@@ -1,7 +1,7 @@
 """
-Stage 4 백테스팅 CLI 도구 (Week 1 버전)
+Stage 4 백테스팅 CLI 도구 (Week 3 버전)
 
-백테스트 실행 및 간단한 결과 출력
+백테스트 실행, 결과 출력, 시각화
 
 Usage:
     # 기본 실행 (3개월)
@@ -13,8 +13,17 @@ Usage:
     # 특정 패턴만
     python scripts/analysis/backtest_runner.py --pattern 모멘텀형
 
-    # CSV 저장
-    python scripts/analysis/backtest_runner.py --save-csv output/backtest_trades.csv
+    # 차트 생성 (화면 표시)
+    python scripts/analysis/backtest_runner.py --plot
+
+    # PNG 저장
+    python scripts/analysis/backtest_runner.py --save-dir output/charts
+
+    # PDF 리포트 생성
+    python scripts/analysis/backtest_runner.py --save-pdf output/backtest_report.pdf
+
+    # CSV + 차트 모두 저장
+    python scripts/analysis/backtest_runner.py --save-csv output/trades.csv --save-dir output/charts
 """
 
 import argparse
@@ -28,6 +37,7 @@ sys.path.insert(0, str(project_root))
 from src.database.connection import get_connection
 from src.backtesting.engine import BacktestEngine, BacktestConfig
 from src.backtesting.metrics import PerformanceMetrics
+from src.backtesting.visualizer import BacktestVisualizer
 import pandas as pd
 
 
@@ -122,7 +132,7 @@ def save_trades_to_csv(trades, filepath: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='백테스팅 CLI 도구 (Week 1 버전)',
+        description='백테스팅 CLI 도구 (Week 3 버전 - 시각화 추가)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 예시:
@@ -141,8 +151,17 @@ def main():
   # 롱+숏 병행
   python scripts/analysis/backtest_runner.py --strategy both
 
-  # CSV 저장
-  python scripts/analysis/backtest_runner.py --save-csv output/backtest_trades.csv
+  # 차트 생성 및 화면 표시
+  python scripts/analysis/backtest_runner.py --plot
+
+  # PNG 차트 저장
+  python scripts/analysis/backtest_runner.py --save-dir output/charts
+
+  # PDF 리포트 생성
+  python scripts/analysis/backtest_runner.py --save-pdf output/report.pdf
+
+  # CSV + 차트 모두 저장
+  python scripts/analysis/backtest_runner.py --save-csv output/trades.csv --save-dir output/charts
         """
     )
 
@@ -174,6 +193,12 @@ def main():
     # 출력 설정
     parser.add_argument('--save-csv', help='거래 내역 CSV 저장 경로')
     parser.add_argument('--quiet', action='store_true', help='진행 상황 출력 안함')
+
+    # 시각화 옵션 (Week 3)
+    parser.add_argument('--plot', action='store_true', help='차트 생성 및 화면 표시')
+    parser.add_argument('--save-dir', help='차트 PNG 저장 디렉토리')
+    parser.add_argument('--save-pdf', help='차트 PDF 리포트 저장 경로')
+    parser.add_argument('--save-daily-values', help='일별 포트폴리오 가치 CSV 저장 경로')
 
     args = parser.parse_args()
 
@@ -210,6 +235,33 @@ def main():
     # CSV 저장
     if args.save_csv:
         save_trades_to_csv(result['trades'], args.save_csv)
+
+    # 일별 포트폴리오 가치 CSV 저장
+    if args.save_daily_values:
+        result['daily_values'].to_csv(args.save_daily_values, index=False, encoding='utf-8-sig')
+        print(f"✅ 일별 포트폴리오 가치 저장: {args.save_daily_values}")
+
+    # 시각화 (Week 3)
+    if args.plot or args.save_dir or args.save_pdf:
+        if not result['trades']:
+            print("\n⚠️  거래가 없어서 차트를 생성할 수 없습니다.")
+        else:
+            print("\n" + "="*80)
+            print("📊 차트 생성 중...")
+            print("="*80)
+
+            visualizer = BacktestVisualizer(
+                trades=result['trades'],
+                daily_values=result['daily_values'],
+                initial_capital=config.initial_capital
+            )
+
+            # 모든 차트 생성
+            visualizer.plot_all(
+                save_dir=args.save_dir,
+                save_pdf=args.save_pdf,
+                show=args.plot
+            )
 
     conn.close()
 

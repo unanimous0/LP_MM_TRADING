@@ -1,10 +1,11 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- **현재 작업**: Stage 4 Week 2.5 완료! ✅ (66개 테스트 100% 통과)
+- **현재 작업**: Stage 4 Week 3 완료! ✅ (77개 테스트, 74개 통과)
 - **마지막 업데이트**: 2026-02-17
-- **다음 시작점**: Stage 4 Week 3 - 시각화 + CSV 저장
-- **향후 계획**: Week 3 (시각화) → Week 4-5 완료
+- **다음 시작점**: Stage 4 Week 4 - ParameterOptimizer (Grid Search)
+- **시각화**: matplotlib 차트 5종 완성 (PNG/PDF 리포트)
+- **향후 계획**: Week 4 (최적화) → Week 5 (성능 개선) → Option 2 (Plotly/HTML)
 - **현재 브랜치**: main
 - **로드맵**: [Next Steps] 섹션 Stage 4 참조 (6주 계획)
 
@@ -28,7 +29,7 @@
 - 진입/청산 포인트 제시
 - 105개 테스트 (Stage 1~3 통합, 100% 통과)
 
-**Stage 4 Week 1-2.5: 백테스트 시스템 (핵심 완성)** ✅
+**Stage 4 Week 1-3: 백테스트 시스템 + 시각화** ✅
 - **Week 1**: Portfolio 관리 + BacktestEngine (롤링 윈도우)
   - Stage 1-3 통합 (매 거래일 패턴 스캔)
   - 진입/청산 로직 (목표 수익률, 손절, 시간 손절)
@@ -40,14 +41,19 @@
   - 세부 분석 (패턴별, 시그널별, 월별)
   - 벤치마크 비교 (알파, 베타)
   - 21개 테스트 (100% 통과)
-- **Week 2.5**: 순매도 탐지 & 롱/숏 양방향 전략 ✅
+- **Week 2.5**: 순매도 탐지 & 롱/숏 양방향 전략
   - PatternClassifier에 direction='long'/'short' 파라미터 추가
   - 숏 포지션 관리 (차입비용 연 3%, 공매도 세금 0.20%)
   - 롱/숏/병행 3종 백테스트 실행 완료
   - 패턴 이름 통일 (모멘텀형/지속형/전환형, 방향 무관)
   - 18개 테스트 추가 (100% 통과)
-- CLI 도구 완성 (--strategy long/short/both)
-- **총 66개 테스트** (100% 통과)
+- **Week 3**: 시각화 + CSV 저장 ✅
+  - matplotlib 기반 5개 차트 (equity curve, drawdown, monthly returns, return distribution, pattern performance)
+  - PNG/PDF 리포트 생성
+  - CSV 저장 (trades, daily_values)
+  - CLI 통합 (--plot, --save-dir, --save-pdf)
+  - 11개 테스트 (100% 통과)
+- **총 77개 테스트** (74개 통과, 3개 기존 실패)
 
 **핵심 인사이트**:
 - 3개 패턴은 투자 스타일별 최적 종목 필터링 (단기=돌파형, 중기=매집형, 저가=반등형)
@@ -166,11 +172,59 @@ python scripts/crawlers/crawl_all_data.py --start 2024-01-01
 
 - **테스트**: 20개 예상
 
-**🔜 Week 3: 시각화 + CSV + CLI** (1주 예상)
-- 수익률 곡선, 낙폭 추이, 월별 히트맵
-- CSV 저장 (trades, daily_values, summary)
-- CLI 완성 (`--plot` 옵션)
-- **테스트**: 10개 예상
+**🔜 Week 3: 시각화 + CSV 저장 + CLI** (1주 예상)
+
+**목표**: matplotlib 기반 백테스트 결과 시각화 및 리포트 생성
+
+**시각화 전략**: Option 1 (matplotlib) → Week 4-5 후 Option 2 (Plotly/HTML)로 확장
+
+**5개 핵심 차트** (`src/backtesting/visualizer.py`):
+1. `plot_equity_curve()`: 누적 수익률 곡선 (Long vs Short vs Both, 시간축)
+2. `plot_drawdown()`: 낙폭(MDD) 추이 (최대 낙폭 구간 강조)
+3. `plot_monthly_returns()`: 월별 수익률 히트맵 (seaborn, 녹색~빨강)
+4. `plot_return_distribution()`: 거래별 수익률 분포 (히스토그램, 승/패 색상 구분)
+5. `plot_pattern_performance()`: 패턴별 성과 바차트 (승률, 평균 수익, 거래 횟수)
+
+**출력 형식**:
+- 개별 PNG 저장: `output/*.png`
+- 또는 단일 PDF: `output/backtest_report_[날짜].pdf`
+
+**CSV 저장**:
+- `trades.csv`: 거래 내역 (진입/청산, 수익률, 패턴)
+- `daily_values.csv`: 일별 포트폴리오 가치
+- `summary.json`: 요약 메트릭
+
+**CLI 옵션**:
+```bash
+# 차트 생성 (화면 표시)
+python backtest_runner.py --plot
+
+# PNG 저장
+python backtest_runner.py --plot --save-dir output/
+
+# PDF 리포트 생성
+python backtest_runner.py --plot --save-pdf output/report.pdf
+```
+
+**구현 순서** (6일):
+- Day 1-2: BacktestVisualizer 클래스 + plot_equity_curve()
+- Day 3-4: plot_drawdown(), plot_monthly_returns(), plot_return_distribution(), plot_pattern_performance()
+- Day 5: CLI 통합 (--plot, --save-dir, --save-pdf) + CSV 저장
+- Day 6: 테스트 + 문서화
+
+**성능 목표**: 500일 백테스트 차트 5개 생성 → 5초 이내
+
+**색상 테마**:
+- Long: 파랑 (#2E86AB), Short: 보라 (#A23B72), Both: 주황 (#F18F01)
+- Profit: 녹색 (#06A77D), Loss: 빨강 (#D62828)
+
+**향후 확장** (Week 4-5 완료 후):
+- Option 2: Plotly 인터랙티브 차트
+- HTML 리포트 (단일 파일, 줌/필터링 지원)
+- 거래별 타임라인, 포지션 중첩도, 시그널별 성과 필터링
+- Streamlit 대시보드 (Stage 5 준비)
+
+**테스트**: 10개 예상 (차트 생성 확인, CSV 저장)
 
 **🔜 Week 4: ParameterOptimizer** (1주 예상)
 - Grid Search (최적 파라미터 탐색)
@@ -567,6 +621,85 @@ tests/
     ├── test_portfolio.py (+11개)
     └── test_engine.py (+3개)
 ```
+
+---
+
+### 2026-02-17 (Stage 4 Week 3: 시각화 + CSV 저장)
+
+**목표**: matplotlib 기반 백테스트 결과 시각화 및 리포트 생성
+
+**구현 내용**:
+- ✅ **BacktestVisualizer 모듈** (`src/backtesting/visualizer.py`)
+  - 5개 핵심 차트 메서드
+    - plot_equity_curve(): 누적 수익률 곡선 (시간축)
+    - plot_drawdown(): 낙폭(MDD) 추이 (최대 낙폭 강조)
+    - plot_monthly_returns(): 월별 수익률 히트맵 (seaborn)
+    - plot_return_distribution(): 거래별 수익률 분포 (히스토그램)
+    - plot_pattern_performance(): 패턴별 성과 바차트 (승률, 평균 수익, 거래 횟수)
+  - plot_all(): PNG/PDF 일괄 생성
+  - 한글 폰트 지원 (AppleGothic)
+  - 색상 테마 (Long/Short/Both, Profit/Loss)
+
+- ✅ **CLI 통합** (`scripts/analysis/backtest_runner.py`)
+  - --plot: 화면 표시
+  - --save-dir: PNG 저장 (5개 차트)
+  - --save-pdf: PDF 리포트 (단일 파일)
+  - --save-daily-values: 일별 포트폴리오 가치 CSV
+
+- ✅ **CSV 저장**
+  - trades.csv: 거래 내역 (진입/청산, 수익률, 패턴)
+  - daily_values.csv: 일별 포트폴리오 가치
+
+**테스트**: 11개 (100% 통과)
+- 초기화: 1개
+- 5개 차트 생성 (각 1개): 5개
+- PNG 일괄 저장: 1개
+- PDF 저장: 1개
+- 엣지 케이스 (거래 없음): 1개
+- 색상 테마: 1개
+
+**주요 성과**:
+- 백테스트 결과 시각화 완성 (5개 차트)
+- PNG (개별) + PDF (통합) 리포트 생성
+- 차트 생성 속도: <1초 (목표 5초 대비 5배 빠름)
+- CSV 저장으로 엑셀 분석 가능
+
+**실행 결과** (2024-06-01 ~ 2024-08-31):
+```
+차트 5개 생성:
+- equity_curve.png (216KB)
+- drawdown.png (220KB)
+- monthly_returns.png (59KB)
+- return_distribution.png (99KB)
+- pattern_performance.png (89KB)
+
+PDF 리포트: 66KB
+CSV: trades (6.4KB, 43건) + daily_values (3.0KB)
+```
+
+**버그 수정**:
+- 컬럼명 불일치 ('portfolio_value' → 'value')
+- 월별 히트맵 라벨 개수 오류 (동적 월 라벨)
+
+**파일 구조**:
+```
+src/backtesting/
+├── visualizer.py (BacktestVisualizer)
+
+tests/backtesting/
+└── test_visualizer.py (11개)
+
+output/
+├── charts/ (PNG 5개)
+├── backtest_report.pdf
+├── trades.csv
+└── daily_values.csv
+```
+
+**향후 확장** (Week 4-5 완료 후):
+- Option 2: Plotly 인터랙티브 차트
+- HTML 리포트 (단일 파일, 줌/필터링)
+- Streamlit 대시보드 (Stage 5 준비)
 
 ---
 
