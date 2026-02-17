@@ -2,8 +2,9 @@
 
 ## [Status]
 - **현재 작업**: Stage 3 완료! ✅ (105개 테스트 100% 통과)
-- **마지막 업데이트**: 2026-02-13
+- **마지막 업데이트**: 2026-02-15
 - **다음 시작점**: Stage 4 - 백테스팅 시스템 (선택)
+- **향후 계획**: Stage 5 - 웹 서비스 & AI 자동화 (변경 가능)
 - **현재 브랜치**: main
 
 ### 주요 성과
@@ -214,6 +215,148 @@ python scripts/analysis/backtest_runner.py --walk-forward --window 90 --step 30
 - Stage 3 완료로 핵심 기능 구현 완료
 - Stage 4는 전략 검증 및 실전 투자 준비를 위한 선택적 고도화 단계
 - 구현 시 약 2~3주 소요 예상 (주말 작업 기준)
+
+---
+
+### Stage 5: 웹 서비스 & AI 기반 자동화 (향후 계획, 변경 가능)
+
+**목표**: 일별 자동 분석 및 AI 기반 종목 리포트 생성 웹 서비스 구축
+
+**전체 로드맵**:
+- **Stage 5-1**: Streamlit 웹 대시보드
+- **Stage 5-2**: 스케줄러 기반 자동화 파이프라인
+
+---
+
+#### 5-1. Streamlit 웹 대시보드
+**파일**: `app/streamlit_dashboard.py`
+
+**주요 기능**:
+- 실시간 히트맵 시각화 (인터랙티브)
+- 패턴별/시그널별 필터링
+- 종목 상세 정보 조회
+- 분석 결과 히스토리 조회
+- 사용자 로그인 (향후)
+
+**기술 스택**:
+- **Streamlit**: 웹 대시보드 프레임워크
+- **Plotly**: 인터랙티브 차트
+- **Streamlit Cloud**: 무료 호스팅 (초기)
+
+**예상 소요**: 1~2주
+
+---
+
+#### 5-2. 스케줄러 기반 자동화 파이프라인
+**파일**: `scripts/automation/daily_scheduler.py`
+
+**자동화 흐름**:
+```
+[일별 자동 실행 - 장 마감 후 16:30]
+
+1. 데이터 크롤링
+   - 수급 데이터 (외국인/기관)
+   - 주가 데이터
+   - 유통주식 수
+   ↓
+2. DB 저장
+   ↓
+3. Stage 1-3 분석 실행
+   - 정규화 (Sff/Z-Score)
+   - 히트맵 생성
+   - 패턴 분류
+   ↓
+4. 고득점 종목 추출 (70점 이상)
+   ↓
+5. AI 기반 종목 분석
+   - Gemini API: 뉴스 분석
+   - Claude API: 증권사 리포트 분석
+   - 종합 보고서 생성
+   ↓
+6. 결과 저장 및 알림
+   - DB 저장
+   - HTML 리포트 생성
+   - Slack/이메일 알림 (선택)
+```
+
+**핵심 구성요소**:
+
+1. **스케줄러** (`APScheduler`)
+   ```python
+   from apscheduler.schedulers.blocking import BlockingScheduler
+
+   scheduler = BlockingScheduler()
+   scheduler.add_job(daily_pipeline, 'cron', hour=16, minute=30)
+   scheduler.start()
+   ```
+
+2. **AI 분석 모듈** (`src/ai/analyzer.py`)
+   - Gemini API 연동 (뉴스 분석)
+   - Claude API 연동 (리포트 분석)
+   - 프롬프트 템플릿 관리
+   - 결과 캐싱
+
+3. **에러 핸들링 & 알림**
+   - Sentry: 에러 자동 추적
+   - Slack Webhook: 실패 시 즉시 알림
+   - Retry 로직: 3회 재시도
+
+4. **API 비용 관리**
+   - 일일 호출 한도 (100건)
+   - 고득점 종목만 분석 (70점 이상)
+   - 캐싱: 중복 분석 방지
+
+5. **로그 및 모니터링**
+   ```python
+   logging.info("분석 시작: 2026-02-15")
+   logging.info("고득점 종목 15개 추출")
+   logging.info("AI 분석 완료: 삼성전자")
+   ```
+
+**필수 보완 사항**:
+
+⭐⭐⭐ **반드시 구현**:
+- [ ] 에러 핸들링 & 알림 (Sentry + Slack)
+- [ ] API 비용 관리 (일일 한도 100건)
+- [ ] Rate Limiting (API 호출 간격 2초)
+- [ ] 로그 관리 (로그 로테이션)
+- [ ] 데이터 백업 (일일 자동 백업)
+
+⭐⭐ **강력 추천**:
+- [ ] 우선순위 큐 (고득점 종목 우선 분석)
+- [ ] 결과 캐싱 (같은 날 중복 분석 방지)
+- [ ] 점진적 분석 (10개씩 배치 처리)
+
+⭐ **선택 사항**:
+- [ ] 실시간 알림 (Slack/텔레그램)
+- [ ] 멀티 소스 데이터 (뉴스, 공시, SNS)
+- [ ] A/B 테스팅 (Gemini vs Claude 성능 비교)
+
+**기술 스택**:
+- **스케줄러**: APScheduler (간단) / Airflow (고도화)
+- **AI API**: Gemini (Google AI Studio) + Claude (Anthropic API)
+- **비동기 처리**: Celery + Redis (선택)
+- **모니터링**: Sentry (에러) + Prometheus (성능, 선택)
+- **알림**: Slack Webhook / 텔레그램 봇
+
+**예상 소요**:
+- **5-2-1: 기본 자동화** (1주) - 스케줄러 + 일별 분석
+- **5-2-2: AI 통합** (2주) - Gemini/Claude 연동 + 프롬프트
+- **5-2-3: 안정화** (1주) - 에러 핸들링 + 비용 관리
+- **5-2-4: 고도화** (선택) - 실시간 알림 + 멀티 소스
+
+**총 예상 소요**: 4~5주 (주말 작업 기준)
+
+**데이터 확장 (향후)**:
+- 네이버 뉴스 크롤링
+- 금융감독원 전자공시 (DART API)
+- SNS 감성 분석 (Twitter/네이버 카페)
+- 증권사 리포트 PDF 파싱
+
+**참고**:
+- Stage 5는 Stage 4 완료 후 진행 권장
+- 웹 서비스 구독 모델 구현 시 서버 필요 (AWS/GCP)
+- 초기에는 Streamlit Cloud 무료 호스팅으로 시작 가능
 
 ---
 
