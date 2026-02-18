@@ -20,9 +20,13 @@ data/raw/processed/
 *.backup_*
 
 # Output files (regeneratable)
-output/test_*.png
-output/bench_*.png
+output/*.pdf
+output/*.png
+output/*.csv
+output/*.html
+output/*.md
 output/*.log
+output/charts/
 
 # Analysis results (regeneratable)
 data/analysis_results/
@@ -48,14 +52,6 @@ config/secrets.json
 .DS_Store
 Thumbs.db
 
-# Output 파일 관리 (최종 결과물만 커밋)
-# Stage 2 최종 결과: heatmap_semi_*.csv/png 만 커밋
-output/*.png
-output/*.csv
-!output/heatmap_semi_*.png
-!output/heatmap_semi_*.csv
-
 # Excel output files
 output/*.xlsx
 output/~$*.xlsx
-output/charts/
