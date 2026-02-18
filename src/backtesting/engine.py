@@ -29,10 +29,12 @@ class BacktestConfig:
                  min_score: float = 70,  # 최소 패턴 점수
                  min_signals: int = 2,  # 최소 시그널 개수
                  target_return: float = 0.15,  # 목표 수익률 (+15%)
-                 stop_loss: float = -0.07,  # 손절 비율 (-7%)
-                 max_hold_days: int = 30,  # 최대 보유 기간 (30일)
+                 stop_loss: float = -0.075,  # 손절 비율 (-7.5%)
+                 max_hold_days: int = 999,  # 최대 보유 기간 (999 = 사실상 무제한)
+                 reverse_signal_threshold: float = 60,  # 반대 수급 손절 점수 (60점 이상)
                  allowed_patterns: Optional[List[str]] = None,  # 허용 패턴 (None이면 전체)
-                 strategy: str = 'long'):  # 'long', 'short', 'both'
+                 strategy: str = 'long',  # 'long', 'short', 'both'
+                 force_exit_on_end: bool = False):  # 백테스트 종료 시 강제 청산 여부
         """
         백테스트 설정 초기화
 
@@ -41,11 +43,13 @@ class BacktestConfig:
             max_positions: 최대 동시 보유 종목 수
             min_score: 진입 최소 점수 (0~100)
             min_signals: 진입 최소 시그널 개수 (0~3)
-            target_return: 목표 수익률 (예: 0.15 = +15%)
-            stop_loss: 손절 비율 (예: -0.07 = -7%)
-            max_hold_days: 시간 손절 (N일 보유 후 강제 청산)
+            target_return: 목표 수익률 (예: 0.15 = +15%, 순수 가격 변화율)
+            stop_loss: 손절 비율 (예: -0.075 = -7.5%, 순수 가격 변화율)
+            max_hold_days: 시간 손절 (N일 보유 후 강제 청산, 999 = 무제한)
+            reverse_signal_threshold: 반대 수급 손절 점수 (Long→매도 60점 이상, Short→매수 60점 이상)
             allowed_patterns: 허용 패턴 리스트 (예: ['모멘텀형', '지속형'])
             strategy: 전략 방향 ('long': 순매수, 'short': 순매도, 'both': 롱+숏)
+            force_exit_on_end: 백테스트 종료일에 강제 청산 여부 (기본: False)
         """
         self.initial_capital = initial_capital
         self.max_positions = max_positions
@@ -54,8 +58,10 @@ class BacktestConfig:
         self.target_return = target_return
         self.stop_loss = stop_loss
         self.max_hold_days = max_hold_days
+        self.reverse_signal_threshold = reverse_signal_threshold
         self.allowed_patterns = allowed_patterns
         self.strategy = strategy
+        self.force_exit_on_end = force_exit_on_end
 
         if strategy not in ['long', 'short', 'both']:
             raise ValueError(f"strategy must be 'long', 'short', or 'both', got: {strategy}")
@@ -231,7 +237,7 @@ class BacktestEngine:
 
     def _check_exit_conditions(self, current_date: str) -> List[Trade]:
         """
-        청산 조건 확인 (목표 수익률, 손절, 시간 손절)
+        청산 조건 확인 (목표 수익률, 손절, 반대 수급, 시간 손절)
 
         Args:
             current_date: 현재 거래일
@@ -244,14 +250,20 @@ class BacktestEngine:
         # 보유 포지션 복사 (iteration 중 수정 방지)
         positions_to_check = list(self.portfolio.positions.items())
 
+        # 반대 수급 확인을 위한 Stage 1-3 실행 (한 번만)
+        reverse_signals_cache = {}  # {direction: DataFrame}
+
         for stock_code, position in positions_to_check:
             # 현재 가격 조회 (종가)
             current_price = self.get_price(stock_code, current_date)
             if current_price is None:
                 continue  # 가격 없으면 skip (휴장 등)
 
-            # 수익률 계산
-            return_pct = (current_price / position.entry_price - 1)
+            # 수익률 계산 (순수 가격 변화율, 비용 제외)
+            if position.direction == 'long':
+                return_pct = (current_price / position.entry_price - 1)
+            else:  # short
+                return_pct = (position.entry_price / current_price - 1)
 
             # 보유 기간
             hold_days = position.hold_days(current_date)
@@ -259,12 +271,42 @@ class BacktestEngine:
             # 청산 조건 확인
             exit_reason = None
 
+            # 1. 목표 수익률 달성
             if return_pct >= self.config.target_return:
-                exit_reason = 'target'  # 목표 수익률 달성
+                exit_reason = 'target'
+
+            # 2. 가격 손절
             elif return_pct <= self.config.stop_loss:
-                exit_reason = 'stop_loss'  # 손절
-            elif hold_days >= self.config.max_hold_days:
-                exit_reason = 'time'  # 시간 손절
+                exit_reason = 'stop_loss'
+
+            # 3. 반대 수급 손절
+            elif self.config.reverse_signal_threshold > 0:
+                # 반대 방향 확인
+                reverse_direction = 'short' if position.direction == 'long' else 'long'
+
+                # 캐시 확인
+                if reverse_direction not in reverse_signals_cache:
+                    reverse_signals_cache[reverse_direction] = self._scan_signals_on_date(
+                        current_date, direction=reverse_direction
+                    )
+
+                reverse_signals = reverse_signals_cache[reverse_direction]
+
+                # 해당 종목의 반대 수급 점수 확인
+                if not reverse_signals.empty:
+                    stock_signal = reverse_signals[reverse_signals['stock_code'] == stock_code]
+
+                    if not stock_signal.empty:
+                        reverse_pattern_score = stock_signal.iloc[0]['score']
+                        reverse_signal_count = stock_signal.iloc[0]['signal_count']
+                        reverse_final_score = reverse_pattern_score + (reverse_signal_count * 5)
+
+                        if reverse_final_score >= self.config.reverse_signal_threshold:
+                            exit_reason = 'reverse_signal'  # 반대 수급 발생
+
+            # 4. 시간 손절
+            if exit_reason is None and hold_days >= self.config.max_hold_days:
+                exit_reason = 'time'
 
             # 청산 실행
             if exit_reason:
@@ -443,12 +485,13 @@ class BacktestEngine:
                       f"포지션: {self.portfolio.position_count}/{self.config.max_positions} | "
                       f"거래: {len(self.portfolio.trades)}건")
 
-        # 6. 마지막 날 모든 포지션 청산
-        last_date = trading_dates[-1]
-        for stock_code in list(self.portfolio.positions.keys()):
-            exit_price = self.get_price(stock_code, last_date)
-            if exit_price:
-                self.portfolio.exit_position(stock_code, last_date, exit_price, 'end')
+        # 6. 마지막 날 모든 포지션 청산 (옵션)
+        if self.config.force_exit_on_end:
+            last_date = trading_dates[-1]
+            for stock_code in list(self.portfolio.positions.keys()):
+                exit_price = self.get_price(stock_code, last_date)
+                if exit_price:
+                    self.portfolio.exit_position(stock_code, last_date, exit_price, 'end')
 
         # 결과 반환
         daily_df = pd.DataFrame(self.daily_values)

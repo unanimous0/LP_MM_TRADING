@@ -174,9 +174,10 @@ def main():
     parser.add_argument('--min-signals', type=int, default=1, help='최소 시그널 개수 (0~3)')
 
     # 청산 조건
-    parser.add_argument('--target', type=float, default=0.10, help='목표 수익률 (예: 0.10 = 10%%)')
-    parser.add_argument('--stop', type=float, default=-0.05, help='손절 비율 (예: -0.05 = -5%%)')
-    parser.add_argument('--max-days', type=int, default=15, help='최대 보유 기간 (일)')
+    parser.add_argument('--target', type=float, default=0.15, help='목표 수익률 (예: 0.15 = 15%%, 순수 가격 변화율)')
+    parser.add_argument('--stop', type=float, default=-0.075, help='손절 비율 (예: -0.075 = -7.5%%, 순수 가격 변화율)')
+    parser.add_argument('--max-days', type=int, default=999, help='최대 보유 기간 (일, 999 = 무제한)')
+    parser.add_argument('--reverse-threshold', type=float, default=60, help='반대 수급 손절 점수 (예: 60 = 60점 이상)')
 
     # 포트폴리오 설정
     parser.add_argument('--capital', type=float, default=10_000_000, help='초기 자본금 (원)')
@@ -213,8 +214,10 @@ def main():
         target_return=args.target,
         stop_loss=args.stop,
         max_hold_days=args.max_days,
+        reverse_signal_threshold=args.reverse_threshold,
         allowed_patterns=allowed_patterns,
-        strategy=args.strategy
+        strategy=args.strategy,
+        force_exit_on_end=False  # 백테스트 종료 시 강제 청산 안 함
     )
 
     # 데이터베이스 연결
