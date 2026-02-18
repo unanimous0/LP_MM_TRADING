@@ -78,7 +78,7 @@ class BacktestEngine:
         # Stage 1-3 모듈 초기화
         self.normalizer = SupplyNormalizer(conn)
         self.calculator = OptimizedMultiPeriodCalculator(
-            self.normalizer, enable_caching=True
+            self.normalizer, enable_caching=False  # 백테스트는 end_date가 매번 바뀌므로 캐싱 비활성화
         )
         self.classifier = PatternClassifier()
         self.signal_detector = SignalDetector(conn)
@@ -184,12 +184,11 @@ class BacktestEngine:
         if zscore_latest.empty:
             return pd.DataFrame()
 
-        # Stage 2: 히트맵 계산
-        # TODO: OptimizedMultiPeriodCalculator에 end_date 파라미터 추가 필요!
-        # 현재는 전체 데이터 사용 (미래 데이터 누수 가능성)
+        # Stage 2: 히트맵 계산 (end_date 적용 - 미래 데이터 차단!)
         zscore_matrix = self.calculator.calculate_multi_period_zscores(
             periods_dict=self.periods,
-            stock_codes=zscore_latest['stock_code'].tolist()
+            stock_codes=zscore_latest['stock_code'].tolist(),
+            end_date=end_date  # 미래 데이터 누수 방지
         )
 
         if zscore_matrix.empty:
@@ -213,10 +212,10 @@ class BacktestEngine:
         # Stage 3-1: 패턴 분류 (direction별)
         pattern_result = self.classifier.classify_all(zscore_matrix, direction=direction)
 
-        # Stage 3-2: 시그널 탐지 (TODO: end_date 파라미터 추가 필요)
-        # 현재는 전체 데이터 사용하므로 주의!
+        # Stage 3-2: 시그널 탐지 (end_date 적용 - 미래 데이터 차단!)
         signal_result = self.signal_detector.detect_all_signals(
-            stock_codes=pattern_result['stock_code'].tolist()
+            stock_codes=pattern_result['stock_code'].tolist(),
+            end_date=end_date
         )
 
         # 통합
@@ -285,11 +284,18 @@ class BacktestEngine:
             signals: Stage 1-3 결과
 
         Returns:
-            진입 조건 충족 종목 (점수 내림차순)
+            진입 조건 충족 종목 (종합점수 내림차순)
         """
-        # 필터링: 점수 & 시그널 개수
+        if signals.empty:
+            return signals
+
+        # 종합점수 계산: 패턴점수 + (시그널 × 5점)
+        signals = signals.copy()
+        signals['final_score'] = signals['score'] + (signals['signal_count'] * 5)
+
+        # 필터링: 종합점수 & 시그널 개수
         candidates = signals[
-            (signals['score'] >= self.config.min_score) &
+            (signals['final_score'] >= self.config.min_score) &
             (signals['signal_count'] >= self.config.min_signals)
         ].copy()
 
@@ -299,8 +305,8 @@ class BacktestEngine:
                 candidates['pattern'].isin(self.config.allowed_patterns)
             ]
 
-        # 점수 내림차순 정렬
-        candidates = candidates.sort_values('score', ascending=False)
+        # 종합점수 내림차순 정렬
+        candidates = candidates.sort_values('final_score', ascending=False)
 
         return candidates
 
@@ -335,14 +341,14 @@ class BacktestEngine:
             if entry_price is None or entry_price <= 0:
                 continue  # 가격 없으면 skip
 
-            # 진입 실행 (direction 전달)
+            # 진입 실행 (direction 전달, 종합점수 사용)
             position = self.portfolio.enter_position(
                 stock_code=stock_code,
                 stock_name=stock_name,
                 entry_date=entry_date,
                 entry_price=entry_price,
                 pattern=row['pattern'],
-                score=row['score'],
+                score=row['final_score'],  # 종합점수 사용
                 signal_count=row['signal_count'],
                 direction=direction
             )

@@ -37,7 +37,8 @@ class OptimizedMultiPeriodCalculator:
     def calculate_multi_period_zscores(
         self,
         periods_dict: Dict[str, int],
-        stock_codes: Optional[list] = None
+        stock_codes: Optional[list] = None,
+        end_date: Optional[str] = None
     ) -> pd.DataFrame:
         """
         8개 기간 Z-Score를 최적화하여 계산
@@ -48,6 +49,7 @@ class OptimizedMultiPeriodCalculator:
         Args:
             periods_dict: {기간명: 영업일수} 예: {'1D': 1, '1W': 5, ...}
             stock_codes: 특정 종목만 (None이면 전체)
+            end_date: 종료일 (YYYY-MM-DD, None이면 최신까지)
 
         Returns:
             pd.DataFrame:
@@ -57,7 +59,7 @@ class OptimizedMultiPeriodCalculator:
         Example:
             >>> periods = {'1D': 1, '1W': 5, '1M': 21}
             >>> optimizer = OptimizedMultiPeriodCalculator(normalizer)
-            >>> df = optimizer.calculate_multi_period_zscores(periods)
+            >>> df = optimizer.calculate_multi_period_zscores(periods, end_date='2025-01-03')
             >>> print(df.head())
                         1D      1W      1M
             stock_code
@@ -68,11 +70,11 @@ class OptimizedMultiPeriodCalculator:
 
         # Step 1: Sff 캐싱 (1회만 실행)
         if self.enable_caching and self._sff_cache is None:
-            self._sff_cache = self.normalizer._get_sff_data(stock_codes)
+            self._sff_cache = self.normalizer._get_sff_data(stock_codes, end_date=end_date)
             print(f"[OK] Cached {len(self._sff_cache)} records")
         elif not self.enable_caching:
             # 캐싱 비활성화 시 매번 로드
-            self._sff_cache = self.normalizer._get_sff_data(stock_codes)
+            self._sff_cache = self.normalizer._get_sff_data(stock_codes, end_date=end_date)
 
         # Step 2: 각 기간별 Z-Score 계산 (벡터화 또는 병렬)
         print("[INFO] Calculating Z-Scores for all periods...")

@@ -287,7 +287,8 @@ class SupplyNormalizer:
 
         return summary
 
-    def _get_sff_data(self, stock_codes: Optional[list] = None) -> pd.DataFrame:
+    def _get_sff_data(self, stock_codes: Optional[list] = None,
+                     end_date: Optional[str] = None) -> pd.DataFrame:
         """
         [Stage 2] Sff 데이터 추출 메서드 (캐싱용)
 
@@ -296,6 +297,7 @@ class SupplyNormalizer:
 
         Args:
             stock_codes: 종목 코드 리스트 (None이면 전체)
+            end_date: 종료일 (YYYY-MM-DD, None이면 최신까지)
 
         Returns:
             pd.DataFrame: (trade_date, stock_code, combined_sff)
@@ -317,6 +319,9 @@ class SupplyNormalizer:
             # 검증된 종목 코드를 안전하게 문자열로 결합
             codes_str = "','".join(stock_codes)
             where_clauses.append(f"stock_code IN ('{codes_str}')")
+
+        if end_date:
+            where_clauses.append(f"trade_date <= '{end_date}'")
 
         where_sql = "WHERE " + " AND ".join(where_clauses)
 

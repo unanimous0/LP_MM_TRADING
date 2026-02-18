@@ -50,12 +50,14 @@ class SignalDetector:
             'sync_window': 20,    # 최근 20일간 동조율 계산
         }
 
-    def _load_supply_data(self, stock_codes: Optional[List[str]] = None) -> pd.DataFrame:
+    def _load_supply_data(self, stock_codes: Optional[List[str]] = None,
+                          end_date: Optional[str] = None) -> pd.DataFrame:
         """
         수급 데이터 로드 (내부 헬퍼 메서드)
 
         Args:
             stock_codes: 종목 코드 리스트 (None이면 전체)
+            end_date: 종료일 (YYYY-MM-DD, None이면 최신까지)
 
         Returns:
             pd.DataFrame: (trade_date, stock_code, foreign_net_amount, institution_net_amount)
@@ -73,6 +75,8 @@ class SignalDetector:
         if stock_codes:
             codes_str = "','".join(stock_codes)
             where_clauses.append(f"stock_code IN ('{codes_str}')")
+        if end_date:
+            where_clauses.append(f"trade_date <= '{end_date}'")
 
         where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
 
@@ -96,7 +100,8 @@ class SignalDetector:
 
         return df
 
-    def detect_ma_crossover(self, stock_codes: Optional[List[str]] = None) -> pd.DataFrame:
+    def detect_ma_crossover(self, stock_codes: Optional[List[str]] = None,
+                           end_date: Optional[str] = None) -> pd.DataFrame:
         """
         MA 골든크로스 탐지
 
@@ -106,6 +111,7 @@ class SignalDetector:
 
         Args:
             stock_codes: 종목 코드 리스트 (None이면 전체)
+            end_date: 종료일 (YYYY-MM-DD, None이면 최신까지)
 
         Returns:
             pd.DataFrame: 골든크로스 종목
@@ -121,7 +127,7 @@ class SignalDetector:
             >>> df_cross = detector.detect_ma_crossover()
             >>> print(df_cross[['stock_code', 'ma_short', 'ma_long']])
         """
-        df = self._load_supply_data(stock_codes)
+        df = self._load_supply_data(stock_codes, end_date=end_date)
 
         if df.empty:
             return pd.DataFrame(columns=[
@@ -174,7 +180,8 @@ class SignalDetector:
 
         return pd.DataFrame(results)
 
-    def calculate_acceleration(self, stock_codes: Optional[List[str]] = None) -> pd.DataFrame:
+    def calculate_acceleration(self, stock_codes: Optional[List[str]] = None,
+                              end_date: Optional[str] = None) -> pd.DataFrame:
         """
         수급 가속도 계산
 
@@ -189,6 +196,7 @@ class SignalDetector:
 
         Args:
             stock_codes: 종목 코드 리스트 (None이면 전체)
+            end_date: 종료일 (YYYY-MM-DD, None이면 최신까지)
 
         Returns:
             pd.DataFrame: 가속도 결과
@@ -202,7 +210,7 @@ class SignalDetector:
             >>> df_accel = detector.calculate_acceleration()
             >>> df_hot = df_accel[df_accel['acceleration'] > 1.5]
         """
-        df = self._load_supply_data(stock_codes)
+        df = self._load_supply_data(stock_codes, end_date=end_date)
 
         if df.empty:
             return pd.DataFrame(columns=[
@@ -256,7 +264,8 @@ class SignalDetector:
 
         return df_result
 
-    def calculate_sync_rate(self, stock_codes: Optional[List[str]] = None) -> pd.DataFrame:
+    def calculate_sync_rate(self, stock_codes: Optional[List[str]] = None,
+                           end_date: Optional[str] = None) -> pd.DataFrame:
         """
         외인-기관 동조율 계산
 
@@ -271,6 +280,7 @@ class SignalDetector:
 
         Args:
             stock_codes: 종목 코드 리스트 (None이면 전체)
+            end_date: 종료일 (YYYY-MM-DD, None이면 최신까지)
 
         Returns:
             pd.DataFrame: 동조율 결과
@@ -284,7 +294,7 @@ class SignalDetector:
             >>> df_sync = detector.calculate_sync_rate()
             >>> df_strong = df_sync[df_sync['sync_rate'] > 70]
         """
-        df = self._load_supply_data(stock_codes)
+        df = self._load_supply_data(stock_codes, end_date=end_date)
 
         if df.empty:
             return pd.DataFrame(columns=[
@@ -331,12 +341,14 @@ class SignalDetector:
 
         return pd.DataFrame(results)
 
-    def detect_all_signals(self, stock_codes: Optional[List[str]] = None) -> pd.DataFrame:
+    def detect_all_signals(self, stock_codes: Optional[List[str]] = None,
+                          end_date: Optional[str] = None) -> pd.DataFrame:
         """
         모든 시그널 통합 탐지 (메인 메서드)
 
         Args:
             stock_codes: 종목 코드 리스트 (None이면 전체)
+            end_date: 종료일 (YYYY-MM-DD, None이면 최신까지)
 
         Returns:
             pd.DataFrame: 통합 시그널 결과
@@ -350,21 +362,21 @@ class SignalDetector:
 
         Example:
             >>> detector = SignalDetector(conn)
-            >>> df_signals = detector.detect_all_signals()
+            >>> df_signals = detector.detect_all_signals(end_date='2025-01-03')
             >>> print(df_signals[['stock_code', 'signal_count', 'signal_list']])
         """
         # 1. MA 골든크로스
-        df_ma = self.detect_ma_crossover(stock_codes)
+        df_ma = self.detect_ma_crossover(stock_codes, end_date=end_date)
         df_ma = df_ma[['stock_code', 'ma_diff', 'is_golden_cross']].rename(
             columns={'is_golden_cross': 'ma_cross'}
         )
 
         # 2. 수급 가속도
-        df_accel = self.calculate_acceleration(stock_codes)
+        df_accel = self.calculate_acceleration(stock_codes, end_date=end_date)
         df_accel = df_accel[['stock_code', 'acceleration']]
 
         # 3. 동조율
-        df_sync = self.calculate_sync_rate(stock_codes)
+        df_sync = self.calculate_sync_rate(stock_codes, end_date=end_date)
         df_sync = df_sync[['stock_code', 'sync_rate']]
 
         # 4. 통합 (outer join으로 전체 종목 유지)
