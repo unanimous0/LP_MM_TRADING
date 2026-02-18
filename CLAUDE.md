@@ -1,8 +1,8 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- **현재 작업**: Stage 4 Week 3 완료! ✅ (77개 테스트, 74개 통과)
-- **마지막 업데이트**: 2026-02-18
+- **현재 작업**: 외국인 중심 조건부 Sff 적용 ✅ + Stage 4 Week 3 완료
+- **마지막 업데이트**: 2026-02-19
 - **다음 시작점**: Stage 4 Week 4 - ParameterOptimizer (Grid Search)
 - **시각화**: matplotlib 차트 5종 완성 (PNG/PDF 리포트)
 - **향후 계획**: Week 4 (최적화) → Week 5 (성능 개선) → Option 2 (Plotly/HTML)
@@ -19,6 +19,8 @@
 
 **Stage 1: 데이터 정규화** ✅
 - Sff/Z-Score 정규화 완료
+- **외국인 중심 조건부 Sff**: 같은 방향 → 외국인+기관×0.3, 반대 방향 → 외국인만
+- **조건부 Z-Score 적용**: 부호 전환 시 과잉 반응 방지 (작은 매도 → 큰 매도 오인 해결)
 - 이상 수급 탐지 (20건 탐지, 15초 소요)
 - 섹터 정보 통합 (97.9% 커버리지)
 
@@ -106,8 +108,8 @@ python scripts/crawlers/crawl_all_data.py --start 2024-01-01
 
 **목표**: 과거 데이터로 패턴 분류 전략의 수익률 검증 및 최적화 (롱/숏 전략 지원)
 
-**현재 진행**: Week 1 완료 (27개 테스트 100% 통과)
-**다음 단계**: Week 2 - PerformanceMetrics 구현 → Week 2.5 - 순매도 탐지 추가
+**현재 진행**: Week 1~3 + Week 2.5 완료 (179개 테스트, 176개 통과)
+**다음 단계**: Week 4 - ParameterOptimizer (Grid Search)
 **예상 기간**: 6주 (Week 1~5 + Week 2.5 순매도 탐지)
 
 ---
@@ -132,7 +134,7 @@ python scripts/crawlers/crawl_all_data.py --start 2024-01-01
 - **테스트**: 21개 (100% 통과)
 - **상세**: [Progress History] → 2026-02-17 Week 2
 
-**⭐ Week 2.5: 순매도 탐지 & 롱/숏 전략** (1주 예상)
+**✅ Week 2.5: 순매도 탐지 & 롱/숏 전략** (완료)
 
 **현재 상황** (순매수만 지원):
 ```
@@ -178,7 +180,7 @@ python scripts/crawlers/crawl_all_data.py --start 2024-01-01
 
 - **테스트**: 20개 예상
 
-**🔜 Week 3: 시각화 + CSV 저장 + CLI** (1주 예상)
+**✅ Week 3: 시각화 + CSV 저장 + CLI** (완료)
 
 **목표**: matplotlib 기반 백테스트 결과 시각화 및 리포트 생성
 
@@ -234,6 +236,8 @@ python backtest_runner.py --plot --save-pdf output/report.pdf
 
 **🔜 Week 4: ParameterOptimizer** (1주 예상)
 - Grid Search (최적 파라미터 탐색)
+  - 백테스트 파라미터: min_score, min_signals, target_return, stop_loss, max_hold_days
+  - **기관 가중치 최적화**: institution_weight [0.0, 0.1, 0.2, 0.3, 0.5] (Stage 1 Sff 공식의 기관 반영 비율)
 - 병렬 처리 (선택)
 - CLI 통합 (`--optimize`)
 - **테스트**: 5개 예상
@@ -244,7 +248,7 @@ python backtest_runner.py --plot --save-pdf output/report.pdf
 - 미래 데이터 누수 완전 차단
 - **테스트**: 10개 예상
 
-**진행률**: 153/185 (83%) - 105 (Stage 1-3) + 27 (Week 1) + 21 (Week 2)
+**진행률**: 179/200 (90%) - 105 (Stage 1-3) + 27 (Week 1) + 21 (Week 2) + 18 (Week 2.5) + 11 (Week 3) - 3 기존실패
 
 ---
 
@@ -427,10 +431,15 @@ LP_MM_TRADING/
 │   │   ├── schema.py
 │   │   └── connection.py
 │   ├── analyzer/                  # 분석 모듈
-│   │   ├── normalizer.py          # Sff/Z-Score 계산
-│   │   ├── pattern_classifier.py  # 패턴 분류 (Stage 3) ✨
-│   │   ├── signal_detector.py     # 시그널 탐지 (Stage 3) ✨
-│   │   └── integrated_report.py   # 통합 리포트 (Stage 3) ✨
+│   │   ├── normalizer.py          # Sff/Z-Score 계산 (외국인 중심 조건부)
+│   │   ├── pattern_classifier.py  # 패턴 분류 (Stage 3)
+│   │   ├── signal_detector.py     # 시그널 탐지 (Stage 3)
+│   │   └── integrated_report.py   # 통합 리포트 (Stage 3)
+│   ├── backtesting/               # 백테스트 모듈 (Stage 4) ✨
+│   │   ├── engine.py              # BacktestEngine (롤링 윈도우)
+│   │   ├── portfolio.py           # Trade, Position, Portfolio
+│   │   ├── metrics.py             # PerformanceMetrics
+│   │   └── visualizer.py          # 차트 5종 (matplotlib)
 │   ├── visualizer/                # 시각화 모듈
 │   │   ├── performance_optimizer.py
 │   │   └── heatmap_renderer.py
@@ -448,14 +457,19 @@ LP_MM_TRADING/
 │   └── loaders/
 │       ├── load_initial_data.py
 │       └── load_daily_data.py
-└── tests/                         # 테스트 (105개, Stage 1~3, 100% 통과)
+└── tests/                         # 테스트 (179개 통과 / 182개)
     ├── test_config.py
     ├── test_normalizer.py
     ├── test_performance_optimizer.py
     ├── test_utils.py
-    ├── test_pattern_classifier.py       # Stage 3 테스트 ✨
-    ├── test_signal_detector.py          # Stage 3 테스트 ✨
-    └── test_integrated_report.py        # Stage 3 테스트 ✨
+    ├── test_pattern_classifier.py       # Stage 3 테스트
+    ├── test_signal_detector.py          # Stage 3 테스트
+    ├── test_integrated_report.py        # Stage 3 테스트
+    └── backtesting/                     # Stage 4 테스트 ✨
+        ├── test_engine.py
+        ├── test_portfolio.py
+        ├── test_metrics.py
+        └── test_visualizer.py
 ```
 
 ---
@@ -498,12 +512,17 @@ LP_MM_TRADING/
 ## [방법론: 수급 레짐 스캐너]
 
 ### ① Stage 1: 데이터 정규화
-- Sff: 유통물량 대비 순매수 강도
-- Z-Score: 변동성 보정 수급
+- Sff: 유통물량 대비 순매수 강도 (외국인 중심)
+  - 외국인/기관 같은 방향: `foreign_sff + institution_sff × 0.3`
+  - 반대 방향: `foreign_sff`만 사용 (기관이 외국인 신호를 상쇄하지 않음)
+- Z-Score: 변동성 보정 수급 (조건부: 부호 전환 시 `today/std`만 사용)
 
 ### ② Stage 2: 시공간 매트릭스
 - 6개 기간(1W~2Y) 히트맵
 - 4가지 정렬 모드 (투자 스타일별)
+- **조건부 Z-Score**: 부호 전환 시 과잉 반응 방지
+  - 같은 방향(today·mean > 0): `Z = (today - mean) / std` (기존, 폭발 감지)
+  - 방향 전환(today·mean ≤ 0): `Z = today / std` (크기만 평가, 증폭 방지)
 
 ### ③ Stage 3: 패턴 분류 & 시그널 통합
 - **패턴 분류**: 3개 바구니 (모멘텀형/지속형/전환형)
@@ -518,6 +537,73 @@ LP_MM_TRADING/
 ---
 
 ## [Progress History]
+
+### 2026-02-19 (외국인 중심 조건부 Sff 적용)
+
+**목표**: 외국인 수급 중심 분석으로 전환 (기관은 동반 여부만 반영)
+
+**문제**:
+- 기존: `combined_sff = foreign_sff + institution_sff` (1:1 동등 합산)
+- 외국인 +1000억, 기관 -1050억 → combined = -50 (매도로 판단) ❌
+- 실제: 외국인 강한 매수 → 유의미한 신호
+- 기관만 강한 매수(외국인 미미)도 강한 신호로 잡히는 문제
+
+**해결: 외국인 중심 조건부 합산**:
+```python
+same_direction = (foreign_sff * institution_sff) > 0
+combined_sff = where(
+    same_direction,
+    foreign_sff + institution_sff * 0.3,  # 동반: 기관 30%만 반영
+    foreign_sff                           # 반대: 외국인만
+)
+```
+
+**변경 파일**:
+- `src/analyzer/normalizer.py`: calculate_sff(), _get_sff_data() 2곳
+- `src/analyzer/signal_detector.py`: calculate_acceleration() 1곳
+
+**영향 범위**: Stage 1 근원 데이터 변경 → Stage 2~4 자동 반영 (코드 변경 없음)
+- MA크로스: 이미 외국인만 사용 (변경 불필요)
+- 동조율: 이미 외국인 AND 기관 동반 측정 (변경 불필요)
+- 가속도: 동일 조건부 로직 적용
+
+**테스트**: 179개 통과 (기존 3개 실패 유지, 새로운 실패 없음)
+
+---
+
+### 2026-02-18 (Z-Score 조건부 공식 적용)
+
+**목표**: 부호 전환 시 Z-Score 과잉 반응 문제 해결
+
+**문제**:
+- 기존 Z-Score: `Z = (today - mean) / std`
+- 매수세(mean=+0.488) 중 작은 매도(today=-0.038) 발생 시:
+  - Z = (-0.038 - 0.488) / 0.436 = **-1.21** (큰 매도 신호로 오인)
+- 원인: today와 mean의 부호가 다르면 빼기 연산이 차이를 증폭
+- 영향: 반대 수급 청산(reverse_signal)에서 잘못된 청산 발생
+  - 예: 주성엔지니어링 3/18 매수 → 3/25 잘못된 청산 (패턴점수 75→60점 초과)
+
+**해결: 조건부 Z-Score**:
+```python
+same_sign = (today * mean) > 0
+Z = (today - mean) / std   # 같은 방향: 기존 (폭발 감지 유지)
+Z = today / std             # 방향 전환: 크기만 평가 (과잉 반응 방지)
+```
+
+**검증 케이스**:
+- 폭발 매수(today=20, mean=12): 같은 방향 → Z=1.79 ✓ (폭발 감지)
+- 작은 매도(today=-0.038, mean=+0.488): 방향 전환 → Z=-0.087 ✓ (무시)
+- 큰 매도 시작(today=-2.0, mean=+0.488): 방향 전환 → Z=-4.59 ✓ (강한 매도)
+- 연속 매도 중(today=-0.7, mean=-0.58): 같은 방향 → Z=-0.64 ✓ (기존 동일)
+
+**변경 파일**:
+- `src/visualizer/performance_optimizer.py:139-145` (Z-Score 계산 조건부 변경)
+
+**영향 범위**:
+- Stage 2 Z-Score 계산만 변경, 나머지 파이프라인(Stage 3~4) 변경 없음
+- 기존 테스트 165개 통과 (2개 기존 실패는 Z-Score 변경과 무관)
+
+---
 
 ### 2026-02-17 (Stage 4 Week 2: PerformanceMetrics)
 
@@ -814,5 +900,5 @@ tests/backtesting/
 
 ---
 
-**프로젝트 버전**: v3.1 (Stage 3 완료 + 버그 수정)
-**마지막 업데이트**: 2026-02-13
+**프로젝트 버전**: v4.3 (Stage 4 Week 3 완료 + 외국인 중심 Sff)
+**마지막 업데이트**: 2026-02-19

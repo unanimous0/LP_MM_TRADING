@@ -219,8 +219,13 @@ class SignalDetector:
 
         window = self.config['acceleration_window']
 
-        # 외국인 + 기관 합산
-        df['combined_net'] = df['foreign_net_amount'] + df['institution_net_amount']
+        # 외국인 중심 조건부 합산 (Sff와 동일 로직)
+        same_direction = (df['foreign_net_amount'] * df['institution_net_amount']) > 0
+        df['combined_net'] = np.where(
+            same_direction,
+            df['foreign_net_amount'] + df['institution_net_amount'] * 0.3,
+            df['foreign_net_amount']
+        )
 
         results = []
 

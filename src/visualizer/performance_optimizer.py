@@ -136,8 +136,15 @@ class OptimizedMultiPeriodCalculator:
             lambda x: x.rolling(window=lookback_days, min_periods=max(1, lookback_days // 2)).std()
         )
 
-        # Z-Score 계산
-        df['zscore'] = (df['combined_sff'] - df['rolling_mean']) / df['rolling_std']
+        # Z-Score 계산 (조건부: 부호 전환 시 과잉 반응 방지)
+        # 같은 방향(today와 mean 부호 동일): 기존 공식 (폭발 감지)
+        # 방향 전환(부호 다름): today/std만 사용 (작은 매도가 큰 매도로 증폭되는 것 방지)
+        same_sign = (df['combined_sff'] * df['rolling_mean']) > 0
+        df['zscore'] = np.where(
+            same_sign,
+            (df['combined_sff'] - df['rolling_mean']) / df['rolling_std'],
+            df['combined_sff'] / df['rolling_std']
+        )
 
         # inf/nan 처리 (std=0인 경우)
         df['zscore'] = df['zscore'].replace([np.inf, -np.inf], np.nan)

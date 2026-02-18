@@ -112,7 +112,16 @@ class SupplyNormalizer:
         # Sff 계산 (백분율)
         df['foreign_sff'] = (df['foreign_net_amount'] / df['free_float_mcap']) * 100
         df['institution_sff'] = (df['institution_net_amount'] / df['free_float_mcap']) * 100
-        df['combined_sff'] = df['foreign_sff'] + df['institution_sff']
+
+        # 외국인 중심 조건부 합산:
+        # 같은 방향 → 외국인 + 기관×0.3 (동반 보너스)
+        # 반대 방향 → 외국인만 (기관이 외국인 신호를 상쇄하지 않음)
+        same_direction = (df['foreign_sff'] * df['institution_sff']) > 0
+        df['combined_sff'] = np.where(
+            same_direction,
+            df['foreign_sff'] + df['institution_sff'] * 0.3,
+            df['foreign_sff']
+        )
 
         # inf/nan 처리 (division by zero)
         df = df.replace([np.inf, -np.inf], np.nan)
@@ -346,10 +355,16 @@ class SupplyNormalizer:
             print("[WARN] No data found for Sff calculation")
             return pd.DataFrame(columns=['trade_date', 'stock_code', 'combined_sff'])
 
-        # Sff 계산
+        # Sff 계산 (외국인 중심 조건부 합산)
         df['foreign_sff'] = (df['foreign_net_amount'] / df['free_float_mcap']) * 100
         df['institution_sff'] = (df['institution_net_amount'] / df['free_float_mcap']) * 100
-        df['combined_sff'] = df['foreign_sff'] + df['institution_sff']
+
+        same_direction = (df['foreign_sff'] * df['institution_sff']) > 0
+        df['combined_sff'] = np.where(
+            same_direction,
+            df['foreign_sff'] + df['institution_sff'] * 0.3,
+            df['foreign_sff']
+        )
 
         # inf/nan 처리
         df = df.replace([np.inf, -np.inf], np.nan)
