@@ -58,3 +58,4 @@ output/*.csv
 # Excel output files
 output/*.xlsx
 output/~$*.xlsx
+output/charts/
