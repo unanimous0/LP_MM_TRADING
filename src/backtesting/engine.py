@@ -235,9 +235,11 @@ class BacktestEngine:
 
         return result
 
-    def _check_exit_conditions(self, current_date: str) -> List[Trade]:
+    def _check_exit_conditions_price(self, current_date: str) -> List[Trade]:
         """
-        청산 조건 확인 (목표 수익률, 손절, 반대 수급, 시간 손절)
+        가격 기준 청산 확인 (목표 수익률, 손절, 시간 손절)
+
+        당일 종가로 즉시 청산
 
         Args:
             current_date: 현재 거래일
@@ -246,75 +248,94 @@ class BacktestEngine:
             청산된 Trade 리스트
         """
         trades = []
-
-        # 보유 포지션 복사 (iteration 중 수정 방지)
         positions_to_check = list(self.portfolio.positions.items())
 
-        # 반대 수급 확인을 위한 Stage 1-3 실행 (한 번만)
-        reverse_signals_cache = {}  # {direction: DataFrame}
-
         for stock_code, position in positions_to_check:
-            # 현재 가격 조회 (종가)
             current_price = self.get_price(stock_code, current_date)
             if current_price is None:
-                continue  # 가격 없으면 skip (휴장 등)
+                continue
 
-            # 수익률 계산 (순수 가격 변화율, 비용 제외)
+            # 수익률 계산 (순수 가격 변화율)
             if position.direction == 'long':
                 return_pct = (current_price / position.entry_price - 1)
-            else:  # short
+            else:
                 return_pct = (position.entry_price / current_price - 1)
 
-            # 보유 기간
             hold_days = position.hold_days(current_date)
-
-            # 청산 조건 확인
             exit_reason = None
 
-            # 1. 목표 수익률 달성
+            # 1. 목표 수익률 달성 (당일 청산)
             if return_pct >= self.config.target_return:
                 exit_reason = 'target'
 
-            # 2. 가격 손절
+            # 2. 가격 손절 (당일 청산)
             elif return_pct <= self.config.stop_loss:
                 exit_reason = 'stop_loss'
 
-            # 3. 반대 수급 손절
-            elif self.config.reverse_signal_threshold > 0:
-                # 반대 방향 확인
-                reverse_direction = 'short' if position.direction == 'long' else 'long'
-
-                # 캐시 확인
-                if reverse_direction not in reverse_signals_cache:
-                    reverse_signals_cache[reverse_direction] = self._scan_signals_on_date(
-                        current_date, direction=reverse_direction
-                    )
-
-                reverse_signals = reverse_signals_cache[reverse_direction]
-
-                # 해당 종목의 반대 수급 점수 확인
-                if not reverse_signals.empty:
-                    stock_signal = reverse_signals[reverse_signals['stock_code'] == stock_code]
-
-                    if not stock_signal.empty:
-                        reverse_pattern_score = stock_signal.iloc[0]['score']
-                        reverse_signal_count = stock_signal.iloc[0]['signal_count']
-                        reverse_final_score = reverse_pattern_score + (reverse_signal_count * 5)
-
-                        if reverse_final_score >= self.config.reverse_signal_threshold:
-                            exit_reason = 'reverse_signal'  # 반대 수급 발생
-
-            # 4. 시간 손절
-            if exit_reason is None and hold_days >= self.config.max_hold_days:
+            # 3. 시간 손절 (당일 청산)
+            elif hold_days >= self.config.max_hold_days:
                 exit_reason = 'time'
 
-            # 청산 실행
+            # 청산 실행 (당일 종가)
             if exit_reason:
                 trade = self.portfolio.exit_position(
                     stock_code, current_date, current_price, exit_reason
                 )
                 if trade:
                     trades.append(trade)
+
+        return trades
+
+    def _check_exit_conditions_reverse(self, signal_date: str, exit_date: str) -> List[Trade]:
+        """
+        반대 수급 청산 확인
+
+        signal_date에 반대 수급 감지 → exit_date 종가로 청산
+        (진입과 동일한 타이밍: 시그널 다음 날 청산)
+
+        Args:
+            signal_date: 반대 수급 시그널 스캔일
+            exit_date: 청산일 (signal_date 다음 거래일)
+
+        Returns:
+            청산된 Trade 리스트
+        """
+        trades = []
+
+        if self.config.reverse_signal_threshold <= 0:
+            return trades  # 반대 수급 손절 비활성화
+
+        positions_to_check = list(self.portfolio.positions.items())
+        reverse_signals_cache = {}
+
+        for stock_code, position in positions_to_check:
+            # signal_date에 반대 수급 확인
+            reverse_direction = 'short' if position.direction == 'long' else 'long'
+
+            if reverse_direction not in reverse_signals_cache:
+                reverse_signals_cache[reverse_direction] = self._scan_signals_on_date(
+                    signal_date, direction=reverse_direction
+                )
+
+            reverse_signals = reverse_signals_cache[reverse_direction]
+
+            if not reverse_signals.empty:
+                stock_signal = reverse_signals[reverse_signals['stock_code'] == stock_code]
+
+                if not stock_signal.empty:
+                    reverse_pattern_score = stock_signal.iloc[0]['score']
+                    reverse_signal_count = stock_signal.iloc[0]['signal_count']
+                    reverse_final_score = reverse_pattern_score + (reverse_signal_count * 5)
+
+                    # 반대 수급 조건 충족 시 exit_date 종가로 청산
+                    if reverse_final_score >= self.config.reverse_signal_threshold:
+                        exit_price = self.get_price(stock_code, exit_date)
+                        if exit_price:
+                            trade = self.portfolio.exit_position(
+                                stock_code, exit_date, exit_price, 'reverse_signal'
+                            )
+                            if trade:
+                                trades.append(trade)
 
         return trades
 
@@ -434,8 +455,13 @@ class BacktestEngine:
 
         # 롤링 윈도우 시뮬레이션
         for i, trade_date in enumerate(trading_dates):
-            # 1. 청산 체크 (목표/손절/시간)
-            self._check_exit_conditions(trade_date)
+            # 1-1. 가격 기준 청산 (목표가/손절가/시간 손절) - 당일 종가
+            self._check_exit_conditions_price(trade_date)
+
+            # 1-2. 반대 수급 청산 - 전날 시그널 감지 → 오늘 종가 청산
+            if i > 0:
+                prev_date = trading_dates[i - 1]
+                self._check_exit_conditions_reverse(prev_date, trade_date)
 
             # 2. Stage 1-3 실행 (미래 데이터 차단!)
             # strategy별로 direction 설정
