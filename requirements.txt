@@ -12,3 +12,4 @@ tqdm>=4.66.0  # 진행률 표시
 # 시각화 관련 (Stage 2)
 matplotlib>=3.5.0  # 히트맵 렌더링
 seaborn>=0.12.0  # 색상 스케일
+plotly>=5.0.0  # 인터랙티브 차트 (Option 2)

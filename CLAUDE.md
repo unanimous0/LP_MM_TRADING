@@ -1,9 +1,9 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- **현재 작업**: Stage 4 Week 5 완료 - Walk-Forward Analysis + 성능 최적화 ✅
+- **현재 작업**: Option 2 완료 - Plotly HTML 인터랙티브 리포트 ✅
 - **마지막 업데이트**: 2026-02-19
-- **다음 시작점**: Stage 5 또는 Option 2 (Plotly/HTML 인터랙티브 차트)
+- **다음 시작점**: Stage 5-1 (Streamlit 웹 대시보드)
 - **시각화**: matplotlib 차트 5종 완성 (PNG/PDF 리포트)
 - **향후 계획**: Option 2 (Plotly/HTML) → Stage 5 (Streamlit 웹 대시보드)
 - **현재 브랜치**: main
@@ -1004,5 +1004,5 @@ tests/backtesting/
 
 ---
 
-**프로젝트 버전**: v4.5 (Stage 4 Week 5 완료 - Walk-Forward Analysis + 성능 최적화)
+**프로젝트 버전**: v4.6 (Option 2 완료 - Plotly HTML 인터랙티브 리포트)
 **마지막 업데이트**: 2026-02-19

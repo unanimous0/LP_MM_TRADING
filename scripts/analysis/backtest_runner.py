@@ -289,11 +289,16 @@ def main():
     parser.add_argument('--save-csv', help='거래 내역 CSV 저장 경로')
     parser.add_argument('--quiet', action='store_true', help='진행 상황 출력 안함')
 
-    # 시각화 옵션 (Week 3)
+    # 시각화 옵션 (Week 3 - matplotlib)
     parser.add_argument('--plot', action='store_true', help='차트 생성 및 화면 표시')
     parser.add_argument('--save-dir', help='차트 PNG 저장 디렉토리')
     parser.add_argument('--save-pdf', help='차트 PDF 리포트 저장 경로')
     parser.add_argument('--save-daily-values', help='일별 포트폴리오 가치 CSV 저장 경로')
+
+    # 인터랙티브 시각화 옵션 (Option 2 - Plotly)
+    parser.add_argument('--save-html', help='HTML 인터랙티브 리포트 저장 경로')
+    parser.add_argument('--html-cdn', action='store_true',
+                        help='HTML에 CDN 방식으로 Plotly.js 로드 (파일 경량, 인터넷 필요)')
 
     # 최적화 옵션 (Week 4)
     parser.add_argument('--optimize', action='store_true', help='Grid Search 파라미터 최적화 실행')
@@ -368,7 +373,24 @@ def main():
         result['daily_values'].to_csv(args.save_daily_values, index=False, encoding='utf-8-sig')
         print(f"✅ 일별 포트폴리오 가치 저장: {args.save_daily_values}")
 
-    # 시각화 (Week 3)
+    # 인터랙티브 HTML 리포트 (Option 2 - Plotly)
+    if args.save_html:
+        from src.backtesting.plotly_visualizer import PlotlyVisualizer
+        print("\n" + "="*80)
+        print("📊 Plotly HTML 리포트 생성 중...")
+        print("="*80)
+        pv = PlotlyVisualizer(
+            trades=result['trades'],
+            daily_values=result['daily_values'],
+            initial_capital=config.initial_capital,
+        )
+        pv.create_dashboard(
+            save_html=args.save_html,
+            show=False,
+            cdn=args.html_cdn,
+        )
+
+    # 시각화 (Week 3 - matplotlib)
     if args.plot or args.save_dir or args.save_pdf:
         if not result['trades']:
             print("\n⚠️  거래가 없어서 차트를 생성할 수 없습니다.")
