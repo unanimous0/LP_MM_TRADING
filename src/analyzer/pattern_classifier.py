@@ -132,23 +132,23 @@ class PatternClassifier:
         # 1. Recent: (1W+1M)/2
         df['recent'] = (df['1W'] + df['1M']) / 2
 
-        # 2. Momentum: 1W-2Y
-        df['momentum'] = df['1W'] - df['2Y']
+        # 2. Momentum: 1W - 가장 긴 유효 기간 (2Y→1Y→6M→3M→1M 순서 폴백)
+        # 백테스트 초기처럼 DB 데이터 부족 시 긴 기간(1Y/2Y)이 NaN일 수 있으므로 폴백 적용
+        _longest = (df['2Y']
+                    .fillna(df['1Y'])
+                    .fillna(df['6M'])
+                    .fillna(df['3M'])
+                    .fillna(df['1M']))
+        df['momentum'] = df['1W'] - _longest
 
-        # 3. Weighted: 가중 평균 (최근 기간 높은 가중치)
+        # 3. Weighted: NaN-robust 가중 평균 (데이터 없는 기간 자동 제외)
+        # 백테스트 초기에 1Y/2Y가 NaN이어도 사용 가능한 기간으로 계산
         weights = {'1W': 3.0, '1M': 2.5, '3M': 2.0, '6M': 1.5, '1Y': 1.0, '2Y': 0.5}
-        total_weight = sum(weights.values())
+        _w_num = sum(df[p].fillna(0) * w for p, w in weights.items())
+        _w_den = sum(df[p].notna().astype(float) * w for p, w in weights.items())
+        df['weighted'] = np.where(_w_den > 0, _w_num / _w_den, np.nan)
 
-        df['weighted'] = (
-            df['1W'] * weights['1W'] +
-            df['1M'] * weights['1M'] +
-            df['3M'] * weights['3M'] +
-            df['6M'] * weights['6M'] +
-            df['1Y'] * weights['1Y'] +
-            df['2Y'] * weights['2Y']
-        ) / total_weight
-
-        # 4. Average: 단순 평균
+        # 4. Average: 단순 평균 (skipna=True, pandas 기본값)
         df['average'] = df[required_cols].mean(axis=1)
 
         return df
@@ -216,20 +216,28 @@ class PatternClassifier:
         """
         weights = self.config['score_weights']
 
-        # 가중 합계 계산
-        weighted_sum = (
-            row['recent'] * weights['recent'] +
-            row['momentum'] * weights['momentum'] +
-            row['weighted'] * weights['weighted'] +
-            row['average'] * weights['average']
-        )
+        # NaN-robust 가중 합계 계산 (데이터 부족 기간 대응)
+        components = [
+            (row['recent'],   weights['recent']),
+            (row['momentum'], weights['momentum']),
+            (row['weighted'], weights['weighted']),
+            (row['average'],  weights['average']),
+        ]
+        valid = [(v, w) for v, w in components if pd.notna(v)]
+        if not valid:
+            return np.nan
+
+        # 유효 가중치 합계로 정규화하여 원래 스케일 유지
+        original_total_w = sum(w for _, w in components)
+        valid_total_w = sum(w for _, w in valid)
+        weighted_sum = sum(v * w for v, w in valid) / valid_total_w * original_total_w
 
         # Z-Score 범위 [-3, 3] → [0, 100] 변환
         # Z=3일 때 100점, Z=0일 때 50점, Z=-3일 때 0점
         score = ((weighted_sum + 3) / 6) * 100
 
         # 클리핑 (0~100 범위)
-        return np.clip(score, 0, 100)
+        return float(np.clip(score, 0, 100))
 
     def classify_all(self, zscore_matrix: pd.DataFrame,
                      direction: str = 'long') -> pd.DataFrame:
