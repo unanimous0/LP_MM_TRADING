@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 import sqlite3
 
 from .portfolio import Portfolio, Trade, Position
+from .precomputer import BacktestPrecomputer
 from src.analyzer.normalizer import SupplyNormalizer
 from src.visualizer.performance_optimizer import OptimizedMultiPeriodCalculator
 from src.analyzer.pattern_classifier import PatternClassifier
@@ -112,6 +113,9 @@ class BacktestEngine:
             max_positions=self.config.max_positions
         )
 
+        # 사전 계산 결과 (preload_data=True일 때 활성화)
+        self._precomputed = None  # PrecomputeResult or None
+
         # 백테스트 결과
         self.daily_values: List[Dict] = []  # 일별 포트폴리오 가치
 
@@ -150,6 +154,13 @@ class BacktestEngine:
             DB에 시가 데이터가 없으므로 종가만 사용
             진입/청산 모두 당일 종가로 계산
         """
+        # 사전 계산 데이터 우선 사용 (O(1) lookup)
+        if self._precomputed is not None:
+            price = self._precomputed.price_lookup.get((stock_code, trade_date))
+            if price is not None:
+                return float(price)
+            return None
+
         query = """
         SELECT close_price
         FROM investor_flows
@@ -165,6 +176,10 @@ class BacktestEngine:
 
     def get_stock_name(self, stock_code: str) -> str:
         """종목명 조회"""
+        # 사전 계산 데이터 우선 사용 (O(1) lookup)
+        if self._precomputed is not None:
+            return self._precomputed.stock_names.get(stock_code, stock_code)
+
         query = """
         SELECT stock_name
         FROM stocks
@@ -191,6 +206,10 @@ class BacktestEngine:
                 - pattern, score, direction
                 - ma_cross, acceleration, sync_rate, signal_count
         """
+        # 사전 계산 데이터가 있으면 빠른 경로 사용
+        if self._precomputed is not None:
+            return self._scan_signals_on_date_fast(end_date, direction)
+
         # Stage 1: Z-Score 계산 (end_date까지만 사용!)
         zscore_latest = self.normalizer.calculate_zscore(end_date=end_date)
 
@@ -239,6 +258,63 @@ class BacktestEngine:
         for code in result['stock_code']:
             stock_names.append(self.get_stock_name(code))
         result.insert(1, 'stock_name', stock_names)
+
+        return result
+
+    def _scan_signals_on_date_fast(self, end_date: str, direction: str = 'long') -> pd.DataFrame:
+        """
+        사전 계산 데이터를 사용한 빠른 시그널 스캔
+
+        _scan_signals_on_date()의 빠른 경로. DB 쿼리 없이
+        O(1) lookup + 패턴 분류(~0.01초)로 동일한 결과 반환.
+        """
+        pc = self._precomputed
+
+        # 1. Z-Score lookup (O(1))
+        try:
+            zscore_on_date = pc.zscore_all_dates.loc[end_date].copy()
+        except KeyError:
+            return pd.DataFrame()
+
+        zscore_matrix = zscore_on_date.reset_index()  # stock_code → column
+
+        # 2. Direction filter (1W > 0: long, 1W < 0: short)
+        if direction == 'long':
+            zscore_matrix = zscore_matrix[zscore_matrix['1W'] > 0].copy()
+        else:
+            zscore_matrix = zscore_matrix[zscore_matrix['1W'] < 0].copy()
+
+        if zscore_matrix.empty:
+            return pd.DataFrame()
+
+        # 3. Pattern classification (~0.01초, DB 접근 없음)
+        pattern_result = self.classifier.classify_all(zscore_matrix, direction=direction)
+
+        # 4. Signal lookup (O(1))
+        try:
+            signals_on_date = pc.signals_all_dates.loc[end_date].copy()
+            signals_on_date = signals_on_date.reset_index()
+        except KeyError:
+            signals_on_date = pd.DataFrame()
+
+        # 5. Merge
+        if not signals_on_date.empty:
+            result = pd.merge(pattern_result, signals_on_date, on='stock_code', how='left')
+        else:
+            result = pattern_result.copy()
+            result['ma_cross'] = False
+            result['ma_diff'] = np.nan
+            result['acceleration'] = np.nan
+            result['sync_rate'] = np.nan
+            result['signal_count'] = 0
+
+        # 6. Fill defaults
+        result['signal_count'] = result['signal_count'].fillna(0).astype(int)
+        result['ma_cross'] = result['ma_cross'].fillna(False)
+
+        # 7. Stock names
+        result.insert(1, 'stock_name', result['stock_code'].map(
+            lambda c: pc.stock_names.get(c, c)))
 
         return result
 
@@ -451,7 +527,8 @@ class BacktestEngine:
         if preload_data:
             if verbose:
                 print("데이터 프리로드 중...")
-            self.normalizer.preload(end_date=end_date)
+            pc = BacktestPrecomputer(self.conn, self.config.institution_weight)
+            self._precomputed = pc.precompute(end_date, verbose=verbose)
 
         if verbose:
             print(f"\n{'='*80}")
@@ -548,7 +625,7 @@ class BacktestEngine:
             print(f"총 거래 횟수: {len(self.portfolio.trades)}건\n")
 
         if preload_data:
-            self.normalizer.clear_preload()
+            self._precomputed = None  # 메모리 해제
 
         return {
             'trades': self.portfolio.trades,

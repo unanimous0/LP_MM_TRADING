@@ -1,14 +1,14 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- **현재 작업**: Stage 4 전체 완료 + --optimize Optuna 통합 ✅
-- **마지막 업데이트**: 2026-02-19
+- **현재 작업**: Stage 5-1 Streamlit 웹 대시보드 진행 중
+- **마지막 업데이트**: 2026-02-20
 - **백테스트 권장 시작일**: 2025-01-01 이후 (DB가 2024-01-02 시작이므로 1Y 데이터 확보)
-- **다음 시작점**: Stage 5-1 (Streamlit 웹 대시보드)
-- **시각화**: matplotlib 차트 5종 완성 (PNG/PDF 리포트)
-- **향후 계획**: Stage 5 (Streamlit 웹 대시보드)
+- **다음 시작점**: Stage 5-1 추가 페이지 (종목 상세, 히트맵 등)
+- **시각화**: matplotlib 5종 (PNG/PDF) + Plotly 5종 (Streamlit 인터랙티브)
+- **Streamlit**: `venv/bin/streamlit run app/streamlit_app.py` → http://localhost:8501
 - **현재 브랜치**: main
-- **로드맵**: [Next Steps] 섹션 Stage 4 완료, Stage 5 참조
+- **로드맵**: [Next Steps] 섹션 Stage 5 참조
 
 ### TODO (데이터 개선 시)
 - [ ] **23년 데이터 추가** → 백테스트 기간 확장 (현재 2024-01-02부터 시작)
@@ -66,10 +66,18 @@
   - 11개 테스트 (100% 통과)
 - **총 77개 테스트** (77개 통과)
 
+**Stage 5-1: Streamlit 웹 대시보드** (진행 중)
+- 멀티페이지 앱 (홈/분석/백테스트)
+- 백테스트 페이지: Plotly 인터랙티브 차트 5종 + KPI 카드 + 거래 내역
+- **BacktestPrecomputer**: 백테스트 속도 165~262배 향상 (177초→1.1초)
+- **Optuna 최적화 UI**: 사이드바에서 파라미터 자동 최적화 → 결과 즉시 반영
+- 256개 테스트 (100% 통과)
+
 **핵심 인사이트**:
 - 3개 패턴은 투자 스타일별 최적 종목 필터링 (단기=돌파형, 중기=매집형, 저가=반등형)
 - 시그널 2개 이상 종목 = 확신도 높은 진입 타이밍 (승률 60%, 평균 +3~4%)
 - 전체 파이프라인 실행 시간: 약 3초 (Stage 1~3 통합)
+- **백테스트 Precomputer**: 38일 177초→1.1초 (165배), 63일 393초→1.5초 (262배)
 - **백테스트 검증 완료** (2024-06-01 ~ 2024-08-31):
   - 롱 전략: -2.14% (승률 46.5%)
   - 숏 전략: +0.56% (승률 57.6%) ⭐
@@ -107,13 +115,11 @@ python scripts/crawlers/crawl_all_data.py --start 2024-01-01
 
 ## [Next Steps]
 
-### Stage 4: 백테스팅 시스템 (진행 중)
+### Stage 4: 백테스팅 시스템 (완료 ✅)
 
 **목표**: 과거 데이터로 패턴 분류 전략의 수익률 검증 및 최적화 (롱/숏 전략 지원)
 
-**현재 진행**: Week 1~5 + Week 2.5 + Optuna 통합 완료 (233개 테스트, 233개 통과) ✅
-**다음 단계**: Stage 5-1 (Streamlit 웹 대시보드)
-**완료**: 6주 + Optuna 통합 (Week 1~5 + Week 2.5 + Optuna 전면 교체)
+**완료**: Week 1~5 + Week 2.5 + Optuna 통합 + Precomputer 속도 최적화 (256개 테스트, 256개 통과) ✅
 
 ---
 
@@ -260,36 +266,52 @@ python backtest_runner.py --plot --save-pdf output/report.pdf
 - **테스트**: 16개 (walk_forward) + 8개 (optimizer) (100% 통과)
 - **상세**: [Progress History] → 2026-02-19
 
-**진행률**: 233/233 (100%) - Stage 4 완료 ✅
+**진행률**: 256/256 (100%) - Stage 4 완료 ✅
 
 ---
 
-### Stage 5: 웹 서비스 & AI 기반 자동화 (향후 계획, 변경 가능)
+### Stage 5: 웹 서비스 & AI 기반 자동화
 
 **목표**: 일별 자동 분석 및 AI 기반 종목 리포트 생성 웹 서비스 구축
 
 **전체 로드맵**:
-- **Stage 5-1**: Streamlit 웹 대시보드
+- **Stage 5-1**: Streamlit 웹 대시보드 (진행 중)
 - **Stage 5-2**: 스케줄러 기반 자동화 파이프라인
 
 ---
 
-#### 5-1. Streamlit 웹 대시보드
-**파일**: `app/streamlit_dashboard.py`
+#### 5-1. Streamlit 웹 대시보드 (진행 중)
 
-**주요 기능**:
-- 실시간 히트맵 시각화 (인터랙티브)
-- 패턴별/시그널별 필터링
-- 종목 상세 정보 조회
-- 분석 결과 히스토리 조회
-- 사용자 로그인 (향후)
+**구조**: `app/` 멀티페이지 앱
+
+**완료된 기능**:
+- ✅ 멀티페이지 앱 구조 (`app/streamlit_app.py` + `app/pages/`)
+- ✅ 공유 데이터 로더 (`app/utils/data_loader.py`) - DB 연결, 분석/백테스트 캐싱
+- ✅ 홈 페이지 (`1_🏠_홈.py`) - DB 통계, 최근 업데이트
+- ✅ 분석 페이지 (`2_🔍_수급_분석.py`) - Stage 1-3 파이프라인, 패턴/시그널 필터링
+- ✅ 백테스트 페이지 (`3_📈_백테스트.py`) - 파라미터 설정 + 실행 + 결과 시각화
+  - Plotly 인터랙티브 차트 5종 (수익률 곡선, 낙폭, 월별 수익률, 수익률 분포, 패턴별 성과)
+  - KPI 카드 5개 (총 수익률, 승률, MDD, 샤프 비율, 총 거래)
+  - 거래 내역 테이블 + CSV 다운로드
+  - **Optuna 파라미터 최적화** 버튼 (Trial 수/평가 지표 설정 → 최적 파라미터 자동 반영)
+- ✅ BacktestPrecomputer 속도 최적화 (165~262배 향상)
+- ✅ PlotlyVisualizer (`src/backtesting/plotly_visualizer.py`)
+
+**남은 작업**:
+- [ ] 종목 상세 페이지 (개별 종목 Z-Score 추이, 시그널 히스토리)
+- [ ] 히트맵 페이지 (인터랙티브 히트맵)
+- [ ] 분석 페이지 고도화 (섹터 필터링, 정렬 옵션)
+
+**실행 방법**:
+```bash
+venv/bin/streamlit run app/streamlit_app.py
+# → http://localhost:8501
+```
 
 **기술 스택**:
 - **Streamlit**: 웹 대시보드 프레임워크
 - **Plotly**: 인터랙티브 차트
 - **Streamlit Cloud**: 무료 호스팅 (초기)
-
-**예상 소요**: 1~2주
 
 ---
 
@@ -438,6 +460,14 @@ LP_MM_TRADING/
 ├── data/
 │   └── processed/
 │       └── investor_data.db       # SQLite DB (171,227 레코드)
+├── app/                           # Streamlit 웹 대시보드 (Stage 5-1) ✨
+│   ├── streamlit_app.py           # 메인 엔트리포인트
+│   ├── utils/
+│   │   └── data_loader.py         # 캐시 데이터 로더 (DB/분석/백테스트/최적화)
+│   └── pages/
+│       ├── 1_🏠_홈.py              # DB 통계, 최근 업데이트
+│       ├── 2_🔍_수급_분석.py       # Stage 1-3 분석 파이프라인
+│       └── 3_📈_백테스트.py        # 백테스트 실행 + Optuna 최적화 + Plotly 차트
 ├── src/
 │   ├── database/                  # DB 모듈
 │   │   ├── schema.py
@@ -447,12 +477,14 @@ LP_MM_TRADING/
 │   │   ├── pattern_classifier.py  # 패턴 분류 (Stage 3)
 │   │   ├── signal_detector.py     # 시그널 탐지 (Stage 3)
 │   │   └── integrated_report.py   # 통합 리포트 (Stage 3)
-│   ├── backtesting/               # 백테스트 모듈 (Stage 4) ✨
-│   │   ├── engine.py              # BacktestEngine (롤링 윈도우, preload 지원)
+│   ├── backtesting/               # 백테스트 모듈 (Stage 4)
+│   │   ├── engine.py              # BacktestEngine (Precomputer 기반 고속 실행)
+│   │   ├── precomputer.py         # BacktestPrecomputer (벡터화 사전 계산) ✨
+│   │   ├── plotly_visualizer.py   # PlotlyVisualizer (Streamlit용 인터랙티브 차트) ✨
 │   │   ├── portfolio.py           # Trade, Position, Portfolio
 │   │   ├── metrics.py             # PerformanceMetrics
 │   │   ├── optimizer.py           # OptunaOptimizer (Bayesian Optimization)
-│   │   ├── walk_forward.py        # WalkForwardAnalyzer (Week 5)
+│   │   ├── walk_forward.py        # WalkForwardAnalyzer
 │   │   └── visualizer.py          # 차트 5종 (matplotlib)
 │   ├── visualizer/                # 시각화 모듈
 │   │   ├── performance_optimizer.py
@@ -463,7 +495,7 @@ LP_MM_TRADING/
 │   ├── analysis/
 │   │   ├── abnormal_supply_detector.py  # Stage 1 CLI
 │   │   ├── heatmap_generator.py         # Stage 2 CLI
-│   │   └── regime_scanner.py            # Stage 3 CLI (통합) ✨
+│   │   └── regime_scanner.py            # Stage 3 CLI (통합)
 │   ├── crawlers/
 │   │   ├── crawl_all_data.py
 │   │   ├── crawl_stock_prices.py
@@ -471,7 +503,7 @@ LP_MM_TRADING/
 │   └── loaders/
 │       ├── load_initial_data.py
 │       └── load_daily_data.py
-└── tests/                         # 테스트 (233개 통과)
+└── tests/                         # 테스트 (256개 통과)
     ├── test_config.py
     ├── test_normalizer.py
     ├── test_performance_optimizer.py
@@ -479,11 +511,12 @@ LP_MM_TRADING/
     ├── test_pattern_classifier.py       # Stage 3 테스트
     ├── test_signal_detector.py          # Stage 3 테스트
     ├── test_integrated_report.py        # Stage 3 테스트
-    └── backtesting/                     # Stage 4 테스트 ✨
+    └── backtesting/                     # Stage 4 테스트
         ├── test_engine.py
         ├── test_portfolio.py
         ├── test_metrics.py
         ├── test_visualizer.py
+        ├── test_precomputer.py          # BacktestPrecomputer (23개) ✨
         ├── test_optimizer.py            # OptunaOptimizer
         └── test_walk_forward.py         # Walk-Forward (16개)
 ```
@@ -494,9 +527,10 @@ LP_MM_TRADING/
 - Python 3.10+
 - SQLite (DB)
 - pandas, numpy (분석)
-- matplotlib, seaborn (시각화)
-- plotly (인터랙티브 차트)
-- optuna (Bayesian Optimization - --optimize, --walk-forward 공용)
+- matplotlib, seaborn (시각화 - CLI/PDF)
+- plotly (인터랙티브 차트 - Streamlit)
+- streamlit (웹 대시보드)
+- optuna (Bayesian Optimization - --optimize, --walk-forward, Streamlit 공용)
 - FinanceDataReader, BeautifulSoup (크롤링)
 - pytest (테스트)
 
@@ -524,6 +558,9 @@ LP_MM_TRADING/
 | Stage 2 | 345종목×6기간 히트맵 | ~1.5초 | Sff 캐싱 + groupby.transform |
 | Stage 3 | 패턴 분류 + 시그널 통합 | ~1.5초 | 벡터화 + 병렬 처리 |
 | **전체** | **Stage 1~3 통합 실행** | **~3초** | **최적화 완료** |
+| **백테스트 38일** | **Precomputer 적용** | **~1.1초** | **165배 향상 (177초→1.1초)** |
+| **백테스트 63일** | **Precomputer 적용** | **~1.5초** | **262배 향상 (393초→1.5초)** |
+| **백테스트 1년** | **Streamlit 실행** | **~4초** | **Precomputer 자동 적용** |
 
 ---
 
@@ -555,6 +592,74 @@ LP_MM_TRADING/
 ---
 
 ## [Progress History]
+
+### 2026-02-20 (BacktestPrecomputer 속도 최적화 + Streamlit 백테스트 페이지)
+
+**목표**: 백테스트 속도 극적 향상 (사전 계산) + Streamlit 백테스트 페이지에 Optuna 최적화 UI 추가
+
+**구현 내용**:
+
+- ✅ **precomputer.py 신규 생성** (`src/backtesting/precomputer.py`)
+  - `PrecomputeResult` dataclass: MultiIndex(trade_date, stock_code) Z-Score/시그널 + price_lookup dict
+  - `BacktestPrecomputer` 클래스: DB 1회 로드 → 전 날짜 벡터화 계산
+    - `_compute_sff_all_dates()`: 외국인 중심 조건부 Sff 벡터화
+    - `_compute_multi_period_zscores_all_dates()`: 6기간 Z-Score 벡터화 (조건부 Z-Score 적용)
+    - `_compute_signals_all_dates()`: MA 크로스/가속도/동조율 벡터화
+    - `_build_price_lookup()`: (stock_code, trade_date) → float O(1) 조회
+  - **효과**: 매 거래일 Stage 1-3 재계산 → 1회 사전 계산 후 O(1) 참조
+
+- ✅ **engine.py 수정**: Precomputer 기반 고속 실행
+  - `_scan_signals_on_date()`: precomputed 데이터 있으면 fast path 라우팅
+  - `_scan_signals_on_date_fast()`: O(1) Z-Score/시그널 lookup + 패턴 분류
+  - `get_price()` / `get_stock_name()`: precomputed 데이터 우선 참조
+  - `run()`: normalizer.preload() → BacktestPrecomputer.precompute() 교체
+
+- ✅ **plotly_visualizer.py 신규 생성** (`src/backtesting/plotly_visualizer.py`)
+  - `PlotlyVisualizer` 클래스: Streamlit용 인터랙티브 차트 5종
+  - `fig_equity_curve()`, `fig_drawdown()`, `fig_monthly_returns()`
+  - `fig_return_distribution()`, `fig_pattern_performance()`
+
+- ✅ **Streamlit 백테스트 페이지** (`app/pages/3_📈_백테스트.py`)
+  - 사이드바: 백테스트 파라미터 설정 + 실행 버튼
+  - **Optuna 최적화 UI** (사이드바 하단 접기 섹션):
+    - Trial 수 슬라이더 (10~200, 기본 30)
+    - 평가 지표 선택 (Sharpe Ratio / 총 수익률 / 승률 / Profit Factor)
+    - "최적 파라미터 찾기" 버튼 → 최적 파라미터 사이드바 위젯 자동 반영 + 백테스트 자동 실행
+    - 최적화 결과 표시 (메트릭값, Trial 수, 5개 최적 파라미터)
+  - KPI 카드 5개 + Plotly 차트 5탭 + 거래 내역 테이블 + CSV 다운로드
+  - session_state 기반 파라미터 전달 (`pending_opt_params` → widget key 자동 반영)
+
+- ✅ **data_loader.py 수정** (`app/utils/data_loader.py`)
+  - `run_optuna_optimization()` 함수 추가: OptunaOptimizer 래핑
+
+**속도 벤치마크**:
+| 기간 | 기존 (초) | Precomputer (초) | 향상 |
+|------|----------|-----------------|------|
+| 38일 (2025-01~02) | 177.6 | 1.1 | 165배 |
+| 63일 (2025-06~08) | 392.8 | 1.5 | 262배 |
+| 1년 (Streamlit) | N/A | 4.0 | - |
+
+**테스트**: 23개 신규 (test_precomputer.py)
+- PrecomputeResult 구조: 6개
+- Z-Score 사전 계산: 4개 (slow path와 수치 일치 검증 포함)
+- 시그널 사전 계산: 5개
+- 가격/종목명 lookup: 5개
+- start_date 필터/기관 가중치: 3개
+
+**전체 테스트**: 256개 (100% 통과)
+
+**파일 구조**:
+```
+src/backtesting/precomputer.py (BacktestPrecomputer - 신규)
+src/backtesting/plotly_visualizer.py (PlotlyVisualizer - 신규)
+src/backtesting/engine.py (Precomputer 기반 fast path)
+src/backtesting/__init__.py (BacktestPrecomputer 추가)
+app/pages/3_📈_백테스트.py (Optuna 최적화 UI + Plotly 차트)
+app/utils/data_loader.py (run_optuna_optimization 추가)
+tests/backtesting/test_precomputer.py (23개 - 신규)
+```
+
+---
 
 ### 2026-02-19 (--optimize Grid Search → Optuna 교체)
 
@@ -1133,5 +1238,5 @@ tests/backtesting/
 
 ---
 
-**프로젝트 버전**: v4.8 (--optimize Grid Search → Optuna 통합)
-**마지막 업데이트**: 2026-02-19
+**프로젝트 버전**: v5.0 (Stage 5-1 Streamlit 대시보드 + Precomputer 속도 최적화)
+**마지막 업데이트**: 2026-02-20

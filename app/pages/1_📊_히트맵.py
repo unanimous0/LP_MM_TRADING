@@ -1,0 +1,79 @@
+"""
+히트맵 페이지 - Z-Score 인터랙티브 히트맵
+
+사이드바: 정렬 기준, 표시 종목 수, 섹터 필터
+메인: Plotly 인터랙티브 히트맵 (줌/호버)
+"""
+
+import sys
+from pathlib import Path
+
+_PROJECT_ROOT = Path(__file__).parent.parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+import streamlit as st
+import pandas as pd
+
+from utils.data_loader import run_analysis_pipeline, get_stock_list, get_sectors
+from utils.charts import create_zscore_heatmap
+
+st.set_page_config(page_title="히트맵", page_icon="📊", layout="wide")
+st.title("Z-Score 수급 히트맵")
+
+# ---------------------------------------------------------------------------
+# 사이드바 필터
+# ---------------------------------------------------------------------------
+sort_options = {
+    'recent': '최근 수급 (1W 기준)',
+    'momentum': '모멘텀 (단기-장기 차이)',
+    'weighted': '가중 평균 (최근 높은 비중)',
+    'average': '단순 평균',
+}
+sort_by = st.sidebar.selectbox(
+    "정렬 기준",
+    options=list(sort_options.keys()),
+    format_func=lambda x: sort_options[x],
+)
+
+top_n = st.sidebar.slider("표시 종목 수", min_value=10, max_value=200, value=50, step=10)
+
+sectors = get_sectors()
+selected_sector = st.sidebar.selectbox("섹터 필터", options=["전체"] + sectors)
+
+# ---------------------------------------------------------------------------
+# 데이터 로드
+# ---------------------------------------------------------------------------
+zscore_matrix, classified_df, signals_df, report_df = run_analysis_pipeline()
+
+if zscore_matrix.empty:
+    st.warning("Z-Score 데이터가 없습니다.")
+    st.stop()
+
+# 섹터 필터링
+if selected_sector != "전체":
+    stock_list = get_stock_list()
+    sector_stocks = stock_list[stock_list['sector'] == selected_sector]['stock_code'].tolist()
+    zscore_matrix = zscore_matrix[zscore_matrix['stock_code'].isin(sector_stocks)]
+
+    if zscore_matrix.empty:
+        st.info(f"'{selected_sector}' 섹터에 해당하는 종목이 없습니다.")
+        st.stop()
+
+# ---------------------------------------------------------------------------
+# 히트맵
+# ---------------------------------------------------------------------------
+stock_names = get_stock_list()
+fig = create_zscore_heatmap(zscore_matrix, sort_by=sort_by, top_n=top_n, stock_names=stock_names)
+st.plotly_chart(fig, use_container_width=True)
+
+# ---------------------------------------------------------------------------
+# 통계
+# ---------------------------------------------------------------------------
+period_cols = [c for c in zscore_matrix.columns if c != 'stock_code']
+if '1W' in period_cols:
+    col1, col2, col3 = st.columns(3)
+    col1.metric("표시 종목 수", f"{min(top_n, len(zscore_matrix))}개")
+    col2.metric("평균 1W Z-Score", f"{zscore_matrix['1W'].mean():.2f}")
+    strong_buy = (zscore_matrix['1W'] > 2).sum()
+    col3.metric("강한 매수 (Z>2)", f"{strong_buy}개")

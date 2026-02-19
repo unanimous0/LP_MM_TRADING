@@ -6,13 +6,14 @@ Stage 4: 백테스팅 시스템
 - Portfolio: 포지션 관리
 - PerformanceMetrics: 성과 분석
 - BacktestVisualizer: 결과 시각화 (Week 3)
-- ParameterOptimizer: 파라미터 최적화 (Week 4)
+- BacktestPrecomputer: 사전 계산 (속도 최적화)
 """
 
 from .portfolio import Trade, Position, Portfolio
 from .engine import BacktestEngine, BacktestConfig
 from .metrics import PerformanceMetrics
 from .visualizer import BacktestVisualizer
+from .precomputer import BacktestPrecomputer, PrecomputeResult
 
 __all__ = [
     'Trade',
@@ -22,4 +23,6 @@ __all__ = [
     'BacktestConfig',
     'PerformanceMetrics',
     'BacktestVisualizer',
+    'BacktestPrecomputer',
+    'PrecomputeResult',
 ]
