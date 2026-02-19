@@ -36,8 +36,52 @@ class SupplyNormalizer:
         self.conn = conn
         self.config = config or {
             'z_score_window': 60,     # 60 거래일
-            'min_data_points': 30      # 최소 30일 필요
+            'min_data_points': 30,    # 최소 30일 필요
+            'institution_weight': 0.3,  # 기관 가중치 (0.0=외국인만, 0.3=기본, 0.5=기관 강조)
         }
+        self._preload_raw = None  # 프리로드 원본 데이터 (None이면 비활성)
+
+    def preload(self, end_date: Optional[str] = None):
+        """
+        백테스트 전 전체 원본 데이터를 메모리에 로드.
+        이후 calculate_sff / _get_sff_data 호출 시 DB 쿼리 없이 메모리 필터링 사용.
+
+        Args:
+            end_date: 로드 종료일 (None이면 전체)
+        """
+        where_clauses = ["close_price IS NOT NULL", "free_float_shares IS NOT NULL"]
+        if end_date:
+            where_clauses.append(f"trade_date <= '{end_date}'")
+        where_sql = "WHERE " + " AND ".join(where_clauses)
+
+        query = f"""
+        SELECT trade_date, stock_code,
+               foreign_net_amount, institution_net_amount,
+               close_price, free_float_shares
+        FROM investor_flows
+        {where_sql}
+        ORDER BY stock_code, trade_date
+        """
+        self._preload_raw = pd.read_sql(query, self.conn)
+
+    def clear_preload(self):
+        """프리로드 데이터 삭제 (메모리 해제)"""
+        self._preload_raw = None
+
+    def _apply_sff_formula(self, df: pd.DataFrame) -> pd.DataFrame:
+        """원본 데이터에서 Sff 계산 (내부 공통 메서드)"""
+        df = df.copy()
+        free_float_mcap = df['close_price'] * df['free_float_shares']
+        df['foreign_sff'] = (df['foreign_net_amount'] / free_float_mcap) * 100
+        df['institution_sff'] = (df['institution_net_amount'] / free_float_mcap) * 100
+        institution_weight = self.config.get('institution_weight', 0.3)
+        same_direction = (df['foreign_sff'] * df['institution_sff']) > 0
+        df['combined_sff'] = np.where(
+            same_direction,
+            df['foreign_sff'] + df['institution_sff'] * institution_weight,
+            df['foreign_sff']
+        )
+        return df.replace([np.inf, -np.inf], np.nan)
 
     def calculate_sff(self,
                      stock_codes: Optional[list] = None,
@@ -70,6 +114,21 @@ class SupplyNormalizer:
 
         if end_date and not validate_date_format(end_date):
             raise ValueError(f"Invalid end_date format: {end_date}. Expected YYYY-MM-DD")
+
+        # 프리로드 데이터 우선 사용 (DB 쿼리 없음)
+        if self._preload_raw is not None:
+            df = self._preload_raw.copy()
+            if stock_codes:
+                df = df[df['stock_code'].isin(stock_codes)]
+            if start_date:
+                df = df[df['trade_date'] >= start_date]
+            if end_date:
+                df = df[df['trade_date'] <= end_date]
+            if df.empty:
+                return pd.DataFrame(columns=['trade_date', 'stock_code', 'foreign_sff',
+                                            'institution_sff', 'combined_sff'])
+            result = self._apply_sff_formula(df)
+            return result[['trade_date', 'stock_code', 'foreign_sff', 'institution_sff', 'combined_sff']]
 
         # WHERE 절 생성 (검증된 입력만 사용)
         where_clauses = ["close_price IS NOT NULL", "free_float_shares IS NOT NULL"]
@@ -114,12 +173,13 @@ class SupplyNormalizer:
         df['institution_sff'] = (df['institution_net_amount'] / df['free_float_mcap']) * 100
 
         # 외국인 중심 조건부 합산:
-        # 같은 방향 → 외국인 + 기관×0.3 (동반 보너스)
+        # 같은 방향 → 외국인 + 기관×weight (동반 보너스)
         # 반대 방향 → 외국인만 (기관이 외국인 신호를 상쇄하지 않음)
+        institution_weight = self.config.get('institution_weight', 0.3)
         same_direction = (df['foreign_sff'] * df['institution_sff']) > 0
         df['combined_sff'] = np.where(
             same_direction,
-            df['foreign_sff'] + df['institution_sff'] * 0.3,
+            df['foreign_sff'] + df['institution_sff'] * institution_weight,
             df['foreign_sff']
         )
 
@@ -321,6 +381,18 @@ class SupplyNormalizer:
         if stock_codes:
             stock_codes = validate_stock_codes(stock_codes)
 
+        # 프리로드 데이터 우선 사용 (DB 쿼리 없음)
+        if self._preload_raw is not None:
+            df = self._preload_raw.copy()
+            if stock_codes:
+                df = df[df['stock_code'].isin(stock_codes)]
+            if end_date:
+                df = df[df['trade_date'] <= end_date]
+            if df.empty:
+                return pd.DataFrame(columns=['trade_date', 'stock_code', 'combined_sff'])
+            result = self._apply_sff_formula(df)
+            return result[['trade_date', 'stock_code', 'combined_sff']]
+
         # WHERE 절 생성 (검증된 입력만 사용)
         where_clauses = ["close_price IS NOT NULL", "free_float_shares IS NOT NULL"]
 
@@ -359,10 +431,11 @@ class SupplyNormalizer:
         df['foreign_sff'] = (df['foreign_net_amount'] / df['free_float_mcap']) * 100
         df['institution_sff'] = (df['institution_net_amount'] / df['free_float_mcap']) * 100
 
+        institution_weight = self.config.get('institution_weight', 0.3)
         same_direction = (df['foreign_sff'] * df['institution_sff']) > 0
         df['combined_sff'] = np.where(
             same_direction,
-            df['foreign_sff'] + df['institution_sff'] * 0.3,
+            df['foreign_sff'] + df['institution_sff'] * institution_weight,
             df['foreign_sff']
         )
 

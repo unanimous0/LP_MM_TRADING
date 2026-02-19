@@ -1,7 +1,7 @@
 """
-Stage 4 백테스팅 CLI 도구 (Week 3 버전)
+Stage 4 백테스팅 CLI 도구 (Week 5 버전)
 
-백테스트 실행, 결과 출력, 시각화
+백테스트 실행, 결과 출력, 시각화, 파라미터 최적화, Walk-Forward Analysis
 
 Usage:
     # 기본 실행 (3개월)
@@ -24,6 +24,21 @@ Usage:
 
     # CSV + 차트 모두 저장
     python scripts/analysis/backtest_runner.py --save-csv output/trades.csv --save-dir output/charts
+
+    # Grid Search 최적화 (기본)
+    python scripts/analysis/backtest_runner.py --optimize
+
+    # 병렬 Grid Search (4 workers, total_return 기준)
+    python scripts/analysis/backtest_runner.py --optimize --workers 4 --metric total_return
+
+    # 최적화 결과 CSV 저장
+    python scripts/analysis/backtest_runner.py --optimize --opt-save-csv output/optimization.csv
+
+    # Walk-Forward Analysis (기본: 6개월 학습, 1개월 검증)
+    python scripts/analysis/backtest_runner.py --walk-forward --start 2024-01-01 --end 2024-12-31
+
+    # Walk-Forward 결과 CSV 저장
+    python scripts/analysis/backtest_runner.py --walk-forward --wf-save-csv output/walk_forward.csv
 """
 
 import argparse
@@ -34,10 +49,11 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.database.connection import get_connection
+from src.database.connection import get_connection, DB_PATH
 from src.backtesting.engine import BacktestEngine, BacktestConfig
 from src.backtesting.metrics import PerformanceMetrics
 from src.backtesting.visualizer import BacktestVisualizer
+from src.backtesting.optimizer import ParameterOptimizer
 import pandas as pd
 
 
@@ -130,9 +146,75 @@ def save_trades_to_csv(trades, filepath: str):
     print(f"\n✅ 거래 내역 저장: {filepath}")
 
 
+def run_walk_forward(args):
+    """Walk-Forward Analysis 실행"""
+    from src.backtesting.walk_forward import WalkForwardAnalyzer, WalkForwardConfig
+
+    wf_config = WalkForwardConfig(
+        train_months=args.train_months,
+        val_months=args.val_months,
+        step_months=args.step_months,
+        metric=args.metric,
+        workers=args.workers,
+    )
+    base_config = BacktestConfig(
+        initial_capital=args.capital,
+        max_positions=args.max_positions,
+        strategy=args.strategy,
+        reverse_signal_threshold=args.reverse_threshold,
+        max_hold_days=args.max_days,
+        force_exit_on_end=False,
+    )
+    analyzer = WalkForwardAnalyzer(
+        db_path=str(project_root / DB_PATH),
+        start_date=args.start,
+        end_date=args.end,
+        wf_config=wf_config,
+        base_config=base_config,
+    )
+    analyzer.run(verbose=True)
+    analyzer.print_results()
+
+    if args.wf_save_csv:
+        Path(args.wf_save_csv).parent.mkdir(parents=True, exist_ok=True)
+        analyzer.summary().to_csv(args.wf_save_csv, index=False, encoding='utf-8-sig')
+        print(f"✅ Walk-Forward 결과 저장: {args.wf_save_csv}")
+
+
+def run_optimization(args):
+    """Grid Search 최적화 실행"""
+    base_config = BacktestConfig(
+        initial_capital=args.capital,
+        max_positions=args.max_positions,
+        strategy=args.strategy,
+        reverse_signal_threshold=args.reverse_threshold,
+        max_hold_days=args.max_days,
+        force_exit_on_end=False,
+    )
+
+    optimizer = ParameterOptimizer(
+        db_path=str(project_root / DB_PATH),
+        start_date=args.start,
+        end_date=args.end,
+        base_config=base_config,
+    )
+
+    results_df = optimizer.grid_search(
+        metric=args.metric,
+        top_n=args.top_n,
+        workers=args.workers,
+        verbose=True,
+    )
+
+    if not results_df.empty and args.opt_save_csv:
+        Path(args.opt_save_csv).parent.mkdir(parents=True, exist_ok=True)
+        results_df.to_csv(args.opt_save_csv, index=False, encoding='utf-8-sig')
+        print(f"✅ 최적화 결과 저장: {args.opt_save_csv}")
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description='백테스팅 CLI 도구 (Week 3 버전 - 시각화 추가)',
+        description='백테스팅 CLI 도구 (Week 5 버전 - Walk-Forward Analysis 추가)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 예시:
@@ -162,6 +244,18 @@ def main():
 
   # CSV + 차트 모두 저장
   python scripts/analysis/backtest_runner.py --save-csv output/trades.csv --save-dir output/charts
+
+  # Grid Search 최적화
+  python scripts/analysis/backtest_runner.py --optimize
+
+  # 병렬 Grid Search
+  python scripts/analysis/backtest_runner.py --optimize --workers 4 --metric total_return
+
+  # 최적화 결과 CSV 저장
+  python scripts/analysis/backtest_runner.py --optimize --opt-save-csv output/optimization.csv
+
+  # Walk-Forward Analysis
+  python scripts/analysis/backtest_runner.py --walk-forward --start 2024-01-01 --end 2024-12-31
         """
     )
 
@@ -201,7 +295,37 @@ def main():
     parser.add_argument('--save-pdf', help='차트 PDF 리포트 저장 경로')
     parser.add_argument('--save-daily-values', help='일별 포트폴리오 가치 CSV 저장 경로')
 
+    # 최적화 옵션 (Week 4)
+    parser.add_argument('--optimize', action='store_true', help='Grid Search 파라미터 최적화 실행')
+    parser.add_argument('--workers', type=int, default=1, help='병렬 처리 worker 수 (기본: 1)')
+    parser.add_argument('--metric', default='sharpe_ratio',
+                        choices=['sharpe_ratio', 'total_return', 'win_rate', 'profit_factor'],
+                        help='최적화 평가 지표 (기본: sharpe_ratio)')
+    parser.add_argument('--top-n', type=int, default=10, help='상위 N개 결과 출력 (기본: 10)')
+    parser.add_argument('--opt-save-csv', help='최적화 결과 CSV 저장 경로')
+
+    # Walk-Forward 옵션 (Week 5)
+    parser.add_argument('--walk-forward', action='store_true',
+                        help='Walk-Forward Analysis 실행')
+    parser.add_argument('--train-months', type=int, default=6,
+                        help='학습 기간 (개월, 기본: 6)')
+    parser.add_argument('--val-months', type=int, default=1,
+                        help='검증 기간 (개월, 기본: 1)')
+    parser.add_argument('--step-months', type=int, default=1,
+                        help='롤링 스텝 (개월, 기본: 1)')
+    parser.add_argument('--wf-save-csv', help='Walk-Forward 결과 CSV 저장 경로')
+
     args = parser.parse_args()
+
+    # Walk-Forward 모드
+    if args.walk_forward:
+        run_walk_forward(args)
+        return
+
+    # 최적화 모드
+    if args.optimize:
+        run_optimization(args)
+        return
 
     # 설정 생성
     allowed_patterns = [args.pattern] if args.pattern else None

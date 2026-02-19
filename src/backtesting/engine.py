@@ -34,6 +34,7 @@ class BacktestConfig:
                  reverse_signal_threshold: float = 60,  # 반대 수급 손절 점수 (60점 이상)
                  allowed_patterns: Optional[List[str]] = None,  # 허용 패턴 (None이면 전체)
                  strategy: str = 'long',  # 'long', 'short', 'both'
+                 institution_weight: float = 0.3,  # 기관 가중치 (0.0=외국인만, 0.3=기본, 0.5=기관 강조)
                  force_exit_on_end: bool = False):  # 백테스트 종료 시 강제 청산 여부
         """
         백테스트 설정 초기화
@@ -49,6 +50,7 @@ class BacktestConfig:
             reverse_signal_threshold: 반대 수급 손절 점수 (Long→매도 60점 이상, Short→매수 60점 이상)
             allowed_patterns: 허용 패턴 리스트 (예: ['모멘텀형', '지속형'])
             strategy: 전략 방향 ('long': 순매수, 'short': 순매도, 'both': 롱+숏)
+            institution_weight: 기관 가중치 (0.0=외국인만, 0.3=기본, 0.5=기관 강조)
             force_exit_on_end: 백테스트 종료일에 강제 청산 여부 (기본: False)
         """
         self.initial_capital = initial_capital
@@ -61,6 +63,7 @@ class BacktestConfig:
         self.reverse_signal_threshold = reverse_signal_threshold
         self.allowed_patterns = allowed_patterns
         self.strategy = strategy
+        self.institution_weight = institution_weight
         self.force_exit_on_end = force_exit_on_end
 
         if strategy not in ['long', 'short', 'both']:
@@ -82,7 +85,11 @@ class BacktestEngine:
         self.config = config or BacktestConfig()
 
         # Stage 1-3 모듈 초기화
-        self.normalizer = SupplyNormalizer(conn)
+        self.normalizer = SupplyNormalizer(conn, config={
+            'z_score_window': 60,
+            'min_data_points': 30,
+            'institution_weight': self.config.institution_weight,
+        })
         self.calculator = OptimizedMultiPeriodCalculator(
             self.normalizer, enable_caching=False  # 백테스트는 end_date가 매번 바뀌므로 캐싱 비활성화
         )
@@ -421,7 +428,8 @@ class BacktestEngine:
 
         return positions
 
-    def run(self, start_date: str, end_date: str, verbose: bool = True) -> Dict:
+    def run(self, start_date: str, end_date: str, verbose: bool = True,
+            preload_data: bool = True) -> Dict:
         """
         백테스트 실행
 
@@ -429,6 +437,8 @@ class BacktestEngine:
             start_date: 시작일 (YYYY-MM-DD)
             end_date: 종료일 (YYYY-MM-DD)
             verbose: 진행 상황 출력 여부
+            preload_data: True이면 시작 전 전체 Sff 데이터를 메모리 로드 (기본: True)
+                         False이면 매 계산마다 DB 조회 (메모리 절약 필요 시)
 
         Returns:
             {
@@ -438,6 +448,11 @@ class BacktestEngine:
                 'config': BacktestConfig
             }
         """
+        if preload_data:
+            if verbose:
+                print("데이터 프리로드 중...")
+            self.normalizer.preload(end_date=end_date)
+
         if verbose:
             print(f"\n{'='*80}")
             print(f"📈 백테스트 시작: {start_date} ~ {end_date}")
@@ -531,6 +546,9 @@ class BacktestEngine:
             print(f"최종 자본금: {final_value:,.0f}원")
             print(f"총 수익률: {total_return:+.2f}%")
             print(f"총 거래 횟수: {len(self.portfolio.trades)}건\n")
+
+        if preload_data:
+            self.normalizer.clear_preload()
 
         return {
             'trades': self.portfolio.trades,

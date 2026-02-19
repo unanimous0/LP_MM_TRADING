@@ -1,13 +1,13 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- **현재 작업**: 외국인 중심 조건부 Sff 적용 ✅ + Stage 4 Week 3 완료
+- **현재 작업**: Stage 4 Week 5 완료 - Walk-Forward Analysis + 성능 최적화 ✅
 - **마지막 업데이트**: 2026-02-19
-- **다음 시작점**: Stage 4 Week 4 - ParameterOptimizer (Grid Search)
+- **다음 시작점**: Stage 5 또는 Option 2 (Plotly/HTML 인터랙티브 차트)
 - **시각화**: matplotlib 차트 5종 완성 (PNG/PDF 리포트)
-- **향후 계획**: Week 4 (최적화) → Week 5 (성능 개선) → Option 2 (Plotly/HTML)
+- **향후 계획**: Option 2 (Plotly/HTML) → Stage 5 (Streamlit 웹 대시보드)
 - **현재 브랜치**: main
-- **로드맵**: [Next Steps] 섹션 Stage 4 참조 (6주 계획)
+- **로드맵**: [Next Steps] 섹션 Stage 4 완료, Stage 5 참조
 
 ### TODO (데이터 개선 시)
 - [ ] **시가 데이터 추가** → 진입/청산 타이밍 개선
@@ -61,7 +61,7 @@
   - CSV 저장 (trades, daily_values)
   - CLI 통합 (--plot, --save-dir, --save-pdf)
   - 11개 테스트 (100% 통과)
-- **총 77개 테스트** (74개 통과, 3개 기존 실패)
+- **총 77개 테스트** (77개 통과)
 
 **핵심 인사이트**:
 - 3개 패턴은 투자 스타일별 최적 종목 필터링 (단기=돌파형, 중기=매집형, 저가=반등형)
@@ -108,9 +108,9 @@ python scripts/crawlers/crawl_all_data.py --start 2024-01-01
 
 **목표**: 과거 데이터로 패턴 분류 전략의 수익률 검증 및 최적화 (롱/숏 전략 지원)
 
-**현재 진행**: Week 1~3 + Week 2.5 완료 (179개 테스트, 176개 통과)
-**다음 단계**: Week 4 - ParameterOptimizer (Grid Search)
-**예상 기간**: 6주 (Week 1~5 + Week 2.5 순매도 탐지)
+**현재 진행**: Week 1~5 + Week 2.5 완료 (205개 테스트, 205개 통과) ✅
+**다음 단계**: Stage 5 또는 Option 2 (Plotly/HTML 인터랙티브 차트)
+**완료**: 6주 (Week 1~5 + Week 2.5 순매도 탐지)
 
 ---
 
@@ -234,21 +234,21 @@ python backtest_runner.py --plot --save-pdf output/report.pdf
 
 **테스트**: 10개 예상 (차트 생성 확인, CSV 저장)
 
-**🔜 Week 4: ParameterOptimizer** (1주 예상)
+**✅ Week 4: ParameterOptimizer** (완료)
 - Grid Search (최적 파라미터 탐색)
-  - 백테스트 파라미터: min_score, min_signals, target_return, stop_loss, max_hold_days
-  - **기관 가중치 최적화**: institution_weight [0.0, 0.1, 0.2, 0.3, 0.5] (Stage 1 Sff 공식의 기관 반영 비율)
-- 병렬 처리 (선택)
-- CLI 통합 (`--optimize`)
-- **테스트**: 5개 예상
+  - 백테스트 파라미터: min_score, min_signals, target_return, stop_loss
+  - **기관 가중치 최적화**: institution_weight [0.0, 0.1, 0.2, 0.3, 0.5] (normalizer.py 파라미터화)
+- multiprocessing 병렬 처리 (workers 옵션)
+- CLI 통합 (`--optimize`, `--workers`, `--metric`, `--top-n`, `--opt-save-csv`)
+- **테스트**: 8개 (100% 통과)
 
-**🔜 Week 5: Walk-Forward + 최적화** (1주 예상)
+**✅ Week 5: Walk-Forward + 성능 최적화** (완료)
 - Walk-Forward Analysis (학습/검증 롤링)
-- 성능 최적화 (500일 백테스트 5분 목표)
-- 미래 데이터 누수 완전 차단
-- **테스트**: 10개 예상
+- 성능 최적화: normalizer preload() - DB 1회 로드 후 메모리 필터링
+- **테스트**: 15개 (100% 통과)
+- **상세**: [Progress History] → 2026-02-19 Week 5
 
-**진행률**: 179/200 (90%) - 105 (Stage 1-3) + 27 (Week 1) + 21 (Week 2) + 18 (Week 2.5) + 11 (Week 3) - 3 기존실패
+**진행률**: 205/205 (100%) - Stage 4 완료 ✅
 
 ---
 
@@ -436,9 +436,11 @@ LP_MM_TRADING/
 │   │   ├── signal_detector.py     # 시그널 탐지 (Stage 3)
 │   │   └── integrated_report.py   # 통합 리포트 (Stage 3)
 │   ├── backtesting/               # 백테스트 모듈 (Stage 4) ✨
-│   │   ├── engine.py              # BacktestEngine (롤링 윈도우)
+│   │   ├── engine.py              # BacktestEngine (롤링 윈도우, preload 지원)
 │   │   ├── portfolio.py           # Trade, Position, Portfolio
 │   │   ├── metrics.py             # PerformanceMetrics
+│   │   ├── optimizer.py           # ParameterOptimizer (Grid Search)
+│   │   ├── walk_forward.py        # WalkForwardAnalyzer (Week 5)
 │   │   └── visualizer.py          # 차트 5종 (matplotlib)
 │   ├── visualizer/                # 시각화 모듈
 │   │   ├── performance_optimizer.py
@@ -537,6 +539,108 @@ LP_MM_TRADING/
 ---
 
 ## [Progress History]
+
+### 2026-02-19 (Stage 4 Week 5: Walk-Forward Analysis + 성능 최적화)
+
+**목표**: Walk-Forward Analysis 구현 및 백테스트 성능 최적화
+
+**구현 내용**:
+- ✅ **normalizer.py 수정**: preload/clear_preload 메커니즘 추가
+  - `preload(end_date)`: DB 1회 로드 → `self._preload_raw` 캐시
+  - `clear_preload()`: 캐시 해제 (메모리 반환)
+  - `_apply_sff_formula()`: 원본 데이터 → Sff 계산 공통 메서드
+  - `calculate_sff()` / `_get_sff_data()`: preload 활성화 시 메모리 필터링 사용
+  - **효과**: 매 거래일 DB 쿼리 → 백테스트 시작 시 1회 쿼리 (대폭 속도 향상)
+
+- ✅ **engine.py 수정**: `run(preload_data=True)` 파라미터 추가
+  - `preload_data=True`: run() 시작 시 preload(), 종료 시 clear_preload() 자동 호출
+  - `preload_data=False`: 기존 방식 유지 (메모리 절약 필요 시)
+
+- ✅ **walk_forward.py 신규 생성** (`src/backtesting/walk_forward.py`)
+  - `_add_months()`: stdlib calendar만 사용 (dateutil 불필요)
+  - `WalkForwardConfig`: train_months/val_months/step_months/metric/workers
+  - `WalkForwardAnalyzer`:
+    - `split_periods()`: 학습/검증 기간 롤링 분할
+    - `run()`: 각 기간 Grid Search → 최적 파라미터로 검증 백테스트
+    - `summary()`: 기간별 결과 DataFrame 반환
+    - `print_results()`: 통합 통계 출력
+
+- ✅ **backtest_runner.py 수정**: --walk-forward 옵션 추가
+  - `--walk-forward`: Walk-Forward Analysis 실행
+  - `--train-months N`: 학습 기간 (기본: 6)
+  - `--val-months N`: 검증 기간 (기본: 1)
+  - `--step-months N`: 롤링 스텝 (기본: 1)
+  - `--wf-save-csv PATH`: 결과 CSV 저장
+  - `run_walk_forward()` 함수 분리
+
+**테스트**: 15개 (100% 통과)
+- WalkForwardConfig 기본값/커스텀: 2개
+- split_periods 기간 수/중복/연속성/데이터부족: 5개
+- run() 반환키/메트릭포함/summary/빈결과: 4개
+- normalizer preload 활성화/해제/end_date필터/결과일치: 4개
+
+**전체 테스트**: 205개 (100% 통과) - Stage 4 완료
+
+**파일 구조**:
+```
+src/analyzer/normalizer.py (preload/clear_preload/_apply_sff_formula 추가)
+src/backtesting/engine.py (run()에 preload_data 파라미터)
+src/backtesting/walk_forward.py (WalkForwardAnalyzer - 신규)
+scripts/analysis/backtest_runner.py (--walk-forward 옵션)
+tests/backtesting/test_walk_forward.py (15개 테스트 - 신규)
+```
+
+---
+
+### 2026-02-19 (Stage 4 Week 4: ParameterOptimizer)
+
+**목표**: Grid Search 기반 파라미터 최적화 시스템 구현
+
+**구현 내용**:
+- ✅ **normalizer.py 수정**: institution_weight 파라미터화
+  - 0.3 하드코딩 → `self.config.get('institution_weight', 0.3)` 참조
+  - `calculate_sff()`, `_get_sff_data()` 두 곳 모두 수정
+  - `__init__` config에 기본값 포함
+
+- ✅ **engine.py 수정**: BacktestConfig에 institution_weight 추가
+  - `institution_weight: float = 0.3` 파라미터 추가
+  - `BacktestEngine.__init__` 에서 SupplyNormalizer에 institution_weight 전달
+
+- ✅ **optimizer.py 신규 생성** (`src/backtesting/optimizer.py`)
+  - `_run_backtest_worker()`: 모듈 레벨 worker (multiprocessing pickle 호환)
+  - `ParameterOptimizer` 클래스
+    - `DEFAULT_PARAM_GRID`: 5개 파라미터 × 기본 값 세트
+    - `grid_search()`: 모든 조합 실행 → top_n DataFrame 반환
+    - `_build_param_combinations()`: itertools.product 조합 생성
+    - `print_results()`: 결과 테이블 출력
+  - `workers=1`: 순차 / `workers>1`: multiprocessing.Pool 병렬
+
+- ✅ **backtest_runner.py 수정**: --optimize 옵션 추가
+  - `--optimize`: Grid Search 실행
+  - `--workers N`: 병렬 worker 수
+  - `--metric`: 평가 지표 (sharpe_ratio/total_return/win_rate/profit_factor)
+  - `--top-n N`: 상위 N개 출력
+  - `--opt-save-csv PATH`: 결과 CSV 저장
+  - `run_optimization()` 함수 분리
+
+**테스트**: 8개 (100% 통과)
+- institution_weight Config 기본값/커스텀: 2개
+- BacktestEngine normalizer 전달: 1개
+- 파라미터 조합 수/값 검증: 2개
+- grid_search 반환 타입/정렬/top_n: 3개
+
+**전체 테스트**: 190개 (100% 통과) - 기존 3개 실패도 복구됨
+
+**파일 구조**:
+```
+src/analyzer/normalizer.py (institution_weight 파라미터화)
+src/backtesting/engine.py (institution_weight in BacktestConfig)
+src/backtesting/optimizer.py (ParameterOptimizer - 신규)
+scripts/analysis/backtest_runner.py (--optimize 옵션)
+tests/backtesting/test_optimizer.py (8개 테스트 - 신규)
+```
+
+---
 
 ### 2026-02-19 (외국인 중심 조건부 Sff 적용)
 
@@ -900,5 +1004,5 @@ tests/backtesting/
 
 ---
 
-**프로젝트 버전**: v4.3 (Stage 4 Week 3 완료 + 외국인 중심 Sff)
+**프로젝트 버전**: v4.5 (Stage 4 Week 5 완료 - Walk-Forward Analysis + 성능 최적화)
 **마지막 업데이트**: 2026-02-19

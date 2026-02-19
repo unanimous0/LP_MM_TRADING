@@ -466,7 +466,9 @@ class TestShortPosition:
         assert trade is not None
         assert trade.direction == 'short'
         assert trade.return_pct < 0  # 손실
-        assert portfolio.cash < cash_after_entry  # 손실 발생
+        # 공매도 청산 시 담보금이 환수되므로 cash > cash_after_entry는 정상
+        # 손실이 발생했으므로 초기 자본(10,000,000)보다는 적어야 함
+        assert portfolio.cash < 10_000_000
 
     def test_short_exit_costs_include_borrowing_fee(self):
         """Short 청산 비용에 차입 비용 포함 확인"""

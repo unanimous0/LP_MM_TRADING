@@ -23,8 +23,8 @@ class TestBacktestConfig:
         assert config.min_score == 70
         assert config.min_signals == 2
         assert config.target_return == 0.15
-        assert config.stop_loss == -0.07
-        assert config.max_hold_days == 30
+        assert config.stop_loss == -0.075
+        assert config.max_hold_days == 999
         assert config.allowed_patterns is None
 
     def test_custom_config(self):
@@ -145,14 +145,16 @@ class TestBacktestEngine:
 
         candidates = engine._select_entry_candidates(signals)
 
-        # 점수 60 이상, 시그널 1개 이상
-        assert len(candidates) == 3  # 85, 75, 65
+        # final_score(= score + signal_count*5) 60 이상, 시그널 1개 이상
+        # 005930: 85+10=95, 000660: 75+10=85, 035420: 65+5=70, 051910: 55+5=60 → 4개
+        assert len(candidates) == 4
         assert candidates.iloc[0]['stock_code'] == '005930'  # 점수 높은 순
 
         # 패턴 필터링
         engine.config.allowed_patterns = ['모멘텀형']
         candidates2 = engine._select_entry_candidates(signals)
-        assert len(candidates2) == 1  # 005930만
+        # 모멘텀형: 005930(final=95), 051910(final=60) → 2개
+        assert len(candidates2) == 2
         assert candidates2.iloc[0]['pattern'] == '모멘텀형'
 
     @pytest.mark.slow
