@@ -2,12 +2,12 @@
 WalkForwardAnalyzer 모듈 테스트 (Week 5)
 
 테스트 항목:
-1. WalkForwardConfig 기본값 검증
+1. WalkForwardConfig 기본값 검증 (n_trials 포함)
 2. split_periods() 기간 분할 수 정확성
 3. split_periods() 학습/검증 기간 중복 없음
 4. split_periods() 연속성 (스텝 이동 정확성)
 5. split_periods() 데이터 부족 시 빈 리스트 반환
-6. run() 반환 딕셔너리 키 구조 검증
+6. run() 반환 딕셔너리 키 구조 검증 (Optuna worker mock)
 7. run() 각 기간 결과에 성과 메트릭 포함 확인
 8. summary() DataFrame 반환 확인
 9. SupplyNormalizer preload() / clear_preload() 동작
@@ -93,7 +93,7 @@ class TestWalkForwardConfig:
     """WalkForwardConfig 테스트"""
 
     def test_wf_config_defaults(self):
-        """WalkForwardConfig 기본값 검증"""
+        """WalkForwardConfig 기본값 검증 (n_trials 포함)"""
         config = WalkForwardConfig()
 
         assert config.train_months == 6
@@ -102,6 +102,12 @@ class TestWalkForwardConfig:
         assert config.metric == 'sharpe_ratio'
         assert config.top_n == 1
         assert config.workers == 1
+        assert config.n_trials == 50
+
+    def test_wf_config_n_trials_custom(self):
+        """WalkForwardConfig n_trials 사용자 정의 값 저장 확인"""
+        config = WalkForwardConfig(n_trials=100)
+        assert config.n_trials == 100
 
     def test_wf_config_custom(self):
         """WalkForwardConfig 사용자 정의 값 저장 확인"""
@@ -179,60 +185,45 @@ class TestSplitPeriods:
 class TestWalkForwardAnalyzerRun:
     """WalkForwardAnalyzer.run() 테스트"""
 
-    def _mock_opt_result(self):
-        """최적화 결과 Mock DataFrame"""
-        return pd.DataFrame([{
-            'min_score': 60.0,
-            'min_signals': 1.0,
-            'target_return': 0.15,
-            'stop_loss': -0.075,
-            'institution_weight': 0.3,
+    def _make_worker_result(self, period: dict) -> dict:
+        """_run_wf_period_optuna_worker Mock 반환값"""
+        return {
+            'train_start': period['train_start'],
+            'train_end': period['train_end'],
+            'val_start': period['val_start'],
+            'val_end': period['val_end'],
+            'best_params': {
+                'min_score': 60.0, 'min_signals': 1,
+                'target_return': 0.15, 'stop_loss': -0.075,
+                'institution_weight': 0.3,
+            },
             'total_return': 1.5,
             'sharpe_ratio': 0.8,
             'win_rate': 55.0,
             'max_drawdown': -5.0,
             'profit_factor': 1.2,
             'total_trades': 10,
-        }])
-
-    def _mock_engine_result(self):
-        """BacktestEngine.run() Mock 결과"""
-        return {
-            'trades': [],
-            'daily_values': pd.DataFrame({
+            'val_trades': [],
+            'val_daily_values': pd.DataFrame({
                 'date': pd.Series([], dtype=str),
                 'value': pd.Series([], dtype=float),
                 'cash': pd.Series([], dtype=float),
                 'position_count': pd.Series([], dtype=int),
                 'total_trades': pd.Series([], dtype=int),
             }),
-            'portfolio': MagicMock(),
-            'config': BacktestConfig(),
         }
 
     def test_run_returns_expected_keys(self):
-        """run() 반환 딕셔너리 키 구조 검증"""
+        """run() 반환 딕셔너리 키 구조 검증 (Optuna worker mock)"""
         analyzer = _make_analyzer('2024-01-01', '2024-12-31')
 
-        with patch('src.backtesting.walk_forward.ParameterOptimizer') as MockOpt, \
-             patch('src.backtesting.walk_forward.BacktestEngine') as MockEngine, \
-             patch('src.backtesting.walk_forward.PerformanceMetrics') as MockMetrics:
+        # _run_wf_period_optuna_worker를 mock으로 대체
+        def mock_worker(args):
+            _, period, *_ = args
+            return self._make_worker_result(period)
 
-            # Optimizer mock
-            MockOpt.return_value.grid_search.return_value = self._mock_opt_result()
-
-            # Engine mock
-            MockEngine.return_value.run.return_value = self._mock_engine_result()
-
-            # PerformanceMetrics mock
-            mock_metrics = MagicMock()
-            mock_metrics.summary.return_value = {
-                'total_return': 1.5, 'sharpe_ratio': 0.8,
-                'win_rate': 55.0, 'max_drawdown': -5.0,
-                'profit_factor': 1.2, 'total_trades': 10,
-            }
-            MockMetrics.return_value = mock_metrics
-
+        with patch('src.backtesting.walk_forward._run_wf_period_optuna_worker',
+                   side_effect=mock_worker):
             result = analyzer.run(verbose=False)
 
         assert 'periods' in result
@@ -245,21 +236,12 @@ class TestWalkForwardAnalyzerRun:
         # step=6으로 줄여서 기간 수 제한
         analyzer = _make_analyzer('2024-01-01', '2024-12-31', train=6, val=1, step=6)
 
-        with patch('src.backtesting.walk_forward.ParameterOptimizer') as MockOpt, \
-             patch('src.backtesting.walk_forward.BacktestEngine') as MockEngine, \
-             patch('src.backtesting.walk_forward.PerformanceMetrics') as MockMetrics:
+        def mock_worker(args):
+            _, period, *_ = args
+            return self._make_worker_result(period)
 
-            MockOpt.return_value.grid_search.return_value = self._mock_opt_result()
-            MockEngine.return_value.run.return_value = self._mock_engine_result()
-
-            mock_metrics = MagicMock()
-            mock_metrics.summary.return_value = {
-                'total_return': 2.0, 'sharpe_ratio': 1.0,
-                'win_rate': 60.0, 'max_drawdown': -3.0,
-                'profit_factor': 1.5, 'total_trades': 5,
-            }
-            MockMetrics.return_value = mock_metrics
-
+        with patch('src.backtesting.walk_forward._run_wf_period_optuna_worker',
+                   side_effect=mock_worker):
             result = analyzer.run(verbose=False)
 
         assert len(result['periods']) >= 1
@@ -273,21 +255,12 @@ class TestWalkForwardAnalyzerRun:
         """summary() → DataFrame 반환 및 필수 컬럼 확인"""
         analyzer = _make_analyzer('2024-01-01', '2024-12-31', train=6, val=1, step=6)
 
-        with patch('src.backtesting.walk_forward.ParameterOptimizer') as MockOpt, \
-             patch('src.backtesting.walk_forward.BacktestEngine') as MockEngine, \
-             patch('src.backtesting.walk_forward.PerformanceMetrics') as MockMetrics:
+        def mock_worker(args):
+            _, period, *_ = args
+            return self._make_worker_result(period)
 
-            MockOpt.return_value.grid_search.return_value = self._mock_opt_result()
-            MockEngine.return_value.run.return_value = self._mock_engine_result()
-
-            mock_metrics = MagicMock()
-            mock_metrics.summary.return_value = {
-                'total_return': 1.0, 'sharpe_ratio': 0.5,
-                'win_rate': 50.0, 'max_drawdown': -4.0,
-                'profit_factor': 1.1, 'total_trades': 3,
-            }
-            MockMetrics.return_value = mock_metrics
-
+        with patch('src.backtesting.walk_forward._run_wf_period_optuna_worker',
+                   side_effect=mock_worker):
             analyzer.run(verbose=False)
 
         df = analyzer.summary()

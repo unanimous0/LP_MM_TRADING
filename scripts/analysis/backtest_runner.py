@@ -34,8 +34,14 @@ Usage:
     # 최적화 결과 CSV 저장
     python scripts/analysis/backtest_runner.py --optimize --opt-save-csv output/optimization.csv
 
-    # Walk-Forward Analysis (기본: 6개월 학습, 1개월 검증)
+    # Walk-Forward Analysis (기본: 6개월 학습, 1개월 검증, Optuna 50 trials)
     python scripts/analysis/backtest_runner.py --walk-forward --start 2024-01-01 --end 2024-12-31
+
+    # Walk-Forward (Optuna trials 수 지정)
+    python scripts/analysis/backtest_runner.py --walk-forward --n-trials 100
+
+    # Walk-Forward 병렬 실행 (기간 단위)
+    python scripts/analysis/backtest_runner.py --walk-forward --workers 4 --n-trials 30
 
     # Walk-Forward 결과 CSV 저장
     python scripts/analysis/backtest_runner.py --walk-forward --wf-save-csv output/walk_forward.csv
@@ -147,7 +153,7 @@ def save_trades_to_csv(trades, filepath: str):
 
 
 def run_walk_forward(args):
-    """Walk-Forward Analysis 실행"""
+    """Walk-Forward Analysis 실행 (Optuna Bayesian Optimization)"""
     from src.backtesting.walk_forward import WalkForwardAnalyzer, WalkForwardConfig
 
     wf_config = WalkForwardConfig(
@@ -156,6 +162,7 @@ def run_walk_forward(args):
         step_months=args.step_months,
         metric=args.metric,
         workers=args.workers,
+        n_trials=args.n_trials,
     )
     base_config = BacktestConfig(
         initial_capital=args.capital,
@@ -254,8 +261,11 @@ def main():
   # 최적화 결과 CSV 저장
   python scripts/analysis/backtest_runner.py --optimize --opt-save-csv output/optimization.csv
 
-  # Walk-Forward Analysis
+  # Walk-Forward Analysis (Optuna, 기본 50 trials)
   python scripts/analysis/backtest_runner.py --walk-forward --start 2024-01-01 --end 2024-12-31
+
+  # Walk-Forward (100 trials, 4 workers 병렬)
+  python scripts/analysis/backtest_runner.py --walk-forward --n-trials 100 --workers 4
         """
     )
 
@@ -319,6 +329,8 @@ def main():
     parser.add_argument('--step-months', type=int, default=1,
                         help='롤링 스텝 (개월, 기본: 1)')
     parser.add_argument('--wf-save-csv', help='Walk-Forward 결과 CSV 저장 경로')
+    parser.add_argument('--n-trials', type=int, default=50,
+                        help='Optuna Trial 수 (Walk-Forward용, 기본: 50, Phase 1: n//2, Phase 2: 나머지)')
 
     args = parser.parse_args()
 

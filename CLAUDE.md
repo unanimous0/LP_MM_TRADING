@@ -1,12 +1,12 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- **현재 작업**: Stage 4 전체 완료 (버그 수정 포함) ✅
+- **현재 작업**: Stage 4 전체 완료 + Walk-Forward Optuna 업그레이드 ✅
 - **마지막 업데이트**: 2026-02-19
 - **백테스트 권장 시작일**: 2025-01-01 이후 (DB가 2024-01-02 시작이므로 1Y 데이터 확보)
 - **다음 시작점**: Stage 5-1 (Streamlit 웹 대시보드)
 - **시각화**: matplotlib 차트 5종 완성 (PNG/PDF 리포트)
-- **향후 계획**: Option 2 (Plotly/HTML) → Stage 5 (Streamlit 웹 대시보드)
+- **향후 계획**: Stage 5 (Streamlit 웹 대시보드)
 - **현재 브랜치**: main
 - **로드맵**: [Next Steps] 섹션 Stage 4 완료, Stage 5 참조
 
@@ -111,9 +111,9 @@ python scripts/crawlers/crawl_all_data.py --start 2024-01-01
 
 **목표**: 과거 데이터로 패턴 분류 전략의 수익률 검증 및 최적화 (롱/숏 전략 지원)
 
-**현재 진행**: Week 1~5 + Week 2.5 완료 (205개 테스트, 205개 통과) ✅
-**다음 단계**: Stage 5 또는 Option 2 (Plotly/HTML 인터랙티브 차트)
-**완료**: 6주 (Week 1~5 + Week 2.5 순매도 탐지)
+**현재 진행**: Week 1~5 + Week 2.5 + Optuna 업그레이드 완료 (206개 테스트, 206개 통과) ✅
+**다음 단계**: Stage 5-1 (Streamlit 웹 대시보드)
+**완료**: 6주 + Optuna 업그레이드 (Week 1~5 + Week 2.5 + Walk-Forward Optuna)
 
 ---
 
@@ -251,7 +251,17 @@ python backtest_runner.py --plot --save-pdf output/report.pdf
 - **테스트**: 15개 (100% 통과)
 - **상세**: [Progress History] → 2026-02-19 Week 5
 
-**진행률**: 205/205 (100%) - Stage 4 완료 ✅
+**✅ Walk-Forward Optuna 업그레이드** (완료)
+- Grid Search → Optuna Bayesian Optimization으로 교체 (Walk-Forward 한정)
+- **MedianPruner**: 절반 기간 중간 평가 → 나쁜 Trial 조기 중단
+- **2단계 탐색**: Phase 1 (넓은 범위) → Phase 2 (상위 25% 기준 좁혀서 집중)
+- **기간 단위 병렬 실행**: multiprocessing.Pool (--workers N)
+- **CLI**: `--n-trials N` 옵션 추가 (기본: 50)
+- `--optimize` (Grid Search) 는 그대로 유지
+- **테스트**: 16개 (100% 통과, n_trials 테스트 1개 추가)
+- **상세**: [Progress History] → 2026-02-19 Walk-Forward Optuna 업그레이드
+
+**진행률**: 206/206 (100%) - Stage 4 완료 ✅
 
 ---
 
@@ -462,7 +472,7 @@ LP_MM_TRADING/
 │   └── loaders/
 │       ├── load_initial_data.py
 │       └── load_daily_data.py
-└── tests/                         # 테스트 (179개 통과 / 182개)
+└── tests/                         # 테스트 (206개 통과)
     ├── test_config.py
     ├── test_normalizer.py
     ├── test_performance_optimizer.py
@@ -474,7 +484,9 @@ LP_MM_TRADING/
         ├── test_engine.py
         ├── test_portfolio.py
         ├── test_metrics.py
-        └── test_visualizer.py
+        ├── test_visualizer.py
+        ├── test_optimizer.py            # Grid Search + Optuna
+        └── test_walk_forward.py         # Walk-Forward (16개)
 ```
 
 ---
@@ -484,6 +496,8 @@ LP_MM_TRADING/
 - SQLite (DB)
 - pandas, numpy (분석)
 - matplotlib, seaborn (시각화)
+- plotly (인터랙티브 차트)
+- optuna (Bayesian Optimization - Walk-Forward용)
 - FinanceDataReader, BeautifulSoup (크롤링)
 - pytest (테스트)
 
@@ -542,6 +556,68 @@ LP_MM_TRADING/
 ---
 
 ## [Progress History]
+
+### 2026-02-19 (Walk-Forward Optuna 업그레이드)
+
+**목표**: Walk-Forward의 Grid Search를 Optuna Bayesian Optimization으로 교체
+
+**구현 내용**:
+- ✅ **optimizer.py 수정**: `OptunaOptimizer` 클래스 추가 (ParameterOptimizer는 유지)
+  - `DEFAULT_PARAM_SPACE`: 연속 범위 파라미터 공간 (float/int)
+  - `_build_objective()`: Optuna objective 클로저
+    - Step 0: 학습 기간 **절반** 평가 → `trial.report()` → MedianPruner 판단
+    - 통과 시: **전체 기간** 평가 → 최종 메트릭 반환
+  - `_narrow_param_space()`: Phase 1 상위 25% Trial 기준 탐색 범위 좁히기
+  - `optimize(n_trials=50)`: 2단계 Bayesian 최적화
+    - Phase 1 (`n//2` trials): 넓은 범위, MedianPruner 활성화
+    - Phase 2 (`n - n//2` trials): 좁힌 범위 + Phase 1 최고값 seed 삽입
+    - 두 Phase 통합 후 최고 Trial 선택
+
+- ✅ **walk_forward.py 수정**: Optuna + 기간 단위 병렬 실행
+  - `_run_wf_period_optuna_worker()` 모듈 레벨 worker 추가 (pickle 호환)
+    - 1개 기간: OptunaOptimizer로 학습 기간 최적화 → 검증 기간 백테스트
+    - multiprocessing.Pool 병렬 지원
+  - `WalkForwardConfig`: `n_trials=50` 파라미터 추가
+  - `WalkForwardAnalyzer.run()`: Grid Search → OptunaOptimizer로 교체
+    - `workers > 1`: Pool로 기간 단위 병렬 실행
+    - `workers == 1`: 순차 실행 (verbose 상세 출력)
+
+- ✅ **backtest_runner.py 수정**: `--n-trials` CLI 옵션 추가
+  - `--n-trials N`: Optuna Trial 수 (기본: 50, Phase 1: n//2, Phase 2: 나머지)
+  - `--workers N`: 기간 단위 병렬 실행 수
+
+- ✅ **requirements.txt**: `optuna>=3.0.0` 추가
+
+**테스트**: 16개 (100% 통과, 기존 15개 + n_trials 테스트 1개 추가)
+- 기존 run() 테스트 3개: `ParameterOptimizer` mock → `_run_wf_period_optuna_worker` mock으로 교체
+- `test_wf_config_n_trials_custom` 신규 추가
+
+**전체 테스트**: 206개 (100% 통과)
+
+**파일 구조**:
+```
+requirements.txt (optuna>=3.0.0 추가)
+src/backtesting/optimizer.py (OptunaOptimizer 클래스 추가)
+src/backtesting/walk_forward.py (_run_wf_period_optuna_worker + WalkForwardConfig n_trials)
+scripts/analysis/backtest_runner.py (--n-trials 옵션)
+tests/backtesting/test_walk_forward.py (mock 교체 + n_trials 테스트)
+```
+
+**CLI 사용 예시**:
+```bash
+# Walk-Forward (기본: 50 trials, 순차)
+python scripts/analysis/backtest_runner.py --walk-forward \
+  --start 2024-01-01 --end 2024-12-31
+
+# 100 trials, 4 workers 병렬 (기간 단위)
+python scripts/analysis/backtest_runner.py --walk-forward \
+  --n-trials 100 --workers 4
+
+# Grid Search는 그대로
+python scripts/analysis/backtest_runner.py --optimize --workers 4
+```
+
+---
 
 ### 2026-02-19 (Stage 4 Week 5: Walk-Forward Analysis + 성능 최적화)
 
@@ -1007,5 +1083,5 @@ tests/backtesting/
 
 ---
 
-**프로젝트 버전**: v4.6 (Option 2 완료 - Plotly HTML 인터랙티브 리포트)
+**프로젝트 버전**: v4.7 (Walk-Forward Optuna Bayesian Optimization 업그레이드)
 **마지막 업데이트**: 2026-02-19
