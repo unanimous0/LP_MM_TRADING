@@ -25,11 +25,11 @@ Usage:
     # CSV + 차트 모두 저장
     python scripts/analysis/backtest_runner.py --save-csv output/trades.csv --save-dir output/charts
 
-    # Grid Search 최적화 (기본)
+    # Optuna 파라미터 최적화 (기본 50 trials)
     python scripts/analysis/backtest_runner.py --optimize
 
-    # 병렬 Grid Search (4 workers, total_return 기준)
-    python scripts/analysis/backtest_runner.py --optimize --workers 4 --metric total_return
+    # Optuna 최적화 (100 trials, total_return 기준)
+    python scripts/analysis/backtest_runner.py --optimize --n-trials 100 --metric total_return
 
     # 최적화 결과 CSV 저장
     python scripts/analysis/backtest_runner.py --optimize --opt-save-csv output/optimization.csv
@@ -59,7 +59,7 @@ from src.database.connection import get_connection, DB_PATH
 from src.backtesting.engine import BacktestEngine, BacktestConfig
 from src.backtesting.metrics import PerformanceMetrics
 from src.backtesting.visualizer import BacktestVisualizer
-from src.backtesting.optimizer import ParameterOptimizer
+from src.backtesting.optimizer import OptunaOptimizer
 import pandas as pd
 
 
@@ -189,7 +189,7 @@ def run_walk_forward(args):
 
 
 def run_optimization(args):
-    """Grid Search 최적화 실행"""
+    """Optuna Bayesian Optimization 최적화 실행"""
     base_config = BacktestConfig(
         initial_capital=args.capital,
         max_positions=args.max_positions,
@@ -199,23 +199,27 @@ def run_optimization(args):
         force_exit_on_end=False,
     )
 
-    optimizer = ParameterOptimizer(
+    optimizer = OptunaOptimizer(
         db_path=str(project_root / DB_PATH),
         start_date=args.start,
         end_date=args.end,
         base_config=base_config,
     )
 
-    results_df = optimizer.grid_search(
+    result = optimizer.optimize(
+        n_trials=args.n_trials,
         metric=args.metric,
-        top_n=args.top_n,
-        workers=args.workers,
         verbose=True,
     )
 
-    if not results_df.empty and args.opt_save_csv:
+    if result is not None and args.opt_save_csv:
+        # dict → 1행 DataFrame 변환
+        row = {**result['params'], args.metric: result[args.metric],
+               'total_complete': result['total_complete'],
+               'total_pruned': result['total_pruned']}
+        df = pd.DataFrame([row])
         Path(args.opt_save_csv).parent.mkdir(parents=True, exist_ok=True)
-        results_df.to_csv(args.opt_save_csv, index=False, encoding='utf-8-sig')
+        df.to_csv(args.opt_save_csv, index=False, encoding='utf-8-sig')
         print(f"✅ 최적화 결과 저장: {args.opt_save_csv}")
 
 
@@ -252,11 +256,11 @@ def main():
   # CSV + 차트 모두 저장
   python scripts/analysis/backtest_runner.py --save-csv output/trades.csv --save-dir output/charts
 
-  # Grid Search 최적화
+  # Optuna 파라미터 최적화
   python scripts/analysis/backtest_runner.py --optimize
 
-  # 병렬 Grid Search
-  python scripts/analysis/backtest_runner.py --optimize --workers 4 --metric total_return
+  # Optuna 최적화 (100 trials, total_return 기준)
+  python scripts/analysis/backtest_runner.py --optimize --n-trials 100 --metric total_return
 
   # 최적화 결과 CSV 저장
   python scripts/analysis/backtest_runner.py --optimize --opt-save-csv output/optimization.csv
@@ -311,12 +315,11 @@ def main():
                         help='HTML에 CDN 방식으로 Plotly.js 로드 (파일 경량, 인터넷 필요)')
 
     # 최적화 옵션 (Week 4)
-    parser.add_argument('--optimize', action='store_true', help='Grid Search 파라미터 최적화 실행')
+    parser.add_argument('--optimize', action='store_true', help='Optuna 파라미터 최적화 실행')
     parser.add_argument('--workers', type=int, default=1, help='병렬 처리 worker 수 (기본: 1)')
     parser.add_argument('--metric', default='sharpe_ratio',
                         choices=['sharpe_ratio', 'total_return', 'win_rate', 'profit_factor'],
                         help='최적화 평가 지표 (기본: sharpe_ratio)')
-    parser.add_argument('--top-n', type=int, default=10, help='상위 N개 결과 출력 (기본: 10)')
     parser.add_argument('--opt-save-csv', help='최적화 결과 CSV 저장 경로')
 
     # Walk-Forward 옵션 (Week 5)
@@ -330,7 +333,7 @@ def main():
                         help='롤링 스텝 (개월, 기본: 1)')
     parser.add_argument('--wf-save-csv', help='Walk-Forward 결과 CSV 저장 경로')
     parser.add_argument('--n-trials', type=int, default=50,
-                        help='Optuna Trial 수 (Walk-Forward용, 기본: 50, Phase 1: n//2, Phase 2: 나머지)')
+                        help='Optuna Trial 수 (--optimize, --walk-forward 공용, 기본: 50)')
 
     args = parser.parse_args()
 

@@ -1,7 +1,7 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- **현재 작업**: Stage 4 전체 완료 + Walk-Forward Optuna 업그레이드 ✅
+- **현재 작업**: Stage 4 전체 완료 + --optimize Optuna 통합 ✅
 - **마지막 업데이트**: 2026-02-19
 - **백테스트 권장 시작일**: 2025-01-01 이후 (DB가 2024-01-02 시작이므로 1Y 데이터 확보)
 - **다음 시작점**: Stage 5-1 (Streamlit 웹 대시보드)
@@ -111,9 +111,9 @@ python scripts/crawlers/crawl_all_data.py --start 2024-01-01
 
 **목표**: 과거 데이터로 패턴 분류 전략의 수익률 검증 및 최적화 (롱/숏 전략 지원)
 
-**현재 진행**: Week 1~5 + Week 2.5 + Optuna 업그레이드 완료 (206개 테스트, 206개 통과) ✅
+**현재 진행**: Week 1~5 + Week 2.5 + Optuna 통합 완료 (233개 테스트, 233개 통과) ✅
 **다음 단계**: Stage 5-1 (Streamlit 웹 대시보드)
-**완료**: 6주 + Optuna 업그레이드 (Week 1~5 + Week 2.5 + Walk-Forward Optuna)
+**완료**: 6주 + Optuna 통합 (Week 1~5 + Week 2.5 + Optuna 전면 교체)
 
 ---
 
@@ -237,12 +237,11 @@ python backtest_runner.py --plot --save-pdf output/report.pdf
 
 **테스트**: 10개 예상 (차트 생성 확인, CSV 저장)
 
-**✅ Week 4: ParameterOptimizer** (완료)
-- Grid Search (최적 파라미터 탐색)
+**✅ Week 4: 파라미터 최적화** (완료)
+- Optuna Bayesian Optimization (--optimize, --walk-forward 공용)
   - 백테스트 파라미터: min_score, min_signals, target_return, stop_loss
-  - **기관 가중치 최적화**: institution_weight [0.0, 0.1, 0.2, 0.3, 0.5] (normalizer.py 파라미터화)
-- multiprocessing 병렬 처리 (workers 옵션)
-- CLI 통합 (`--optimize`, `--workers`, `--metric`, `--top-n`, `--opt-save-csv`)
+  - **기관 가중치 최적화**: institution_weight (normalizer.py 파라미터화)
+- CLI 통합 (`--optimize`, `--n-trials`, `--workers`, `--metric`, `--opt-save-csv`)
 - **테스트**: 8개 (100% 통과)
 
 **✅ Week 5: Walk-Forward + 성능 최적화** (완료)
@@ -251,17 +250,17 @@ python backtest_runner.py --plot --save-pdf output/report.pdf
 - **테스트**: 15개 (100% 통과)
 - **상세**: [Progress History] → 2026-02-19 Week 5
 
-**✅ Walk-Forward Optuna 업그레이드** (완료)
-- Grid Search → Optuna Bayesian Optimization으로 교체 (Walk-Forward 한정)
+**✅ Optuna 전면 통합** (완료)
+- Grid Search → Optuna Bayesian Optimization 전면 교체 (--optimize + --walk-forward)
 - **MedianPruner**: 절반 기간 중간 평가 → 나쁜 Trial 조기 중단
 - **2단계 탐색**: Phase 1 (넓은 범위) → Phase 2 (상위 25% 기준 좁혀서 집중)
 - **기간 단위 병렬 실행**: multiprocessing.Pool (--workers N)
-- **CLI**: `--n-trials N` 옵션 추가 (기본: 50)
-- `--optimize` (Grid Search) 는 그대로 유지
-- **테스트**: 16개 (100% 통과, n_trials 테스트 1개 추가)
-- **상세**: [Progress History] → 2026-02-19 Walk-Forward Optuna 업그레이드
+- **CLI**: `--n-trials N` 옵션 (--optimize, --walk-forward 공용, 기본: 50)
+- ParameterOptimizer(Grid Search) 완전 제거, OptunaOptimizer로 통일
+- **테스트**: 16개 (walk_forward) + 8개 (optimizer) (100% 통과)
+- **상세**: [Progress History] → 2026-02-19
 
-**진행률**: 206/206 (100%) - Stage 4 완료 ✅
+**진행률**: 233/233 (100%) - Stage 4 완료 ✅
 
 ---
 
@@ -452,7 +451,7 @@ LP_MM_TRADING/
 │   │   ├── engine.py              # BacktestEngine (롤링 윈도우, preload 지원)
 │   │   ├── portfolio.py           # Trade, Position, Portfolio
 │   │   ├── metrics.py             # PerformanceMetrics
-│   │   ├── optimizer.py           # ParameterOptimizer (Grid Search)
+│   │   ├── optimizer.py           # OptunaOptimizer (Bayesian Optimization)
 │   │   ├── walk_forward.py        # WalkForwardAnalyzer (Week 5)
 │   │   └── visualizer.py          # 차트 5종 (matplotlib)
 │   ├── visualizer/                # 시각화 모듈
@@ -472,7 +471,7 @@ LP_MM_TRADING/
 │   └── loaders/
 │       ├── load_initial_data.py
 │       └── load_daily_data.py
-└── tests/                         # 테스트 (206개 통과)
+└── tests/                         # 테스트 (233개 통과)
     ├── test_config.py
     ├── test_normalizer.py
     ├── test_performance_optimizer.py
@@ -485,7 +484,7 @@ LP_MM_TRADING/
         ├── test_portfolio.py
         ├── test_metrics.py
         ├── test_visualizer.py
-        ├── test_optimizer.py            # Grid Search + Optuna
+        ├── test_optimizer.py            # OptunaOptimizer
         └── test_walk_forward.py         # Walk-Forward (16개)
 ```
 
@@ -497,7 +496,7 @@ LP_MM_TRADING/
 - pandas, numpy (분석)
 - matplotlib, seaborn (시각화)
 - plotly (인터랙티브 차트)
-- optuna (Bayesian Optimization - Walk-Forward용)
+- optuna (Bayesian Optimization - --optimize, --walk-forward 공용)
 - FinanceDataReader, BeautifulSoup (크롤링)
 - pytest (테스트)
 
@@ -556,6 +555,57 @@ LP_MM_TRADING/
 ---
 
 ## [Progress History]
+
+### 2026-02-19 (--optimize Grid Search → Optuna 교체)
+
+**목표**: `--optimize`의 Grid Search(ParameterOptimizer)를 Optuna로 교체하여 코드 통일
+
+**구현 내용**:
+- ✅ **optimizer.py 정리**: `ParameterOptimizer` 클래스 + `_run_backtest_worker()` 함수 제거
+  - `OptunaOptimizer`만 남김 (--optimize, --walk-forward 공용)
+  - 미사용 import 제거 (`itertools`, `Pool`, `List`)
+  - 모듈 docstring 업데이트
+
+- ✅ **backtest_runner.py 수정**: `ParameterOptimizer` → `OptunaOptimizer`
+  - `run_optimization()`: `optimizer.optimize(n_trials, metric)` 호출
+  - 결과(dict) → 1행 DataFrame 변환 후 CSV 저장
+  - `--optimize` help: "Grid Search" → "Optuna 파라미터 최적화"
+  - `--top-n` 옵션 제거 (Optuna는 최적 1개 반환)
+  - `--n-trials` help: --optimize, --walk-forward 공용으로 변경
+
+- ✅ **walk_forward.py 정리**: 미사용 `ParameterOptimizer` import 제거
+
+- ✅ **test_optimizer.py 재작성**:
+  - `TestParameterOptimizer` (5개) 제거
+  - `TestOptunaOptimizer` (5개) 추가:
+    - `test_default_param_space_keys`, `test_optimize_returns_expected_structure`
+    - `test_optimize_returns_none_on_failure`, `test_optimize_best_metric_value`
+    - `test_optimize_n_trials`
+  - `TestInstitutionWeightConfig` (3개) 유지
+
+**테스트**: 233개 (100% 통과, 테스트 수 변동 없음)
+
+**파일 구조**:
+```
+src/backtesting/optimizer.py (ParameterOptimizer 제거, OptunaOptimizer만 유지)
+src/backtesting/walk_forward.py (미사용 import 제거)
+scripts/analysis/backtest_runner.py (OptunaOptimizer 사용, --top-n 제거)
+tests/backtesting/test_optimizer.py (TestOptunaOptimizer로 교체)
+```
+
+**CLI 사용 예시**:
+```bash
+# Optuna 파라미터 최적화 (기본: 50 trials)
+python scripts/analysis/backtest_runner.py --optimize
+
+# 100 trials, total_return 기준
+python scripts/analysis/backtest_runner.py --optimize --n-trials 100 --metric total_return
+
+# Walk-Forward도 동일한 OptunaOptimizer 사용
+python scripts/analysis/backtest_runner.py --walk-forward --n-trials 100 --workers 4
+```
+
+---
 
 ### 2026-02-19 (Walk-Forward Optuna 업그레이드)
 
@@ -1083,5 +1133,5 @@ tests/backtesting/
 
 ---
 
-**프로젝트 버전**: v4.7 (Walk-Forward Optuna Bayesian Optimization 업그레이드)
+**프로젝트 버전**: v4.8 (--optimize Grid Search → Optuna 통합)
 **마지막 업데이트**: 2026-02-19

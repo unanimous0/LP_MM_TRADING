@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from multiprocessing import Pool
 
 from .engine import BacktestConfig, BacktestEngine
-from .optimizer import ParameterOptimizer, OptunaOptimizer
+from .optimizer import OptunaOptimizer
 from .metrics import PerformanceMetrics
 
 

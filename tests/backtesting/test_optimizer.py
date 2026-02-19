@@ -1,13 +1,14 @@
 """
-ParameterOptimizer 모듈 테스트 (Week 4)
+OptunaOptimizer 모듈 테스트
 
 테스트 항목:
 1. BacktestConfig institution_weight 저장 확인
 2. BacktestEngine이 normalizer에 weight 전달 확인
-3. 파라미터 조합 수 정확성 검증
-4. grid_search 반환 타입 + 컬럼 구조 검증
-5. metric 기준 내림차순 정렬 확인
-6. top_n 제한 동작 확인
+3. OptunaOptimizer DEFAULT_PARAM_SPACE 필수 키 확인
+4. optimize() 반환 구조 확인
+5. optimize() 모든 Trial 실패 시 None 반환
+6. optimize() 최고 metric 값 반환 확인
+7. optimize() n_trials 파라미터 동작 확인
 """
 
 import pytest
@@ -16,7 +17,7 @@ import pandas as pd
 from unittest.mock import patch, MagicMock
 
 from src.backtesting.engine import BacktestConfig, BacktestEngine
-from src.backtesting.optimizer import ParameterOptimizer, _run_backtest_worker
+from src.backtesting.optimizer import OptunaOptimizer
 
 
 class TestInstitutionWeightConfig:
@@ -55,158 +56,169 @@ class TestInstitutionWeightConfig:
             assert passed_config['institution_weight'] == 0.1
 
 
-class TestParameterOptimizer:
-    """ParameterOptimizer 테스트"""
+class TestOptunaOptimizer:
+    """OptunaOptimizer 테스트"""
 
     def _make_optimizer(self, db_path=':memory:'):
         """테스트용 optimizer 생성 (짧은 기간)"""
-        return ParameterOptimizer(
+        return OptunaOptimizer(
             db_path=db_path,
             start_date='2024-06-01',
             end_date='2024-06-30',
         )
 
-    def test_build_param_combinations_count(self):
-        """파라미터 조합 수 정확성 검증"""
+    def test_default_param_space_keys(self):
+        """DEFAULT_PARAM_SPACE 필수 키 확인"""
+        required_keys = {'min_score', 'min_signals', 'target_return',
+                         'stop_loss', 'institution_weight'}
+        assert required_keys == set(OptunaOptimizer.DEFAULT_PARAM_SPACE.keys())
+
+        # 각 파라미터에 type, low, high 존재 확인
+        for key, spec in OptunaOptimizer.DEFAULT_PARAM_SPACE.items():
+            assert 'type' in spec, f"{key}: type 없음"
+            assert 'low' in spec, f"{key}: low 없음"
+            assert 'high' in spec, f"{key}: high 없음"
+            assert spec['type'] in ('float', 'int'), f"{key}: 잘못된 type {spec['type']}"
+
+    def test_optimize_returns_expected_structure(self):
+        """optimize() 반환 구조 (params, metric, total_complete, total_pruned)"""
         optimizer = self._make_optimizer()
-
-        param_grid = {
-            'min_score': [60, 70],       # 2가지
-            'min_signals': [1, 2],        # 2가지
-            'institution_weight': [0.0, 0.3, 0.5],  # 3가지
-        }
-
-        combinations = optimizer._build_param_combinations(param_grid)
-
-        # 2 × 2 × 3 = 12가지 조합
-        assert len(combinations) == 12
-
-    def test_build_param_combinations_values(self):
-        """파라미터 조합 값 정확성 검증"""
-        optimizer = self._make_optimizer()
-
-        param_grid = {
-            'min_score': [60, 80],
-            'institution_weight': [0.0, 0.3],
-        }
-
-        combinations = optimizer._build_param_combinations(param_grid)
-
-        # 4가지 조합
-        assert len(combinations) == 4
-
-        # 각 조합에 base_config 기본값이 포함되는지 확인
-        for combo in combinations:
-            assert 'initial_capital' in combo
-            assert 'max_positions' in combo
-            assert 'strategy' in combo
-
-        # min_score 값 확인
-        scores = [c['min_score'] for c in combinations]
-        assert 60 in scores
-        assert 80 in scores
-
-    def test_grid_search_returns_dataframe(self):
-        """grid_search 반환 타입 + 컬럼 구조 검증"""
-        optimizer = self._make_optimizer()
-
-        # 작은 param_grid로 빠르게 테스트
-        small_grid = {
-            'min_score': [60],
-            'min_signals': [1],
-        }
 
         # BacktestEngine.run을 mock으로 대체
-        mock_result = {
-            'trades': [],
-            'daily_values': pd.DataFrame({'date': [], 'value': [], 'cash': [],
-                                          'position_count': [], 'total_trades': []}),
-            'portfolio': MagicMock(),
-            'config': BacktestConfig(),
+        mock_trades = [MagicMock(return_pct=5.0, hold_days=3, pattern='모멘텀형',
+                                  signal_count=2, direction='long')]
+        mock_daily = pd.DataFrame({
+            'date': ['2024-06-15'], 'value': [10_500_000],
+            'cash': [5_000_000], 'position_count': [1], 'total_trades': [1],
+        })
+        mock_summary = {
+            'total_return': 5.0, 'sharpe_ratio': 1.5, 'win_rate': 100.0,
+            'max_drawdown': -1.0, 'profit_factor': 999.0, 'total_trades': 1,
         }
 
-        with patch('src.backtesting.optimizer._run_backtest_worker') as mock_worker:
-            mock_worker.return_value = {
-                'params': {'min_score': 60, 'min_signals': 1},
-                'total_return': 1.5,
-                'sharpe_ratio': 0.8,
-                'win_rate': 55.0,
-                'max_drawdown': -5.0,
-                'profit_factor': 1.2,
-                'total_trades': 10,
-            }
+        with patch('src.backtesting.optimizer.BacktestEngine') as MockEngine:
+            with patch('src.backtesting.optimizer.PerformanceMetrics') as MockMetrics:
+                mock_engine_inst = MagicMock()
+                mock_engine_inst.run.return_value = {
+                    'trades': mock_trades,
+                    'daily_values': mock_daily,
+                }
+                MockEngine.return_value = mock_engine_inst
+                MockMetrics.return_value.summary.return_value = mock_summary
 
-            result_df = optimizer.grid_search(
-                param_grid=small_grid,
+                result = optimizer.optimize(
+                    n_trials=4,
+                    metric='sharpe_ratio',
+                    verbose=False,
+                )
+
+        assert result is not None
+        assert 'params' in result
+        assert 'sharpe_ratio' in result
+        assert 'total_complete' in result
+        assert 'total_pruned' in result
+        assert isinstance(result['params'], dict)
+        assert result['total_complete'] > 0
+
+    def test_optimize_returns_none_on_failure(self):
+        """완료된 Trial이 없으면 None 반환"""
+        import optuna
+
+        optimizer = self._make_optimizer()
+
+        # 모든 Trial이 PRUNED인 study를 직접 구성하여 None 반환 확인
+        # optimize()의 핵심 로직: all_complete가 비어있으면 None 반환
+        with patch.object(optimizer, '_build_objective') as mock_build:
+            def pruning_objective(trial):
+                trial.report(-999, step=0)
+                raise optuna.exceptions.TrialPruned()
+
+            mock_build.return_value = pruning_objective
+
+            result = optimizer.optimize(
+                n_trials=4,
                 metric='sharpe_ratio',
-                top_n=5,
-                workers=1,
                 verbose=False,
             )
 
-        # 반환 타입 확인
-        assert isinstance(result_df, pd.DataFrame)
+        assert result is None
 
-        # 필수 성과 컬럼 존재 확인
-        required_cols = ['total_return', 'sharpe_ratio', 'win_rate',
-                         'max_drawdown', 'profit_factor', 'total_trades']
-        for col in required_cols:
-            assert col in result_df.columns, f"컬럼 없음: {col}"
-
-    def test_grid_search_sorted_by_metric(self):
-        """metric 기준 내림차순 정렬 확인"""
+    def test_optimize_best_metric_value(self):
+        """최고 metric 값 반환 확인"""
         optimizer = self._make_optimizer()
 
-        # 다양한 sharpe_ratio 값을 가진 mock 결과
-        mock_results = [
-            {'params': {'min_score': 60}, 'total_return': 1.0, 'sharpe_ratio': 0.5,
-             'win_rate': 50.0, 'max_drawdown': -5.0, 'profit_factor': 1.1, 'total_trades': 5},
-            {'params': {'min_score': 70}, 'total_return': 2.0, 'sharpe_ratio': 1.5,
-             'win_rate': 60.0, 'max_drawdown': -3.0, 'profit_factor': 1.5, 'total_trades': 8},
-            {'params': {'min_score': 80}, 'total_return': 0.5, 'sharpe_ratio': 0.2,
-             'win_rate': 45.0, 'max_drawdown': -8.0, 'profit_factor': 0.9, 'total_trades': 3},
-        ]
+        call_count = [0]
 
-        with patch('src.backtesting.optimizer._run_backtest_worker',
-                   side_effect=mock_results):
-            result_df = optimizer.grid_search(
-                param_grid={'min_score': [60, 70, 80]},
-                metric='sharpe_ratio',
-                top_n=10,
-                workers=1,
-                verbose=False,
-            )
-
-        # sharpe_ratio 내림차순 정렬 확인
-        sharpe_values = result_df['sharpe_ratio'].tolist()
-        assert sharpe_values == sorted(sharpe_values, reverse=True), \
-            f"내림차순 정렬 실패: {sharpe_values}"
-
-    def test_grid_search_top_n(self):
-        """top_n 제한 동작 확인"""
-        optimizer = self._make_optimizer()
-
-        # 5개 결과가 나올 mock 설정
-        def mock_worker(args):
-            db_path, params, start, end = args
+        def make_summary():
+            call_count[0] += 1
+            # 다양한 sharpe_ratio 값 반환
+            values = [0.5, 1.5, 0.8, 1.2, 0.3, 2.0, 0.1, 0.9]
+            val = values[(call_count[0] - 1) % len(values)]
             return {
-                'params': params,
-                'total_return': params.get('min_score', 60) * 0.1,
-                'sharpe_ratio': params.get('min_score', 60) * 0.01,
-                'win_rate': 50.0,
-                'max_drawdown': -5.0,
-                'profit_factor': 1.0,
-                'total_trades': 5,
+                'total_return': val * 2, 'sharpe_ratio': val,
+                'win_rate': 50.0, 'max_drawdown': -5.0,
+                'profit_factor': 1.0, 'total_trades': 3,
             }
 
-        with patch('src.backtesting.optimizer._run_backtest_worker', side_effect=mock_worker):
-            result_df = optimizer.grid_search(
-                param_grid={'min_score': [60, 65, 70, 75, 80]},  # 5개 조합
-                metric='sharpe_ratio',
-                top_n=3,  # 상위 3개만
-                workers=1,
-                verbose=False,
-            )
+        mock_trades = [MagicMock(return_pct=2.0, hold_days=3, pattern='모멘텀형',
+                                  signal_count=1, direction='long')]
+        mock_daily = pd.DataFrame({
+            'date': ['2024-06-15'], 'value': [10_200_000],
+            'cash': [5_000_000], 'position_count': [1], 'total_trades': [1],
+        })
 
-        # top_n=3이므로 최대 3행
-        assert len(result_df) <= 3
+        with patch('src.backtesting.optimizer.BacktestEngine') as MockEngine:
+            with patch('src.backtesting.optimizer.PerformanceMetrics') as MockMetrics:
+                mock_engine_inst = MagicMock()
+                mock_engine_inst.run.return_value = {
+                    'trades': mock_trades,
+                    'daily_values': mock_daily,
+                }
+                MockEngine.return_value = mock_engine_inst
+                MockMetrics.return_value.summary = make_summary
+
+                result = optimizer.optimize(
+                    n_trials=8,
+                    metric='sharpe_ratio',
+                    verbose=False,
+                )
+
+        assert result is not None
+        # 최고 sharpe_ratio 값이 0보다 큼
+        assert result['sharpe_ratio'] > 0
+
+    def test_optimize_n_trials(self):
+        """n_trials 파라미터 동작 확인"""
+        optimizer = self._make_optimizer()
+
+        mock_trades = [MagicMock(return_pct=1.0, hold_days=2, pattern='지속형',
+                                  signal_count=1, direction='long')]
+        mock_daily = pd.DataFrame({
+            'date': ['2024-06-15'], 'value': [10_100_000],
+            'cash': [5_000_000], 'position_count': [1], 'total_trades': [1],
+        })
+        mock_summary = {
+            'total_return': 1.0, 'sharpe_ratio': 0.5, 'win_rate': 100.0,
+            'max_drawdown': -0.5, 'profit_factor': 999.0, 'total_trades': 1,
+        }
+
+        with patch('src.backtesting.optimizer.BacktestEngine') as MockEngine:
+            with patch('src.backtesting.optimizer.PerformanceMetrics') as MockMetrics:
+                mock_engine_inst = MagicMock()
+                mock_engine_inst.run.return_value = {
+                    'trades': mock_trades,
+                    'daily_values': mock_daily,
+                }
+                MockEngine.return_value = mock_engine_inst
+                MockMetrics.return_value.summary.return_value = mock_summary
+
+                result = optimizer.optimize(
+                    n_trials=10,
+                    metric='sharpe_ratio',
+                    verbose=False,
+                )
+
+        assert result is not None
+        # total_complete + total_pruned <= n_trials (10)
+        total = result['total_complete'] + result['total_pruned']
+        assert total <= 10
