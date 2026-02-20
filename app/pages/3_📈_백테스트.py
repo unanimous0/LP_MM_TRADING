@@ -186,7 +186,7 @@ with st.sidebar.expander("파라미터 최적화 (Optuna)"):
     if use_split:
         st.caption(f"최적화: {opt_start_date} ~ {opt_end_date}  →  검증: {val_start_date} ~ {val_end_date}")
     else:
-        st.caption("최적화 대상: 최소 점수, 최소 시그널 수, 목표 수익률, 손절 비율")
+        st.warning("⚠️ 같은 기간에서 최적화와 백테스트를 수행합니다. 이 결과로 전략의 실제 수익성을 판단할 수 없습니다. 위의 '최적화 / 검증 기간 분리'를 사용하세요.")
     opt_clicked = st.button("최적 파라미터 찾기", use_container_width=True)
 
 if opt_clicked:
