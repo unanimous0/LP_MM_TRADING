@@ -33,12 +33,16 @@ class PrecomputeResult:
         price_lookup: (stock_code, trade_date) → close_price
         stock_names: stock_code → stock_name
         trading_dates: 정렬된 거래일 목록
+        patterns_long: trade_date → classify_all(direction='long') DataFrame
+        patterns_short: trade_date → classify_all(direction='short') DataFrame
     """
     zscore_all_dates: pd.DataFrame
     signals_all_dates: pd.DataFrame
     price_lookup: dict = field(default_factory=dict)
     stock_names: dict = field(default_factory=dict)
     trading_dates: list = field(default_factory=list)
+    patterns_long: dict = field(default_factory=dict)
+    patterns_short: dict = field(default_factory=dict)
 
 
 class BacktestPrecomputer:
@@ -93,6 +97,12 @@ class BacktestPrecomputer:
         if start_date:
             trading_dates = [d for d in trading_dates if d >= start_date]
 
+        patterns_long, patterns_short = self._compute_patterns_all_dates(
+            zscore_df, trading_dates
+        )
+        if verbose:
+            print(f"  패턴 사전 계산 완료: {len(patterns_long)}일(long), {len(patterns_short)}일(short)")
+
         if verbose:
             print(f"  거래일: {len(trading_dates)}일, "
                   f"종목: {raw_df['stock_code'].nunique()}종목")
@@ -104,6 +114,8 @@ class BacktestPrecomputer:
             price_lookup=price_lookup,
             stock_names=stock_names,
             trading_dates=trading_dates,
+            patterns_long=patterns_long,
+            patterns_short=patterns_short,
         )
 
     def _load_raw_data(self, end_date: str) -> pd.DataFrame:
@@ -238,3 +250,39 @@ class BacktestPrecomputer:
         """stock_code → stock_name dict 생성"""
         df = pd.read_sql("SELECT stock_code, stock_name FROM stocks", self.conn)
         return dict(zip(df['stock_code'], df['stock_name']))
+
+    def _compute_patterns_all_dates(self, zscore_df: pd.DataFrame,
+                                     trading_dates: list) -> tuple:
+        """모든 거래일의 패턴 분류 사전 계산
+
+        classify_all()을 Precomputer 단계에서 1회만 실행.
+        Trial 루프에서 매 거래일 classify_all() 호출 → dict O(1) 조회로 교체.
+
+        Args:
+            zscore_df: MultiIndex(trade_date, stock_code) Z-Score DataFrame
+            trading_dates: 사전 계산할 거래일 목록
+
+        Returns:
+            (patterns_long, patterns_short): 각각 {trade_date: DataFrame} dict
+        """
+        from src.analyzer.pattern_classifier import PatternClassifier
+        classifier = PatternClassifier()
+
+        patterns_long = {}
+        patterns_short = {}
+
+        for date in trading_dates:
+            try:
+                zscore_on_date = zscore_df.loc[date].reset_index()
+            except KeyError:
+                continue
+
+            long_stocks = zscore_on_date[zscore_on_date['1W'] > 0].copy()
+            if not long_stocks.empty:
+                patterns_long[date] = classifier.classify_all(long_stocks, direction='long')
+
+            short_stocks = zscore_on_date[zscore_on_date['1W'] < 0].copy()
+            if not short_stocks.empty:
+                patterns_short[date] = classifier.classify_all(short_stocks, direction='short')
+
+        return patterns_long, patterns_short

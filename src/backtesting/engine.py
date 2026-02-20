@@ -123,6 +123,8 @@ class BacktestEngine:
         """
         거래일 목록 조회 (DB에 존재하는 날짜만)
 
+        사전 계산 데이터가 있으면 trading_dates 필터링으로 DB 쿼리 생략.
+
         Args:
             start_date: 시작일 (YYYY-MM-DD)
             end_date: 종료일 (YYYY-MM-DD)
@@ -130,6 +132,10 @@ class BacktestEngine:
         Returns:
             거래일 리스트 (정렬됨)
         """
+        if self._precomputed is not None:
+            return [d for d in self._precomputed.trading_dates
+                    if start_date <= d <= end_date]
+
         query = """
         SELECT DISTINCT trade_date
         FROM investor_flows
@@ -265,39 +271,27 @@ class BacktestEngine:
         """
         사전 계산 데이터를 사용한 빠른 시그널 스캔
 
-        _scan_signals_on_date()의 빠른 경로. DB 쿼리 없이
-        O(1) lookup + 패턴 분류(~0.01초)로 동일한 결과 반환.
+        _scan_signals_on_date()의 빠른 경로. classify_all() 호출 없이
+        O(1) dict 조회만으로 동일한 결과 반환.
         """
         pc = self._precomputed
 
-        # 1. Z-Score lookup (O(1))
-        try:
-            zscore_on_date = pc.zscore_all_dates.loc[end_date].copy()
-        except KeyError:
+        # 1. 사전 계산된 패턴 조회 (O(1)) - classify_all() 호출 없음
+        pattern_dict = pc.patterns_long if direction == 'long' else pc.patterns_short
+        pattern_result = pattern_dict.get(end_date)
+
+        if pattern_result is None or pattern_result.empty:
             return pd.DataFrame()
 
-        zscore_matrix = zscore_on_date.reset_index()  # stock_code → column
+        pattern_result = pattern_result.copy()
 
-        # 2. Direction filter (1W > 0: long, 1W < 0: short)
-        if direction == 'long':
-            zscore_matrix = zscore_matrix[zscore_matrix['1W'] > 0].copy()
-        else:
-            zscore_matrix = zscore_matrix[zscore_matrix['1W'] < 0].copy()
-
-        if zscore_matrix.empty:
-            return pd.DataFrame()
-
-        # 3. Pattern classification (~0.01초, DB 접근 없음)
-        pattern_result = self.classifier.classify_all(zscore_matrix, direction=direction)
-
-        # 4. Signal lookup (O(1))
+        # 2. Signal lookup (O(1))
         try:
-            signals_on_date = pc.signals_all_dates.loc[end_date].copy()
-            signals_on_date = signals_on_date.reset_index()
+            signals_on_date = pc.signals_all_dates.loc[end_date].reset_index()
         except KeyError:
             signals_on_date = pd.DataFrame()
 
-        # 5. Merge
+        # 3. Merge
         if not signals_on_date.empty:
             result = pd.merge(pattern_result, signals_on_date, on='stock_code', how='left')
         else:
@@ -308,11 +302,11 @@ class BacktestEngine:
             result['sync_rate'] = np.nan
             result['signal_count'] = 0
 
-        # 6. Fill defaults
+        # 4. Fill defaults
         result['signal_count'] = result['signal_count'].fillna(0).astype(int)
         result['ma_cross'] = result['ma_cross'].fillna(False)
 
-        # 7. Stock names
+        # 5. Stock names
         result.insert(1, 'stock_name', result['stock_code'].map(
             lambda c: pc.stock_names.get(c, c)))
 
