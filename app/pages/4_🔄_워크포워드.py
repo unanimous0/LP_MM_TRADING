@@ -128,7 +128,7 @@ if return_col:
 param_cols = [c for c in wf_df.columns if c.startswith(('best_', 'opt_'))]
 if not param_cols:
     # 일반 파라미터 컬럼 감지
-    known_params = ['min_score', 'min_signals', 'target_return', 'stop_loss', 'institution_weight']
+    known_params = ['min_score', 'min_signals', 'target_return', 'stop_loss']
     param_cols = [c for c in wf_df.columns if c in known_params]
 
 if param_cols:

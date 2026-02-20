@@ -47,7 +47,6 @@ if 'pending_opt_params' in st.session_state:
     st.session_state['w_min_signals'] = int(max(0, min(3, p.get('min_signals', 1))))
     st.session_state['w_target_return'] = _snap(p.get('target_return', 0.15) * 100, 1.0, 1.0, 50.0)
     st.session_state['w_stop_loss'] = _snap(p.get('stop_loss', -0.075) * 100, 0.5, -30.0, -1.0)
-    st.session_state['w_institution_weight'] = _snap(p.get('institution_weight', 0.3), 0.05, 0.0, 1.0)
     del st.session_state['pending_opt_params']
 
 
@@ -139,7 +138,7 @@ with st.sidebar.expander("파라미터 최적화 (Optuna)"):
         }[x],
         key="w_opt_metric",
     )
-    st.caption("최적화 대상: 최소 점수, 최소 시그널 수, 목표 수익률, 손절 비율, 기관 가중치")
+    st.caption("최적화 대상: 최소 점수, 최소 시그널 수, 목표 수익률, 손절 비율")
     opt_clicked = st.button("최적 파라미터 찾기", use_container_width=True)
 
 if opt_clicked:
@@ -173,7 +172,7 @@ if opt_clicked:
             max_hold_days=max_hold_days,
             initial_capital=float(initial_capital),
             max_positions=max_positions,
-            institution_weight=params['institution_weight'],
+            institution_weight=institution_weight,
             reverse_threshold=reverse_threshold,
         )
         st.rerun()
@@ -209,10 +208,9 @@ if 'opt_result' in st.session_state:
             'min_signals': ('최소 시그널 수', f"{params['min_signals']}"),
             'target_return': ('목표 수익률', f"{params['target_return']*100:.1f}%"),
             'stop_loss': ('손절 비율', f"{params['stop_loss']*100:.1f}%"),
-            'institution_weight': ('기관 가중치', f"{params['institution_weight']:.3f}"),
         }
         st.markdown("**최적 파라미터:**")
-        cols = st.columns(5)
+        cols = st.columns(4)
         for i, (key, (label, val)) in enumerate(param_labels.items()):
             cols[i].metric(label, val)
 

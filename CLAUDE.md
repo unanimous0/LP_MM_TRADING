@@ -675,13 +675,24 @@ LP_MM_TRADING/
 - 기존 `test_default_param_space_keys`: institution_weight 제외 반영
 - 기존 optimizer mock 테스트: BacktestPrecomputer mock 추가
 
+- ✅ **단계 4: Streamlit 페이지 institution_weight 참조 오류 수정**
+  - `3_📈_백테스트.py`:
+    - `pending_opt_params` 핸들러에서 `w_institution_weight` 세션 업데이트 라인 제거
+    - 최적화 후 백테스트 실행 시 `institution_weight=params['institution_weight']` (KeyError) → `institution_weight=institution_weight` (사이드바 위젯 값) 수정
+    - 최적화 결과 표시: institution_weight 항목 제거, 컬럼 5개 → 4개
+    - Optuna 최적화 대상 caption: "기관 가중치" 제거
+  - `4_🔄_워크포워드.py`:
+    - `known_params`에서 `'institution_weight'` 제거
+
 **파일 구조**:
 ```
-src/analyzer/signal_detector.py   (institution_weight 파라미터 추가)
-src/backtesting/precomputer.py    (0.3 하드코딩 → self.institution_weight)
-src/backtesting/engine.py         (SignalDetector에 weight 전달, run()에 precomputed= 추가)
-src/backtesting/optimizer.py      (institution_weight 제거, Precomputer 1회 공유 캐싱)
-tests/backtesting/test_optimizer.py (테스트 2개 추가, mock 업데이트)
+src/analyzer/signal_detector.py      (institution_weight 파라미터 추가)
+src/backtesting/precomputer.py       (0.3 하드코딩 → self.institution_weight)
+src/backtesting/engine.py            (SignalDetector에 weight 전달, run()에 precomputed= 추가)
+src/backtesting/optimizer.py         (institution_weight 제거, Precomputer 1회 공유 캐싱)
+tests/backtesting/test_optimizer.py  (테스트 2개 추가, mock 업데이트)
+app/pages/3_📈_백테스트.py           (institution_weight 참조 오류 4곳 수정)
+app/pages/4_🔄_워크포워드.py         (known_params에서 institution_weight 제거)
 ```
 
 ---
