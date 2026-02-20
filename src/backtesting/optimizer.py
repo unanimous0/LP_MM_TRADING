@@ -282,14 +282,18 @@ class OptunaOptimizer:
         conn_pre = sqlite3.connect(self.db_path)
         try:
             pc = BacktestPrecomputer(conn_pre, self.base_config.institution_weight)
-            shared_precomputed = pc.precompute(self.end_date, verbose=verbose)
+            shared_precomputed = pc.precompute(
+                self.end_date, start_date=self.start_date, verbose=verbose
+            )
         finally:
             conn_pre.close()
         if verbose:
             print(f"[Precompute] 완료 → {n_trials} Trial에 공유\n")
 
         # ── Phase 1: 넓은 범위 탐색 ──────────────────────────────────────
-        study1 = _optuna.create_study(direction='maximize', pruner=pruner)
+        sampler = _optuna.samplers.TPESampler(seed=42)
+        study1 = _optuna.create_study(direction='maximize', pruner=pruner,
+                                      sampler=sampler)
         study2 = None
 
         if phase1_n > 0:
@@ -324,7 +328,8 @@ class OptunaOptimizer:
                 if changed:
                     print(f"  좁혀진 파라미터: {changed}")
 
-            study2 = _optuna.create_study(direction='maximize', pruner=pruner)
+            study2 = _optuna.create_study(direction='maximize', pruner=pruner,
+                                          sampler=_optuna.samplers.TPESampler(seed=42))
 
             # Phase 1 최고 파라미터를 seed trial로 추가
             try:
