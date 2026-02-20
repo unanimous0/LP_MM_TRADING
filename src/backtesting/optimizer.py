@@ -226,7 +226,8 @@ class OptunaOptimizer:
     def optimize(self, param_space: Optional[dict] = None,
                  n_trials: int = 50,
                  metric: str = 'sharpe_ratio',
-                 verbose: bool = True) -> Optional[dict]:
+                 verbose: bool = True,
+                 progress_callback=None) -> Optional[dict]:
         """
         2단계 Bayesian Optimization 실행
 
@@ -275,8 +276,8 @@ class OptunaOptimizer:
         pruner = MedianPruner(n_startup_trials=5, n_warmup_steps=0)
 
         # ── Precomputer 1회 실행 (모든 Trial 공유) ────────────────────────
-        # institution_weight는 base_config 고정값 사용 (최적화 대상 아님)
-        # → Phase 1/2 전체 Trial이 동일한 Precomputed 데이터를 재사용
+        if progress_callback:
+            progress_callback(0, n_trials)  # 0% - 사전 계산 시작
         if verbose:
             print(f"\n[Precompute] 사전 계산 중 (모든 Trial 공유)...")
         conn_pre = sqlite3.connect(self.db_path)
@@ -290,6 +291,16 @@ class OptunaOptimizer:
         if verbose:
             print(f"[Precompute] 완료 → {n_trials} Trial에 공유\n")
 
+        # ── 진행 콜백 (Trial 완료 시 호출) ────────────────────────────────
+        trial_counter = [0]
+
+        def _make_optuna_callback(phase_offset):
+            def _cb(study, trial):
+                trial_counter[0] += 1
+                if progress_callback:
+                    progress_callback(phase_offset + trial_counter[0], n_trials)
+            return _cb
+
         # ── Phase 1: 넓은 범위 탐색 ──────────────────────────────────────
         study1 = _optuna.create_study(direction='maximize', pruner=pruner)
         study2 = None
@@ -299,7 +310,8 @@ class OptunaOptimizer:
                 print(f"[Phase 1] 넓은 범위 탐색 ({phase1_n} trials)...")
             obj1 = self._build_objective(param_space, metric,
                                          precomputed=shared_precomputed)
-            study1.optimize(obj1, n_trials=phase1_n, show_progress_bar=False)
+            study1.optimize(obj1, n_trials=phase1_n, show_progress_bar=False,
+                            callbacks=[_make_optuna_callback(0)])
 
             p1_complete = sum(
                 1 for t in study1.trials
@@ -337,7 +349,8 @@ class OptunaOptimizer:
 
             obj2 = self._build_objective(narrowed_space, metric,
                                           precomputed=shared_precomputed)
-            study2.optimize(obj2, n_trials=phase2_n, show_progress_bar=False)
+            study2.optimize(obj2, n_trials=phase2_n, show_progress_bar=False,
+                            callbacks=[_make_optuna_callback(phase1_n)])
 
             p2_complete = sum(
                 1 for t in study2.trials

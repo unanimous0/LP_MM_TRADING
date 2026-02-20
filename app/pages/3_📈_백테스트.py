@@ -191,21 +191,30 @@ with st.sidebar.expander("파라미터 최적화 (Optuna)"):
 
 if opt_clicked:
     st.session_state.pop('opt_result', None)
-    spinner_msg = f"Optuna 최적화 실행 중... ({opt_n_trials} trials)"
-    if use_split:
-        spinner_msg += f"  |  최적화: {opt_start_date}~{opt_end_date}"
-    with st.spinner(spinner_msg):
-        opt_result = run_optuna_optimization(
-            start_date=opt_start_date.strftime("%Y-%m-%d"),
-            end_date=opt_end_date.strftime("%Y-%m-%d"),
-            strategy=strategy,
-            n_trials=opt_n_trials,
-            metric=opt_metric,
-            initial_capital=float(initial_capital),
-            max_positions=max_positions,
-            max_hold_days=max_hold_days,
-            reverse_threshold=reverse_threshold,
-        )
+    _opt_progress_bar = st.progress(0, text="사전 계산 중...")
+    _opt_status = st.empty()
+
+    def _opt_progress_callback(current, total):
+        if current == 0:
+            _opt_progress_bar.progress(0.0, text="사전 계산 중... (패턴/시그널 벡터화)")
+        else:
+            pct = current / total
+            _opt_progress_bar.progress(pct, text=f"최적화 중... {current}/{total} trial ({pct*100:.0f}%)")
+
+    opt_result = run_optuna_optimization(
+        start_date=opt_start_date.strftime("%Y-%m-%d"),
+        end_date=opt_end_date.strftime("%Y-%m-%d"),
+        strategy=strategy,
+        n_trials=opt_n_trials,
+        metric=opt_metric,
+        initial_capital=float(initial_capital),
+        max_positions=max_positions,
+        max_hold_days=max_hold_days,
+        reverse_threshold=reverse_threshold,
+        progress_callback=_opt_progress_callback,
+    )
+    _opt_progress_bar.empty()
+    _opt_status.empty()
     if opt_result:
         st.session_state['opt_result'] = opt_result
         st.session_state['opt_metric'] = opt_metric

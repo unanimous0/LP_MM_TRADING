@@ -247,6 +247,7 @@ def run_optuna_optimization(
     max_positions: int = 5,
     max_hold_days: int = 999,
     reverse_threshold: float = 60,
+    progress_callback=None,
 ) -> Optional[Dict]:
     """
     Optuna Bayesian Optimization 실행
@@ -278,4 +279,5 @@ def run_optuna_optimization(
         n_trials=n_trials,
         metric=metric,
         verbose=False,
+        progress_callback=progress_callback,
     )
