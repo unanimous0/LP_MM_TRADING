@@ -199,7 +199,8 @@ if opt_clicked:
             _opt_progress_bar.progress(0.0, text="사전 계산 중... (패턴/시그널 벡터화)")
         else:
             pct = min(1.0, current / total)
-            _opt_progress_bar.progress(pct, text=f"최적화 중... {current}/{total} trial ({pct*100:.0f}%)")
+            display = min(current, total)
+            _opt_progress_bar.progress(pct, text=f"최적화 중... {display}/{total} trial ({pct*100:.0f}%)")
 
     opt_result = run_optuna_optimization(
         start_date=opt_start_date.strftime("%Y-%m-%d"),
