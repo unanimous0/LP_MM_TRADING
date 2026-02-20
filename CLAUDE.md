@@ -2,7 +2,7 @@
 
 ## [Status]
 - **현재 작업**: Stage 5-1 Streamlit 웹 대시보드 진행 중
-- **마지막 업데이트**: 2026-02-20
+- **마지막 업데이트**: 2026-02-21
 - **백테스트 권장 시작일**: 2025-01-01 이후 (DB가 2024-01-02 시작이므로 1Y 데이터 확보)
 - **다음 시작점**: Stage 5-1 추가 페이지 (종목 상세, 히트맵 등)
 - **시각화**: matplotlib 5종 (PNG/PDF) + Plotly 5종 (Streamlit 인터랙티브)
@@ -11,6 +11,10 @@
 - **로드맵**: [Next Steps] 섹션 Stage 5 참조
 
 ### TODO (데이터 개선 시)
+- [ ] **공유 한국주식 DB 연동** → 크롤링 제거 + 다중 프로젝트 공유
+  - 여러 프로젝트에서 공동으로 사용하는 한국주식 DB 구축 중
+  - 완성 시: `src/database/connection.py` 접속 설정만 변경하면 이 프로젝트에 즉시 적용
+  - 효과: 크롤링 유지보수 부담 제거, 데이터 일관성 확보
 - [ ] **23년 데이터 추가** → 백테스트 기간 확장 (현재 2024-01-02부터 시작)
   - 23년 데이터 추가 시 2024년 백테스트도 2Y Z-Score 완전 활용 가능
 - [ ] **시가 데이터 추가** → 진입/청산 타이밍 개선
@@ -71,7 +75,8 @@
 - 백테스트 페이지: Plotly 인터랙티브 차트 5종 + KPI 카드 + 거래 내역
 - **BacktestPrecomputer**: 백테스트 속도 165~262배 향상 (177초→1.1초)
 - **Optuna 최적화 UI**: 사이드바에서 파라미터 자동 최적화 → 결과 즉시 반영
-- 256개 테스트 (100% 통과)
+- **[수정] institution_weight 설계 개선**: 버그 수정 + 최적화 파라미터 분리 + Precomputer 공유 캐싱
+- 258개 테스트 (100% 통과)
 
 **핵심 인사이트**:
 - 3개 패턴은 투자 스타일별 최적 종목 필터링 (단기=돌파형, 중기=매집형, 저가=반등형)
@@ -119,7 +124,7 @@ python scripts/crawlers/crawl_all_data.py --start 2024-01-01
 
 **목표**: 과거 데이터로 패턴 분류 전략의 수익률 검증 및 최적화 (롱/숏 전략 지원)
 
-**완료**: Week 1~5 + Week 2.5 + Optuna 통합 + Precomputer 속도 최적화 (256개 테스트, 256개 통과) ✅
+**완료**: Week 1~5 + Week 2.5 + Optuna 통합 + Precomputer 속도 최적화 + institution_weight 설계 개선 (258개 테스트, 258개 통과) ✅
 
 ---
 
@@ -246,7 +251,7 @@ python backtest_runner.py --plot --save-pdf output/report.pdf
 **✅ Week 4: 파라미터 최적화** (완료)
 - Optuna Bayesian Optimization (--optimize, --walk-forward 공용)
   - 백테스트 파라미터: min_score, min_signals, target_return, stop_loss
-  - **기관 가중치 최적화**: institution_weight (normalizer.py 파라미터화)
+  - ~~기관 가중치 최적화~~ → institution_weight는 분석 철학 파라미터로 분리 (하단 참고)
 - CLI 통합 (`--optimize`, `--n-trials`, `--workers`, `--metric`, `--opt-save-csv`)
 - **테스트**: 8개 (100% 통과)
 
@@ -318,16 +323,22 @@ venv/bin/streamlit run app/streamlit_app.py
 #### 5-2. 스케줄러 기반 자동화 파이프라인
 **파일**: `scripts/automation/daily_scheduler.py`
 
-**자동화 흐름**:
+> ⚠️ **데이터 소스 전환 계획**
+> 현재는 이 프로젝트 내에서 직접 크롤링하여 `investor_data.db`에 저장하는 구조이지만,
+> **별도로 구축 중인 한국주식 공유 DB**(여러 프로젝트에서 공동 사용)가 완성되면
+> 크롤링 단계를 제거하고 **공유 DB에서 데이터를 조회**하는 방식으로 전환할 예정이다.
+> 이 경우 `src/database/connection.py`의 연결 대상만 공유 DB로 교체하면 된다.
+
+**자동화 흐름 (현재)**:
 ```
 [일별 자동 실행 - 장 마감 후 16:30]
 
-1. 데이터 크롤링
+1. 데이터 크롤링 (→ 공유 DB 전환 시 이 단계 제거)
    - 수급 데이터 (외국인/기관)
    - 주가 데이터
    - 유통주식 수
    ↓
-2. DB 저장
+2. DB 저장 (→ 공유 DB 전환 시 이 단계 제거)
    ↓
 3. Stage 1-3 분석 실행
    - 정규화 (Sff/Z-Score)
@@ -343,6 +354,31 @@ venv/bin/streamlit run app/streamlit_app.py
    ↓
 6. 결과 저장 및 알림
    - DB 저장
+   - HTML 리포트 생성
+   - Slack/이메일 알림 (선택)
+```
+
+**자동화 흐름 (공유 DB 전환 후)**:
+```
+[일별 자동 실행 - 장 마감 후 16:30]
+
+1. 공유 한국주식 DB에서 최신 데이터 조회
+   - 수급 데이터, 주가, 유통주식 수
+   (크롤링/저장 불필요 - 공유 DB가 자동 갱신)
+   ↓
+2. Stage 1-3 분석 실행
+   - 정규화 (Sff/Z-Score)
+   - 히트맵 생성
+   - 패턴 분류
+   ↓
+3. 고득점 종목 추출 (70점 이상)
+   ↓
+4. AI 기반 종목 분석
+   - Gemini API: 뉴스 분석
+   - Claude API: 증권사 리포트 분석
+   - 종합 보고서 생성
+   ↓
+5. 결과 저장 및 알림
    - HTML 리포트 생성
    - Slack/이메일 알림 (선택)
 ```
@@ -425,6 +461,9 @@ venv/bin/streamlit run app/streamlit_app.py
 - Stage 5는 Stage 4 완료 후 진행 권장
 - 웹 서비스 구독 모델 구현 시 서버 필요 (AWS/GCP)
 - 초기에는 Streamlit Cloud 무료 호스팅으로 시작 가능
+- **공유 DB 전환 시**: `src/database/connection.py`의 DB 경로/접속 설정만 변경하면 됨
+  - 현재: `data/processed/investor_data.db` (로컬 SQLite)
+  - 전환 후: 공유 한국주식 DB (PostgreSQL 등) 접속 정보로 교체
 
 ---
 
@@ -503,7 +542,7 @@ LP_MM_TRADING/
 │   └── loaders/
 │       ├── load_initial_data.py
 │       └── load_daily_data.py
-└── tests/                         # 테스트 (256개 통과)
+└── tests/                         # 테스트 (258개 통과)
     ├── test_config.py
     ├── test_normalizer.py
     ├── test_performance_optimizer.py
@@ -592,6 +631,60 @@ LP_MM_TRADING/
 ---
 
 ## [Progress History]
+
+### 2026-02-21 (institution_weight 설계 개선: 버그 수정 + 파라미터 분리 + Precomputer 캐싱)
+
+**배경**: institution_weight의 역할과 사용 방식에 대한 설계 리뷰 결과 3가지 문제 발견
+
+**문제 1 - 버그**: 가속도 시그널의 institution_weight 하드코딩
+- `signal_detector.py`의 `calculate_acceleration()`에서 0.3 고정 사용
+- `precomputer.py`의 `_compute_signals_all_dates()`에서 0.3 고정 사용
+- `normalizer.py`만 config 파라미터 사용 → 세 모듈 간 불일치
+
+**문제 2 - 설계**: institution_weight를 Optuna 최적화 파라미터로 잘못 분류
+- institution_weight는 "기관 동조를 어떻게 해석할지"를 결정하는 **분석 철학 파라미터**
+- min_score, stop_loss 같은 **전략 파라미터**(언제 사고 팔지)와 성격이 다름
+- 같은 Optuna 탐색 공간에 묶이는 것은 개념적으로 부적절
+
+**문제 3 - 비효율**: institution_weight가 Optuna 파라미터이므로 Trial마다 Precomputer 재실행
+- institution_weight가 고정되면 모든 Trial이 동일한 Precomputed 데이터 공유 가능
+
+**구현 내용**:
+
+- ✅ **단계 1: 버그 수정** (3개 파일)
+  - `signal_detector.py`: `SignalDetector.__init__`에 `institution_weight=0.3` 파라미터 추가
+    - `calculate_acceleration()`: `0.3` → `self.institution_weight`
+  - `precomputer.py`: `_compute_signals_all_dates()`: `0.3` → `self.institution_weight`
+  - `engine.py`: `SignalDetector(conn)` → `SignalDetector(conn, institution_weight=self.config.institution_weight)`
+  - 이제 normalizer / precomputer / signal_detector 세 곳 모두 동일한 institution_weight 사용
+
+- ✅ **단계 2: institution_weight 최적화 파라미터 분리**
+  - `optimizer.py`: `DEFAULT_PARAM_SPACE`에서 `institution_weight` 제거
+  - `BacktestConfig`의 고정 파라미터로만 유지 (기본값 0.3)
+  - 검증 필요 시: 별도 독립 백테스트로 0.0/0.1/0.2/0.3/0.5 수동 비교
+
+- ✅ **단계 3: Precomputer 공유 캐싱**
+  - `engine.run()`: `precomputed=` 파라미터 추가 (외부 주입 지원)
+  - `optimizer.py`: Phase 1/2 시작 전 `BacktestPrecomputer` 1회 실행 → 모든 Trial에 주입
+  - `optimizer.py`: `BacktestPrecomputer` import 추가
+  - 효과: 50 Trial × ~1초 → 1초(사전계산) + 50 Trial × ~0초 ≈ 1~2초
+
+**테스트**: 2개 신규 (총 258개, 100% 통과)
+- `test_institution_weight_passed_to_signal_detector`: SignalDetector에 weight 전달 확인
+- `test_precomputer_called_once_per_optimize`: optimize() 1회당 Precomputer 1회 호출 확인
+- 기존 `test_default_param_space_keys`: institution_weight 제외 반영
+- 기존 optimizer mock 테스트: BacktestPrecomputer mock 추가
+
+**파일 구조**:
+```
+src/analyzer/signal_detector.py   (institution_weight 파라미터 추가)
+src/backtesting/precomputer.py    (0.3 하드코딩 → self.institution_weight)
+src/backtesting/engine.py         (SignalDetector에 weight 전달, run()에 precomputed= 추가)
+src/backtesting/optimizer.py      (institution_weight 제거, Precomputer 1회 공유 캐싱)
+tests/backtesting/test_optimizer.py (테스트 2개 추가, mock 업데이트)
+```
+
+---
 
 ### 2026-02-20 (BacktestPrecomputer 속도 최적화 + Streamlit 백테스트 페이지)
 

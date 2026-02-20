@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Optional, Dict
 
 from .engine import BacktestConfig, BacktestEngine
+from .precomputer import BacktestPrecomputer
 from .metrics import PerformanceMetrics
 
 
@@ -36,11 +37,12 @@ class OptunaOptimizer:
     """
 
     DEFAULT_PARAM_SPACE = {
-        'min_score':          {'type': 'float', 'low': 50.0,  'high': 90.0},
-        'min_signals':        {'type': 'int',   'low': 1,     'high': 3},
-        'target_return':      {'type': 'float', 'low': 0.05,  'high': 0.25},
-        'stop_loss':          {'type': 'float', 'low': -0.15, 'high': -0.03},
-        'institution_weight': {'type': 'float', 'low': 0.0,   'high': 0.5},
+        'min_score':     {'type': 'float', 'low': 50.0,  'high': 90.0},
+        'min_signals':   {'type': 'int',   'low': 1,     'high': 3},
+        'target_return': {'type': 'float', 'low': 0.05,  'high': 0.25},
+        'stop_loss':     {'type': 'float', 'low': -0.15, 'high': -0.03},
+        # institution_weight는 분석 철학 파라미터 (전략 최적화 대상 아님)
+        # BacktestConfig의 고정 파라미터로 관리 (기본값: 0.3)
     }
 
     def __init__(self, db_path: str, start_date: str, end_date: str,
@@ -74,13 +76,17 @@ class OptunaOptimizer:
             'force_exit_on_end': c.force_exit_on_end,
         }
 
-    def _build_objective(self, param_space: dict, metric: str):
+    def _build_objective(self, param_space: dict, metric: str,
+                         precomputed=None):
         """
         Optuna objective function 생성 (closure)
 
         MedianPruner 지원:
         - Step 0: 학습 기간 절반 평가 → trial.report() → prune 판단
         - 통과 시: 전체 기간 평가 → 최종 값 반환
+
+        Args:
+            precomputed: PrecomputeResult (외부 주입 시 Trial 간 공유, None이면 Trial마다 계산)
         """
         import optuna as _optuna
         db_path = self.db_path
@@ -111,9 +117,15 @@ class OptunaOptimizer:
                 config = BacktestConfig(**params)
 
                 # Step 0: 절반 기간 평가 → Pruning 판단
+                # precomputed 주입 시: 전체 기간 사전 계산 데이터를 절반 루프에도 재사용
+                # (rolling은 backward-looking이므로 미래 누수 없음)
                 if mid_date > start_date:
                     engine_half = BacktestEngine(conn, config)
-                    half_result = engine_half.run(start_date, mid_date, verbose=False)
+                    half_result = engine_half.run(
+                        start_date, mid_date, verbose=False,
+                        preload_data=(precomputed is None),
+                        precomputed=precomputed,
+                    )
                     half_trades = half_result.get('trades', [])
                     half_daily = half_result.get('daily_values', pd.DataFrame())
 
@@ -131,7 +143,11 @@ class OptunaOptimizer:
 
                 # 전체 기간 평가
                 engine_full = BacktestEngine(conn, config)
-                full_result = engine_full.run(start_date, end_date, verbose=False)
+                full_result = engine_full.run(
+                    start_date, end_date, verbose=False,
+                    preload_data=(precomputed is None),
+                    precomputed=precomputed,
+                )
                 full_trades = full_result.get('trades', [])
                 full_daily = full_result.get('daily_values', pd.DataFrame())
 
@@ -258,14 +274,29 @@ class OptunaOptimizer:
 
         pruner = MedianPruner(n_startup_trials=5, n_warmup_steps=0)
 
+        # ── Precomputer 1회 실행 (모든 Trial 공유) ────────────────────────
+        # institution_weight는 base_config 고정값 사용 (최적화 대상 아님)
+        # → Phase 1/2 전체 Trial이 동일한 Precomputed 데이터를 재사용
+        if verbose:
+            print(f"\n[Precompute] 사전 계산 중 (모든 Trial 공유)...")
+        conn_pre = sqlite3.connect(self.db_path)
+        try:
+            pc = BacktestPrecomputer(conn_pre, self.base_config.institution_weight)
+            shared_precomputed = pc.precompute(self.end_date, verbose=verbose)
+        finally:
+            conn_pre.close()
+        if verbose:
+            print(f"[Precompute] 완료 → {n_trials} Trial에 공유\n")
+
         # ── Phase 1: 넓은 범위 탐색 ──────────────────────────────────────
         study1 = _optuna.create_study(direction='maximize', pruner=pruner)
         study2 = None
 
         if phase1_n > 0:
             if verbose:
-                print(f"\n[Phase 1] 넓은 범위 탐색 ({phase1_n} trials)...")
-            obj1 = self._build_objective(param_space, metric)
+                print(f"[Phase 1] 넓은 범위 탐색 ({phase1_n} trials)...")
+            obj1 = self._build_objective(param_space, metric,
+                                         precomputed=shared_precomputed)
             study1.optimize(obj1, n_trials=phase1_n, show_progress_bar=False)
 
             p1_complete = sum(
@@ -302,7 +333,8 @@ class OptunaOptimizer:
             except (ValueError, AttributeError):
                 pass
 
-            obj2 = self._build_objective(narrowed_space, metric)
+            obj2 = self._build_objective(narrowed_space, metric,
+                                          precomputed=shared_precomputed)
             study2.optimize(obj2, n_trials=phase2_n, show_progress_bar=False)
 
             p2_complete = sum(

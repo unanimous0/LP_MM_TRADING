@@ -21,7 +21,8 @@ from src.utils import validate_stock_codes
 class SignalDetector:
     """수급 시그널 탐지 클래스"""
 
-    def __init__(self, conn, config: Optional[dict] = None):
+    def __init__(self, conn, config: Optional[dict] = None,
+                 institution_weight: float = 0.3):
         """
         Args:
             conn: 데이터베이스 연결
@@ -30,9 +31,12 @@ class SignalDetector:
                 - ma_long: 장기 이동평균 (기본: 20일)
                 - acceleration_window: 가속도 계산 윈도우 (기본: 5일)
                 - sync_threshold: 동조 판단 임계값 (기본: 0)
+            institution_weight: 기관 가중치 (Sff와 동일 값 사용, 기본: 0.3)
+                - normalizer/precomputer와 일관성 유지를 위해 BacktestEngine에서 전달받음
         """
         self.conn = conn
         self.config = config or self._get_default_config()
+        self.institution_weight = institution_weight
 
     @staticmethod
     def _get_default_config() -> dict:
@@ -219,11 +223,11 @@ class SignalDetector:
 
         window = self.config['acceleration_window']
 
-        # 외국인 중심 조건부 합산 (Sff와 동일 로직)
+        # 외국인 중심 조건부 합산 (normalizer/precomputer와 동일 로직)
         same_direction = (df['foreign_net_amount'] * df['institution_net_amount']) > 0
         df['combined_net'] = np.where(
             same_direction,
-            df['foreign_net_amount'] + df['institution_net_amount'] * 0.3,
+            df['foreign_net_amount'] + df['institution_net_amount'] * self.institution_weight,
             df['foreign_net_amount']
         )
 

@@ -176,11 +176,11 @@ class BacktestPrecomputer:
                      'institution_net_amount']].copy()
         df = df.sort_values(['stock_code', 'trade_date'])
 
-        # Combined net for acceleration (signal_detector와 동일하게 0.3 고정)
+        # 외국인 중심 조건부 합산 (normalizer/signal_detector와 동일 로직)
         same_dir = (df['foreign_net_amount'] * df['institution_net_amount']) > 0
         df['combined_net'] = np.where(
             same_dir,
-            df['foreign_net_amount'] + df['institution_net_amount'] * 0.3,
+            df['foreign_net_amount'] + df['institution_net_amount'] * self.institution_weight,
             df['foreign_net_amount']
         )
 

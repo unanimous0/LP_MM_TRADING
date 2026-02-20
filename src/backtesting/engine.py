@@ -95,7 +95,7 @@ class BacktestEngine:
             self.normalizer, enable_caching=False  # 백테스트는 end_date가 매번 바뀌므로 캐싱 비활성화
         )
         self.classifier = PatternClassifier()
-        self.signal_detector = SignalDetector(conn)
+        self.signal_detector = SignalDetector(conn, institution_weight=self.config.institution_weight)
 
         # 기간 설정 (Stage 2 히트맵용)
         self.periods = {
@@ -505,7 +505,8 @@ class BacktestEngine:
         return positions
 
     def run(self, start_date: str, end_date: str, verbose: bool = True,
-            preload_data: bool = True) -> Dict:
+            preload_data: bool = True,
+            precomputed=None) -> Dict:
         """
         백테스트 실행
 
@@ -513,8 +514,10 @@ class BacktestEngine:
             start_date: 시작일 (YYYY-MM-DD)
             end_date: 종료일 (YYYY-MM-DD)
             verbose: 진행 상황 출력 여부
-            preload_data: True이면 시작 전 전체 Sff 데이터를 메모리 로드 (기본: True)
+            preload_data: True이면 시작 전 전체 데이터를 사전 계산 (기본: True)
                          False이면 매 계산마다 DB 조회 (메모리 절약 필요 시)
+            precomputed: PrecomputeResult 외부 주입 (Optimizer에서 Trial 간 공유 시 사용)
+                         지정 시 preload_data 무시하고 주입된 데이터 사용
 
         Returns:
             {
@@ -524,7 +527,10 @@ class BacktestEngine:
                 'config': BacktestConfig
             }
         """
-        if preload_data:
+        if precomputed is not None:
+            # 외부에서 주입된 Precomputed 데이터 사용 (Optimizer Trial 공유)
+            self._precomputed = precomputed
+        elif preload_data:
             if verbose:
                 print("데이터 프리로드 중...")
             pc = BacktestPrecomputer(self.conn, self.config.institution_weight)
@@ -624,8 +630,8 @@ class BacktestEngine:
             print(f"총 수익률: {total_return:+.2f}%")
             print(f"총 거래 횟수: {len(self.portfolio.trades)}건\n")
 
-        if preload_data:
-            self._precomputed = None  # 메모리 해제
+        if preload_data and precomputed is None:
+            self._precomputed = None  # 직접 계산한 경우만 해제 (주입된 경우는 호출자가 관리)
 
         return {
             'trades': self.portfolio.trades,
