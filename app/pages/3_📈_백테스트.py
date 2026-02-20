@@ -63,7 +63,7 @@ min_date, max_date = get_date_range()
 st.sidebar.subheader("기간")
 use_split = st.sidebar.checkbox(
     "최적화 / 검증 기간 분리",
-    value=False,
+    value=True,
     help="최적화 기간에서 최적 파라미터를 탐색하고, 검증 기간에서 백테스트를 실행합니다. 과적합 없는 신뢰도 높은 결과를 얻을 수 있습니다.",
 )
 
