@@ -57,20 +57,62 @@ st.sidebar.header("백테스트 설정")
 
 min_date, max_date = get_date_range()
 
-# 기간
+# ---------------------------------------------------------------------------
+# 기간 설정
+# ---------------------------------------------------------------------------
 st.sidebar.subheader("기간")
-start_date = st.sidebar.date_input(
-    "시작일",
-    value=datetime.strptime("2025-01-01", "%Y-%m-%d"),
-    min_value=datetime.strptime(min_date, "%Y-%m-%d"),
-    max_value=datetime.strptime(max_date, "%Y-%m-%d"),
+use_split = st.sidebar.checkbox(
+    "최적화 / 검증 기간 분리",
+    value=False,
+    help="최적화 기간에서 최적 파라미터를 탐색하고, 검증 기간에서 백테스트를 실행합니다. 과적합 없는 신뢰도 높은 결과를 얻을 수 있습니다.",
 )
-end_date = st.sidebar.date_input(
-    "종료일",
-    value=datetime.strptime(max_date, "%Y-%m-%d"),
-    min_value=datetime.strptime(min_date, "%Y-%m-%d"),
-    max_value=datetime.strptime(max_date, "%Y-%m-%d"),
-)
+
+if use_split:
+    st.sidebar.caption("🔧 최적화 기간 (파라미터 탐색)")
+    opt_start_date = st.sidebar.date_input(
+        "최적화 시작일",
+        value=datetime.strptime("2025-01-01", "%Y-%m-%d"),
+        min_value=datetime.strptime(min_date, "%Y-%m-%d"),
+        max_value=datetime.strptime(max_date, "%Y-%m-%d"),
+        key="w_opt_start",
+    )
+    opt_end_date = st.sidebar.date_input(
+        "최적화 종료일",
+        value=datetime.strptime("2025-09-30", "%Y-%m-%d"),
+        min_value=datetime.strptime(min_date, "%Y-%m-%d"),
+        max_value=datetime.strptime(max_date, "%Y-%m-%d"),
+        key="w_opt_end",
+    )
+    st.sidebar.caption("✅ 검증 기간 (백테스트 실행)")
+    val_start_date = st.sidebar.date_input(
+        "검증 시작일",
+        value=datetime.strptime("2025-10-01", "%Y-%m-%d"),
+        min_value=datetime.strptime(min_date, "%Y-%m-%d"),
+        max_value=datetime.strptime(max_date, "%Y-%m-%d"),
+        key="w_val_start",
+    )
+    val_end_date = st.sidebar.date_input(
+        "검증 종료일",
+        value=datetime.strptime(max_date, "%Y-%m-%d"),
+        min_value=datetime.strptime(min_date, "%Y-%m-%d"),
+        max_value=datetime.strptime(max_date, "%Y-%m-%d"),
+        key="w_val_end",
+    )
+else:
+    _start = st.sidebar.date_input(
+        "시작일",
+        value=datetime.strptime("2025-01-01", "%Y-%m-%d"),
+        min_value=datetime.strptime(min_date, "%Y-%m-%d"),
+        max_value=datetime.strptime(max_date, "%Y-%m-%d"),
+    )
+    _end = st.sidebar.date_input(
+        "종료일",
+        value=datetime.strptime(max_date, "%Y-%m-%d"),
+        min_value=datetime.strptime(min_date, "%Y-%m-%d"),
+        max_value=datetime.strptime(max_date, "%Y-%m-%d"),
+    )
+    opt_start_date = val_start_date = _start
+    opt_end_date = val_end_date = _end
 
 # 전략
 strategy = st.sidebar.selectbox(
@@ -107,8 +149,8 @@ run_clicked = st.sidebar.button("백테스트 실행", type="primary", use_conta
 
 if run_clicked:
     st.session_state['bt_result'] = run_backtest(
-        start_date=start_date.strftime("%Y-%m-%d"),
-        end_date=end_date.strftime("%Y-%m-%d"),
+        start_date=val_start_date.strftime("%Y-%m-%d"),
+        end_date=val_end_date.strftime("%Y-%m-%d"),
         strategy=strategy,
         min_score=min_score,
         min_signals=min_signals,
@@ -120,6 +162,9 @@ if run_clicked:
         institution_weight=institution_weight,
         reverse_threshold=reverse_threshold,
     )
+    st.session_state['bt_use_split'] = use_split
+    st.session_state['bt_opt_period'] = (opt_start_date.strftime("%Y-%m-%d"), opt_end_date.strftime("%Y-%m-%d"))
+    st.session_state['bt_val_period'] = (val_start_date.strftime("%Y-%m-%d"), val_end_date.strftime("%Y-%m-%d"))
 
 # ---------------------------------------------------------------------------
 # Optuna 최적화 섹션
@@ -138,15 +183,21 @@ with st.sidebar.expander("파라미터 최적화 (Optuna)"):
         }[x],
         key="w_opt_metric",
     )
-    st.caption("최적화 대상: 최소 점수, 최소 시그널 수, 목표 수익률, 손절 비율")
+    if use_split:
+        st.caption(f"최적화: {opt_start_date} ~ {opt_end_date}  →  검증: {val_start_date} ~ {val_end_date}")
+    else:
+        st.caption("최적화 대상: 최소 점수, 최소 시그널 수, 목표 수익률, 손절 비율")
     opt_clicked = st.button("최적 파라미터 찾기", use_container_width=True)
 
 if opt_clicked:
     st.session_state.pop('opt_result', None)
-    with st.spinner(f"Optuna 최적화 실행 중... ({opt_n_trials} trials)"):
+    spinner_msg = f"Optuna 최적화 실행 중... ({opt_n_trials} trials)"
+    if use_split:
+        spinner_msg += f"  |  최적화: {opt_start_date}~{opt_end_date}"
+    with st.spinner(spinner_msg):
         opt_result = run_optuna_optimization(
-            start_date=start_date.strftime("%Y-%m-%d"),
-            end_date=end_date.strftime("%Y-%m-%d"),
+            start_date=opt_start_date.strftime("%Y-%m-%d"),
+            end_date=opt_end_date.strftime("%Y-%m-%d"),
             strategy=strategy,
             n_trials=opt_n_trials,
             metric=opt_metric,
@@ -159,22 +210,26 @@ if opt_clicked:
         st.session_state['opt_result'] = opt_result
         st.session_state['opt_metric'] = opt_metric
         st.session_state['pending_opt_params'] = opt_result['params']
-        # 최적화된 파라미터로 백테스트 자동 실행
+        # 최적화된 파라미터로 검증 기간 백테스트 자동 실행
         params = opt_result['params']
-        st.session_state['bt_result'] = run_backtest(
-            start_date=start_date.strftime("%Y-%m-%d"),
-            end_date=end_date.strftime("%Y-%m-%d"),
-            strategy=strategy,
-            min_score=params['min_score'],
-            min_signals=params['min_signals'],
-            target_return=params['target_return'],
-            stop_loss=params['stop_loss'],
-            max_hold_days=max_hold_days,
-            initial_capital=float(initial_capital),
-            max_positions=max_positions,
-            institution_weight=institution_weight,
-            reverse_threshold=reverse_threshold,
-        )
+        with st.spinner(f"검증 기간 백테스트 실행 중... ({val_start_date}~{val_end_date})"):
+            st.session_state['bt_result'] = run_backtest(
+                start_date=val_start_date.strftime("%Y-%m-%d"),
+                end_date=val_end_date.strftime("%Y-%m-%d"),
+                strategy=strategy,
+                min_score=params['min_score'],
+                min_signals=params['min_signals'],
+                target_return=params['target_return'],
+                stop_loss=params['stop_loss'],
+                max_hold_days=max_hold_days,
+                initial_capital=float(initial_capital),
+                max_positions=max_positions,
+                institution_weight=institution_weight,
+                reverse_threshold=reverse_threshold,
+            )
+        st.session_state['bt_use_split'] = use_split
+        st.session_state['bt_opt_period'] = (opt_start_date.strftime("%Y-%m-%d"), opt_end_date.strftime("%Y-%m-%d"))
+        st.session_state['bt_val_period'] = (val_start_date.strftime("%Y-%m-%d"), val_end_date.strftime("%Y-%m-%d"))
         st.rerun()
     else:
         st.error("최적화 실패: 완료된 Trial이 없습니다. Trial 수를 늘리거나 기간을 조정해보세요.")
@@ -228,6 +283,21 @@ metrics = get_metrics_from_result(result)
 if not trades:
     st.warning("백테스트 기간 내 거래가 발생하지 않았습니다. 파라미터를 조정해보세요.")
     st.stop()
+
+# ---------------------------------------------------------------------------
+# 기간 표시 배너
+# ---------------------------------------------------------------------------
+_use_split = st.session_state.get('bt_use_split', False)
+_opt_p = st.session_state.get('bt_opt_period')
+_val_p = st.session_state.get('bt_val_period')
+
+if _use_split and _opt_p and _val_p:
+    st.info(
+        f"🔧 최적화 기간: **{_opt_p[0]} ~ {_opt_p[1]}** &nbsp;&nbsp;|&nbsp;&nbsp; "
+        f"✅ 검증 기간: **{_val_p[0]} ~ {_val_p[1]}**"
+    )
+elif _val_p:
+    st.caption(f"백테스트 기간: {_val_p[0]} ~ {_val_p[1]}")
 
 # ---------------------------------------------------------------------------
 # KPI 행
