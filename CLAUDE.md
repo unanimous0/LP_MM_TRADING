@@ -706,9 +706,9 @@ LP_MM_TRADING/
 
 ## [Progress History]
 
-### 2026-02-20 (Streamlit 다크 테마 + UI 개선)
+### 2026-02-20 (Streamlit 다크 테마 + UI 개선 + 차트 개선 + 거래내역 성과 컬럼)
 
-**목표**: 차트/앱 전반 다크 테마 적용, 슬라이더+직접입력 동기화, 진행률 표시 개선
+**목표**: 차트/앱 전반 다크 테마 적용, 슬라이더+직접입력 동기화, 진행률 표시 개선, 월별수익률 재설계, 거래내역 기간 내 성과 추가
 
 **구현 내용**:
 
@@ -726,14 +726,14 @@ LP_MM_TRADING/
   - CSS: 사이드바 너비 340px, 슬라이더-입력창 `align-items: flex-end` 수직 정렬
 
 - ✅ **다크 테마 전면 적용**
-  - **`.streamlit/config.toml` 신규 생성**: 앱 전체 다크 테마
+  - **`.streamlit/config.toml` 신규 생성**: 앱 전체 다크 테마 (Tailwind Slate 팔레트)
     ```toml
     [theme]
     base = "dark"
-    primaryColor = "#38bdf8"
-    backgroundColor = "#0f172a"
-    secondaryBackgroundColor = "#1e293b"
-    textColor = "#e2e8f0"
+    primaryColor = "#38bdf8"        # sky-400
+    backgroundColor = "#0f172a"     # slate-900
+    secondaryBackgroundColor = "#1e293b"  # slate-800
+    textColor = "#e2e8f0"           # slate-200
     ```
   - **`src/backtesting/plotly_visualizer.py`**: `_apply_theme()` static 메서드 추가
     - 다크 상수: `_BG_PLOT='#0f172a'`, `_BG_PAPER='#1e293b'`, `_GRID='#334155'`
@@ -742,8 +742,11 @@ LP_MM_TRADING/
     - 히트맵 셀 텍스트: `color='#0f172a'` (검은색)
   - **`app/utils/charts.py`**: `_apply_dark()` 함수 추가 (동일 다크 상수 체계)
   - **모든 `st.plotly_chart()` 호출에 `theme=None` 추가** (10곳)
-    - `theme="streamlit"` 기본값이 명시적 배경색을 덮어쓰는 문제 해결
+    - **근본 원인**: `st.plotly_chart`의 기본값 `theme="streamlit"`이 명시적 `plot_bgcolor`/`paper_bgcolor`를 덮어쓰는 것이 문제였음
     - 영향 파일: `3_📈_백테스트.py`(5곳), `1_📊_히트맵.py`, `2_🔍_패턴분석.py`, `4_🔄_워크포워드.py`, `streamlit_app.py`(2곳)
+  - **`fileWatcherType = "poll"` 추가** (`.streamlit/config.toml`)
+    - WSL 환경에서 inotify가 `src/` 하위 파일 변경을 감지 못하는 문제 해결
+    - 폴링 방식으로 전환 → 코드 저장 시 자동 리로드 정상 동작
 
 - ✅ **분석 진행률 표시 (% 포함)** — CacheReplayClosureError 해결
   - **원인**: `@st.cache_data` 함수 내부에서 `st.progress` 업데이트 시도 → Streamlit이 캐시 재생 시 외부 위젯 호출 실패
@@ -751,17 +754,51 @@ LP_MM_TRADING/
   - `run_analysis_pipeline_with_progress()`: 비캐시 래퍼에서 스테이지 사이에 `st.progress(pct, text=...)` 업데이트
   - 전 페이지 적용: `streamlit_app.py`, `1_📊_히트맵.py`, `2_🔍_패턴분석.py`
 
+- ✅ **`use_container_width` → `width='stretch'` 전환** (Streamlit 1.54.0 deprecation 대응)
+  - `st.plotly_chart` 호출 전부 교체 (10곳)
+  - `st.dataframe` / `st.button`의 `use_container_width`는 해당 없음 (chart 전용 deprecation)
+
+- ✅ **월별 수익률 차트 완전 재설계** (`src/backtesting/plotly_visualizer.py`)
+  - **기존**: 연도×월 히트맵 (x축=월1~12, y축=연도) → 정렬 오류 + 가독성 불편
+  - **변경**: 타임라인 바차트 (x축=연도·월 순서 라벨, y축=월별 수익률%)
+  - 첫 달 수익률: `initial_capital` 기준으로 계산 (`pct_change()` NaN 문제 해결)
+  - y축 범위 자동 패딩 (`pad = max(|max_r|, |min_r|) × 0.35`) → 바 위 텍스트 클리핑 방지
+  - 바 텍스트 (소수점 2자리 `%{customdata}`) + 호버 텍스트 동기화
+  - 글씨 크기 13px로 확대
+  - groupby 방식: `dt.to_period('M')` → `year*100 + month` 정수 (WSL pandas 호환)
+
+- ✅ **수익률 분포 차트 개선** (`src/backtesting/plotly_visualizer.py`)
+  - 평균/중앙값 표시: `add_annotation()` → 범례(legend) 방식으로 변경
+    - 차트 본문 텍스트가 바에 가려지는 문제 해결
+  - 범례 위치: 차트 우측 → 차트 상단 가로 배치 (`orientation='h', y=1.02, x=0`)
+  - dummy trace (`x=[None], y=[None]`) 활용 → vline 색상을 legend에 표시
+
+- ✅ **히트맵 통계 위치 이동** (`app/pages/1_📊_히트맵.py`)
+  - 기존: 히트맵 아래에 "표시 종목 수 / 평균 1W Z-Score / 강한 매수" 표시
+  - 변경: 히트맵 **위**로 이동 → 차트 보기 전에 맥락 파악 가능
+
+- ✅ **거래내역 기간 내 성과 컬럼 추가** (`app/pages/3_📈_백테스트.py`)
+  - DB `close_price` 일괄 조회 (1회 쿼리, 전 종목 기간 포함)
+  - 진입가 기준 일별 수익률 계산 → max_ret / min_ret / MDD
+  - **컬럼 추가**: `max_ret (%)`, `min_ret (%)`, `MDD (%)` (소수점 2자리)
+  - `st.column_config.NumberColumn` 포맷 적용
+
+**버그 수정 이력**:
+- `import numpy as np as _np` → `import numpy as _np` (문법 오류)
+- 월별 수익률 차트 첫 달 누락: `pct_change()` 첫 행 NaN → `initial_capital`로 기준값 설정
+- 월별 수익률 차트 전체 사라짐: `dt.to_period('M')` WSL 이슈 → `year*100+month` 정수 groupby로 교체
+
 **파일 구조**:
 ```
-.streamlit/config.toml                 (신규 — 앱 전체 다크 테마)
-src/backtesting/plotly_visualizer.py   (_apply_theme, 다크 상수, 커스텀 컬러스케일)
+.streamlit/config.toml                 (신규 — 앱 전체 다크 테마 + fileWatcherType=poll)
+src/backtesting/plotly_visualizer.py   (_apply_theme, 다크 상수, 월별수익률 재설계, 수익률분포 개선)
 app/utils/charts.py                    (_apply_dark, 다크 상수, 커스텀 컬러스케일)
 app/utils/data_loader.py               (스테이지별 캐시 분리 + run_analysis_pipeline_with_progress)
-app/streamlit_app.py                   (progress bar + theme=None)
-app/pages/1_📊_히트맵.py               (progress bar + theme=None)
-app/pages/2_🔍_패턴분석.py             (progress bar + theme=None)
-app/pages/3_📈_백테스트.py             (_synced_slider + 날짜 버그 수정 + theme=None × 5)
-app/pages/4_🔄_워크포워드.py           (theme=None)
+app/streamlit_app.py                   (progress bar + theme=None + width='stretch')
+app/pages/1_📊_히트맵.py               (progress bar + theme=None + 통계 위치 차트 위로)
+app/pages/2_🔍_패턴분석.py             (progress bar + theme=None + width='stretch')
+app/pages/3_📈_백테스트.py             (_synced_slider + 날짜 버그 수정 + theme=None × 5 + 거래내역 성과 컬럼)
+app/pages/4_🔄_워크포워드.py           (theme=None + width='stretch')
 ```
 
 ---
