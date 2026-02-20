@@ -18,6 +18,7 @@ from datetime import datetime
 
 from utils.data_loader import (
     run_backtest,
+    run_backtest_with_progress,
     run_optuna_optimization,
     get_metrics_from_result,
     get_trades_from_result,
@@ -222,21 +223,29 @@ if opt_clicked:
         st.session_state['pending_opt_params'] = opt_result['params']
         # 최적화된 파라미터로 검증 기간 백테스트 자동 실행
         params = opt_result['params']
-        with st.spinner(f"검증 기간 백테스트 실행 중... ({val_start_date}~{val_end_date})"):
-            st.session_state['bt_result'] = run_backtest(
-                start_date=val_start_date.strftime("%Y-%m-%d"),
-                end_date=val_end_date.strftime("%Y-%m-%d"),
-                strategy=strategy,
-                min_score=params['min_score'],
-                min_signals=params['min_signals'],
-                target_return=params['target_return'],
-                stop_loss=params['stop_loss'],
-                max_hold_days=max_hold_days,
-                initial_capital=float(initial_capital),
-                max_positions=max_positions,
-                institution_weight=institution_weight,
-                reverse_threshold=reverse_threshold,
-            )
+        _bt_progress_bar = st.progress(0, text="백테스트 준비 중...")
+
+        def _bt_progress_callback(current, total):
+            pct = min(1.0, current / total)
+            display = min(current, total)
+            _bt_progress_bar.progress(pct, text=f"백테스트 중... {display}/{total}일 ({pct*100:.0f}%)")
+
+        st.session_state['bt_result'] = run_backtest_with_progress(
+            start_date=val_start_date.strftime("%Y-%m-%d"),
+            end_date=val_end_date.strftime("%Y-%m-%d"),
+            strategy=strategy,
+            min_score=params['min_score'],
+            min_signals=params['min_signals'],
+            target_return=params['target_return'],
+            stop_loss=params['stop_loss'],
+            max_hold_days=max_hold_days,
+            initial_capital=float(initial_capital),
+            max_positions=max_positions,
+            institution_weight=institution_weight,
+            reverse_threshold=reverse_threshold,
+            progress_callback=_bt_progress_callback,
+        )
+        _bt_progress_bar.empty()
         st.session_state['bt_use_split'] = use_split
         st.session_state['bt_opt_period'] = (opt_start_date.strftime("%Y-%m-%d"), opt_end_date.strftime("%Y-%m-%d"))
         st.session_state['bt_val_period'] = (val_start_date.strftime("%Y-%m-%d"), val_end_date.strftime("%Y-%m-%d"))

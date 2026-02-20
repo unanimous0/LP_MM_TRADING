@@ -471,7 +471,8 @@ class BacktestEngine:
 
     def run(self, start_date: str, end_date: str, verbose: bool = True,
             preload_data: bool = True,
-            precomputed=None) -> Dict:
+            precomputed=None,
+            progress_callback=None) -> Dict:
         """
         백테스트 실행
 
@@ -517,7 +518,11 @@ class BacktestEngine:
             raise ValueError(f"거래일이 없습니다: {start_date} ~ {end_date}")
 
         # 롤링 윈도우 시뮬레이션
+        total_days = len(trading_dates)
         for i, trade_date in enumerate(trading_dates):
+            if progress_callback:
+                progress_callback(i + 1, total_days)
+
             # 1-1. 가격 기준 청산 (목표가/손절가/시간 손절) - 당일 종가
             self._check_exit_conditions_price(trade_date)
 

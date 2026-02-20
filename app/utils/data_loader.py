@@ -233,6 +233,62 @@ def get_trades_from_result(result: Dict) -> List[Trade]:
     return _deserialize_trades(result['trade_dicts'])
 
 
+def run_backtest_with_progress(
+    start_date: str,
+    end_date: str,
+    strategy: str = 'long',
+    min_score: float = 60,
+    min_signals: int = 1,
+    target_return: float = 0.15,
+    stop_loss: float = -0.075,
+    max_hold_days: int = 999,
+    initial_capital: float = 10_000_000,
+    max_positions: int = 5,
+    institution_weight: float = 0.3,
+    reverse_threshold: float = 60,
+    allowed_patterns=None,
+    progress_callback=None,
+) -> Dict:
+    """백테스트 실행 (캐시 없음, progress_callback 지원)"""
+    conn = get_db_connection()
+    config = BacktestConfig(
+        initial_capital=initial_capital,
+        max_positions=max_positions,
+        min_score=min_score,
+        min_signals=min_signals,
+        target_return=target_return,
+        stop_loss=stop_loss,
+        max_hold_days=max_hold_days,
+        reverse_signal_threshold=reverse_threshold,
+        allowed_patterns=allowed_patterns,
+        strategy=strategy,
+        institution_weight=institution_weight,
+        force_exit_on_end=True,
+    )
+    engine = BacktestEngine(conn, config)
+    result = engine.run(
+        start_date=start_date,
+        end_date=end_date,
+        verbose=False,
+        progress_callback=progress_callback,
+    )
+    return {
+        'trade_dicts': _serialize_trades(result['trades']),
+        'daily_values': result['daily_values'],
+        'config': {
+            'initial_capital': config.initial_capital,
+            'max_positions': config.max_positions,
+            'min_score': config.min_score,
+            'min_signals': config.min_signals,
+            'target_return': config.target_return,
+            'stop_loss': config.stop_loss,
+            'max_hold_days': config.max_hold_days,
+            'strategy': config.strategy,
+        },
+        'initial_capital': config.initial_capital,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Optuna 최적화
 # ---------------------------------------------------------------------------
