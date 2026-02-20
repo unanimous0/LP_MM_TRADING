@@ -142,7 +142,7 @@ with st.sidebar.expander("⚡ 파라미터 최적화 (Optuna)"):
     opt_n_trials = st.slider("이번 추가 Trial 수", 10, 200, 50, step=10, key="w_opt_n_trials")
     opt_metric = st.selectbox(
         "평가 지표",
-        options=['sharpe_ratio', 'total_return', 'win_rate', 'profit_factor'],
+        options=['total_return', 'sharpe_ratio', 'win_rate', 'profit_factor'],
         format_func=lambda x: {
             'sharpe_ratio': 'Sharpe Ratio',
             'total_return': '총 수익률',
