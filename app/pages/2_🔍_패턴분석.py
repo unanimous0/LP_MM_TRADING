@@ -95,9 +95,7 @@ with tab1:
             use_container_width=True,
             height=min(600, len(display_df) * 40 + 40),
             column_config={
-                "score": st.column_config.ProgressColumn(
-                    "패턴 점수", min_value=0, max_value=100, format="%.0f",
-                ),
+                "score": st.column_config.NumberColumn("패턴 점수", format="%.0f"),
                 "signal_count": st.column_config.NumberColumn("시그널 수", format="%d"),
                 "final_score": st.column_config.ProgressColumn(
                     "최종 점수", min_value=0, max_value=115, format="%.0f",
