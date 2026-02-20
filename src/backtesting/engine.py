@@ -271,46 +271,15 @@ class BacktestEngine:
         """
         사전 계산 데이터를 사용한 빠른 시그널 스캔
 
-        _scan_signals_on_date()의 빠른 경로. classify_all() 호출 없이
-        O(1) dict 조회만으로 동일한 결과 반환.
+        Precomputer에서 patterns+signals+stock_name+final_score를 미리 통합해두어
+        dict O(1) 조회 + copy만 수행. merge/map/insert 없음.
         """
         pc = self._precomputed
-
-        # 1. 사전 계산된 패턴 조회 (O(1)) - classify_all() 호출 없음
-        pattern_dict = pc.patterns_long if direction == 'long' else pc.patterns_short
-        pattern_result = pattern_dict.get(end_date)
-
-        if pattern_result is None or pattern_result.empty:
+        merged_dict = pc.merged_long if direction == 'long' else pc.merged_short
+        result = merged_dict.get(end_date)
+        if result is None or result.empty:
             return pd.DataFrame()
-
-        pattern_result = pattern_result.copy()
-
-        # 2. Signal lookup (O(1))
-        try:
-            signals_on_date = pc.signals_all_dates.loc[end_date].reset_index()
-        except KeyError:
-            signals_on_date = pd.DataFrame()
-
-        # 3. Merge
-        if not signals_on_date.empty:
-            result = pd.merge(pattern_result, signals_on_date, on='stock_code', how='left')
-        else:
-            result = pattern_result.copy()
-            result['ma_cross'] = False
-            result['ma_diff'] = np.nan
-            result['acceleration'] = np.nan
-            result['sync_rate'] = np.nan
-            result['signal_count'] = 0
-
-        # 4. Fill defaults
-        result['signal_count'] = result['signal_count'].fillna(0).astype(int)
-        result['ma_cross'] = result['ma_cross'].fillna(False)
-
-        # 5. Stock names
-        result.insert(1, 'stock_name', result['stock_code'].map(
-            lambda c: pc.stock_names.get(c, c)))
-
-        return result
+        return result.copy()
 
     def _check_exit_conditions_price(self, current_date: str) -> List[Trade]:
         """
@@ -430,8 +399,10 @@ class BacktestEngine:
             return signals
 
         # 종합점수 계산: 패턴점수 + (시그널 × 5점)
+        # precomputed fast path에서는 이미 final_score가 포함되어 있음
         signals = signals.copy()
-        signals['final_score'] = signals['score'] + (signals['signal_count'] * 5)
+        if 'final_score' not in signals.columns:
+            signals['final_score'] = signals['score'] + (signals['signal_count'] * 5)
 
         # 필터링: 종합점수 & 시그널 개수
         candidates = signals[

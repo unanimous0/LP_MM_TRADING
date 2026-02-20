@@ -35,6 +35,8 @@ class PrecomputeResult:
         trading_dates: 정렬된 거래일 목록
         patterns_long: trade_date → classify_all(direction='long') DataFrame
         patterns_short: trade_date → classify_all(direction='short') DataFrame
+        merged_long: trade_date → patterns+signals+stock_name+final_score 통합 DataFrame (O(1) 조회용)
+        merged_short: trade_date → patterns+signals+stock_name+final_score 통합 DataFrame (O(1) 조회용)
     """
     zscore_all_dates: pd.DataFrame
     signals_all_dates: pd.DataFrame
@@ -43,6 +45,8 @@ class PrecomputeResult:
     trading_dates: list = field(default_factory=list)
     patterns_long: dict = field(default_factory=dict)
     patterns_short: dict = field(default_factory=dict)
+    merged_long: dict = field(default_factory=dict)
+    merged_short: dict = field(default_factory=dict)
 
 
 class BacktestPrecomputer:
@@ -103,6 +107,12 @@ class BacktestPrecomputer:
         if verbose:
             print(f"  패턴 사전 계산 완료: {len(patterns_long)}일(long), {len(patterns_short)}일(short)")
 
+        merged_long, merged_short = self._merge_patterns_signals(
+            patterns_long, patterns_short, signals_df, stock_names
+        )
+        if verbose:
+            print(f"  패턴+시그널 통합 완료: {len(merged_long)}일(long), {len(merged_short)}일(short)")
+
         if verbose:
             print(f"  거래일: {len(trading_dates)}일, "
                   f"종목: {raw_df['stock_code'].nunique()}종목")
@@ -116,6 +126,8 @@ class BacktestPrecomputer:
             trading_dates=trading_dates,
             patterns_long=patterns_long,
             patterns_short=patterns_short,
+            merged_long=merged_long,
+            merged_short=merged_short,
         )
 
     def _load_raw_data(self, end_date: str) -> pd.DataFrame:
@@ -286,3 +298,61 @@ class BacktestPrecomputer:
                 patterns_short[date] = classifier.classify_all(short_stocks, direction='short')
 
         return patterns_long, patterns_short
+
+    def _merge_patterns_signals(self, patterns_long: dict, patterns_short: dict,
+                                 signals_df: pd.DataFrame,
+                                 stock_names: dict) -> tuple:
+        """패턴 + 시그널 + 종목명 + final_score 사전 통합
+
+        _scan_signals_on_date_fast()에서 매번 수행하던 merge/map/insert를
+        Precomputer 단계에서 1회만 실행.
+        Trial 루프에서는 dict O(1) 조회 + copy만 수행.
+
+        Returns:
+            (merged_long, merged_short): 각각 {trade_date: DataFrame} dict
+            컬럼: stock_code, stock_name, pattern, score, direction,
+                  1W~2Y, ma_cross, ma_diff, acceleration, sync_rate, signal_count, final_score
+        """
+        merged_long = {}
+        merged_short = {}
+
+        all_dates = set(patterns_long.keys()) | set(patterns_short.keys())
+
+        for date in all_dates:
+            # 해당 날짜 시그널 (MultiIndex loc)
+            try:
+                signals_on_date = signals_df.loc[date].reset_index()
+            except KeyError:
+                signals_on_date = pd.DataFrame()
+
+            for direction, patterns_dict, merged_dict in [
+                ('long', patterns_long, merged_long),
+                ('short', patterns_short, merged_short),
+            ]:
+                pat = patterns_dict.get(date)
+                if pat is None or pat.empty:
+                    continue
+
+                # merge
+                if not signals_on_date.empty:
+                    merged = pd.merge(pat, signals_on_date, on='stock_code', how='left')
+                else:
+                    merged = pat.copy()
+                    for col in ['ma_cross', 'ma_diff', 'acceleration', 'sync_rate']:
+                        merged[col] = np.nan
+                    merged['signal_count'] = 0
+
+                # fill defaults
+                merged['signal_count'] = merged['signal_count'].fillna(0).astype(int)
+                merged['ma_cross'] = merged['ma_cross'].fillna(False)
+
+                # stock_name 추가
+                merged.insert(1, 'stock_name',
+                              merged['stock_code'].map(lambda c: stock_names.get(c, c)))
+
+                # final_score 사전 계산 (score + signal_count × 5)
+                merged['final_score'] = merged['score'] + merged['signal_count'] * 5
+
+                merged_dict[date] = merged
+
+        return merged_long, merged_short
