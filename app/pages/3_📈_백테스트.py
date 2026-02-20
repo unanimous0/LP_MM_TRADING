@@ -40,6 +40,20 @@ def _snap(value, step, lo, hi):
 
 
 # ---------------------------------------------------------------------------
+# 위젯 기본값 초기화 (최초 1회만 - key+value 동시 지정 경고 방지)
+# ---------------------------------------------------------------------------
+_defaults = {
+    'w_min_score': 60.0,
+    'w_min_signals': 1,
+    'w_target_return': 15.0,
+    'w_stop_loss': -7.5,
+}
+for _k, _v in _defaults.items():
+    if _k not in st.session_state:
+        st.session_state[_k] = _v
+
+
+# ---------------------------------------------------------------------------
 # 최적화된 파라미터 적용 (위젯 렌더링 전에 실행)
 # ---------------------------------------------------------------------------
 if 'pending_opt_params' in st.session_state:
@@ -52,21 +66,17 @@ if 'pending_opt_params' in st.session_state:
 
 
 # ---------------------------------------------------------------------------
-# 사이드바: 파라미터
+# 사이드바 ① 기간 분리 설정 (최상단 — 최적화·백테스트 공통)
 # ---------------------------------------------------------------------------
-st.sidebar.header("백테스트 설정")
-
 min_date, max_date = get_date_range()
 
-# ---------------------------------------------------------------------------
-# 기간 설정
-# ---------------------------------------------------------------------------
-st.sidebar.subheader("기간")
 use_split = st.sidebar.checkbox(
     "최적화 / 검증 기간 분리",
     value=True,
     help="최적화 기간에서 최적 파라미터를 탐색하고, 검증 기간에서 백테스트를 실행합니다. 과적합 없는 신뢰도 높은 결과를 얻을 수 있습니다.",
 )
+if not use_split:
+    st.sidebar.warning("⚠️ 같은 기간에서 최적화·백테스트를 수행합니다. 과적합으로 신뢰하기 어려운 결과가 나올 수 있습니다.")
 
 if use_split:
     st.sidebar.caption("🔧 최적화 기간 (파라미터 탐색)")
@@ -115,6 +125,46 @@ else:
     opt_start_date = val_start_date = _start
     opt_end_date = val_end_date = _end
 
+st.sidebar.divider()
+
+# ---------------------------------------------------------------------------
+# 사이드바 ② 파라미터 최적화
+# ---------------------------------------------------------------------------
+with st.sidebar.expander("⚡ 파라미터 최적화 (Optuna)"):
+    opt_n_trials = st.slider("이번 추가 Trial 수", 10, 200, 50, step=10, key="w_opt_n_trials")
+    opt_metric = st.selectbox(
+        "평가 지표",
+        options=['sharpe_ratio', 'total_return', 'win_rate', 'profit_factor'],
+        format_func=lambda x: {
+            'sharpe_ratio': 'Sharpe Ratio',
+            'total_return': '총 수익률',
+            'win_rate': '승률',
+            'profit_factor': 'Profit Factor',
+        }[x],
+        key="w_opt_metric",
+    )
+    opt_reset = st.checkbox(
+        "누적 Trial 초기화 후 실행",
+        value=False,
+        help="체크 시 이전 누적 결과를 삭제하고 새로 시작합니다.",
+    )
+    # ① 현재 누적 현황 (작게)
+    if opt_reset:
+        st.caption("🔄 초기화 후 새로 시작")
+    elif 'opt_result' in st.session_state:
+        _acc = st.session_state['opt_result'].get('total_complete', 0)
+        st.caption(f"📊 이전 누적 {_acc}회 → 실행 후 약 {_acc + opt_n_trials}회")
+    else:
+        st.caption("📊 첫 실행 (누적 없음)")
+    opt_clicked = st.button("최적 파라미터 찾기", use_container_width=True, type="primary")
+
+st.sidebar.divider()
+
+# ---------------------------------------------------------------------------
+# 사이드바 ③ 백테스트 설정
+# ---------------------------------------------------------------------------
+st.sidebar.header("백테스트 설정")
+
 # 전략
 strategy = st.sidebar.selectbox(
     "전략 방향",
@@ -124,13 +174,13 @@ strategy = st.sidebar.selectbox(
 
 # 진입 조건
 st.sidebar.subheader("진입 조건")
-min_score = st.sidebar.slider("최소 점수", 0.0, 100.0, 60.0, step=5.0, key="w_min_score")
-min_signals = st.sidebar.slider("최소 시그널 수", 0, 3, 1, key="w_min_signals")
+min_score = st.sidebar.slider("최소 점수", 0.0, 100.0, step=5.0, key="w_min_score")
+min_signals = st.sidebar.slider("최소 시그널 수", 0, 3, key="w_min_signals")
 
 # 청산 조건
 st.sidebar.subheader("청산 조건")
-target_return = st.sidebar.slider("목표 수익률 (%)", 1.0, 50.0, 15.0, step=1.0, key="w_target_return") / 100
-stop_loss = st.sidebar.slider("손절 비율 (%)", -30.0, -1.0, -7.5, step=0.5, key="w_stop_loss") / 100
+target_return = st.sidebar.slider("목표 수익률 (%)", 1.0, 50.0, step=1.0, key="w_target_return") / 100
+stop_loss = st.sidebar.slider("손절 비율 (%)", -30.0, -1.0, step=0.5, key="w_stop_loss") / 100
 max_hold_days = st.sidebar.number_input("최대 보유 기간 (일)", 1, 999, 999)
 reverse_threshold = st.sidebar.slider("반대 수급 청산 점수", 0.0, 100.0, 60.0, step=5.0)
 
@@ -168,29 +218,15 @@ if run_clicked:
     st.session_state['bt_val_period'] = (val_start_date.strftime("%Y-%m-%d"), val_end_date.strftime("%Y-%m-%d"))
 
 # ---------------------------------------------------------------------------
-# Optuna 최적화 섹션
+# Optuna 최적화 실행
 # ---------------------------------------------------------------------------
-st.sidebar.divider()
-with st.sidebar.expander("파라미터 최적화 (Optuna)"):
-    opt_n_trials = st.slider("Trial 수", 10, 200, 50, step=10, key="w_opt_n_trials")
-    opt_metric = st.selectbox(
-        "평가 지표",
-        options=['sharpe_ratio', 'total_return', 'win_rate', 'profit_factor'],
-        format_func=lambda x: {
-            'sharpe_ratio': 'Sharpe Ratio',
-            'total_return': '총 수익률',
-            'win_rate': '승률',
-            'profit_factor': 'Profit Factor',
-        }[x],
-        key="w_opt_metric",
-    )
-    if use_split:
-        st.caption(f"최적화: {opt_start_date} ~ {opt_end_date}  →  검증: {val_start_date} ~ {val_end_date}")
-    else:
-        st.warning("⚠️ 같은 기간에서 최적화와 백테스트를 수행합니다. 이 결과로 전략의 실제 수익성을 판단할 수 없습니다. 위의 '최적화 / 검증 기간 분리'를 사용하세요.")
-    opt_clicked = st.button("최적 파라미터 찾기", use_container_width=True)
 
 if opt_clicked:
+    # ② 이전 최고값 저장 (같은 metric일 때만, reset 시 제거)
+    if opt_reset or st.session_state.get('opt_metric') != opt_metric:
+        st.session_state.pop('opt_prev_best', None)
+    elif 'opt_result' in st.session_state:
+        st.session_state['opt_prev_best'] = st.session_state['opt_result'].get(opt_metric)
     st.session_state.pop('opt_result', None)
     _opt_progress_bar = st.progress(0, text="사전 계산 중...")
     _opt_status = st.empty()
@@ -214,6 +250,7 @@ if opt_clicked:
         max_hold_days=max_hold_days,
         reverse_threshold=reverse_threshold,
         progress_callback=_opt_progress_callback,
+        reset_study=opt_reset,
     )
     _opt_progress_bar.empty()
     _opt_status.empty()
@@ -254,39 +291,103 @@ if opt_clicked:
         st.error("최적화 실패: 완료된 Trial이 없습니다. Trial 수를 늘리거나 기간을 조정해보세요.")
 
 # ---------------------------------------------------------------------------
+# 결과 박스 공통 CSS (최적화=주황, 검증=초록 — :has() 로 자동 구분)
+# ---------------------------------------------------------------------------
+st.markdown("""
+<style>
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    border-radius: 12px !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"]:has([style*="ff9800"]) {
+    border-color: rgba(255, 152, 0, 0.4) !important;
+}
+div[data-testid="stVerticalBlockBorderWrapper"]:has([style*="00c853"]) {
+    border-color: rgba(0, 200, 83, 0.35) !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
 # 최적화 결과 표시
 # ---------------------------------------------------------------------------
 if 'opt_result' in st.session_state:
     opt_r = st.session_state['opt_result']
     opt_m = st.session_state.get('opt_metric', 'sharpe_ratio')
+    _bt_opt_p = st.session_state.get('bt_opt_period')
+    _opt_period_str = f"{_bt_opt_p[0]} ~ {_bt_opt_p[1]}" if _bt_opt_p else ""
 
-    with st.expander("최적화 결과", expanded=True):
-        c1, c2, c3 = st.columns(3)
-        metric_names = {
-            'sharpe_ratio': 'Sharpe Ratio',
-            'total_return': '총 수익률',
-            'win_rate': '승률',
-            'profit_factor': 'Profit Factor',
-        }
-        metric_val = opt_r.get(opt_m, 0)
-        if opt_m in ('total_return', 'win_rate'):
-            c1.metric(metric_names[opt_m], f"{metric_val:.2f}%")
-        else:
-            c1.metric(metric_names[opt_m], f"{metric_val:.4f}")
-        c2.metric("완료 Trial", f"{opt_r['total_complete']}개")
-        c3.metric("중단 Trial", f"{opt_r['total_pruned']}개")
+    metric_names = {
+        'sharpe_ratio': 'Sharpe Ratio',
+        'total_return': '총 수익률',
+        'win_rate': '승률',
+        'profit_factor': 'Profit Factor',
+    }
+    metric_val = opt_r.get(opt_m, 0)
+    metric_display = f"{metric_val:.2f}%" if opt_m in ('total_return', 'win_rate') else f"{metric_val:.4f}"
+
+    with st.container(border=True):
+        st.markdown(
+            f"""
+            <div style="
+                border-left: 4px solid #ff9800;
+                padding: 10px 18px;
+                margin-bottom: 20px;
+                background-color: rgba(255, 152, 0, 0.07);
+                border-radius: 0 8px 8px 0;
+            ">
+                <div style="font-size: 1.25rem; font-weight: 700; color: #ff9800; margin-bottom: 4px;">
+                    🔧 최적화 결과 (In-Sample)
+                </div>
+                <div style="font-size: 0.82rem; color: #888; line-height: 1.5;">
+                    최적화 기간 <strong style="color:#aaa">{_opt_period_str}</strong>
+                    &nbsp;·&nbsp; 누적 <strong style="color:#ff9800">{opt_r['total_complete']}회</strong> trial
+                    {"(이번 +" + str(opt_r['total_complete'] - opt_r.get('existing_before', 0)) + "회 추가)" if opt_r.get('existing_before', 0) > 0 else ""}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         params = opt_r['params']
-        param_labels = {
-            'min_score': ('최소 점수', f"{params['min_score']:.1f}"),
-            'min_signals': ('최소 시그널 수', f"{params['min_signals']}"),
-            'target_return': ('목표 수익률', f"{params['target_return']*100:.1f}%"),
-            'stop_loss': ('손절 비율', f"{params['stop_loss']*100:.1f}%"),
-        }
-        st.markdown("**최적 파라미터:**")
-        cols = st.columns(4)
-        for i, (key, (label, val)) in enumerate(param_labels.items()):
-            cols[i].metric(label, val)
+        col_stats, col_div, col_params = st.columns([3, 0.08, 4])
+
+        with col_stats:
+            s1, s2, s3 = st.columns(3)
+            # ② 이전 대비 delta 표시
+            _prev_best = st.session_state.get('opt_prev_best')
+            if _prev_best is not None:
+                _delta = metric_val - _prev_best
+                _delta_str = f"{_delta:+.2f}%" if opt_m in ('total_return', 'win_rate') else f"{_delta:+.4f}"
+                s1.metric(metric_names[opt_m], metric_display, delta=_delta_str)
+            else:
+                s1.metric(metric_names[opt_m], metric_display)
+            s2.metric("완료 Trial", f"{opt_r['total_complete']}개")
+            s3.metric("중단 Trial", f"{opt_r['total_pruned']}개")
+
+        with col_div:
+            st.markdown(
+                '<div style="border-left: 1px solid rgba(128,128,128,0.25); height: 72px; margin: 4px auto;"></div>',
+                unsafe_allow_html=True,
+            )
+
+        with col_params:
+            p1, p2, p3, p4 = st.columns(4)
+            p1.metric("최소 점수", f"{params['min_score']:.1f}")
+            p2.metric("최소 시그널", f"{params['min_signals']}")
+            p3.metric("목표 수익률", f"{params['target_return']*100:.1f}%")
+            p4.metric("손절", f"{params['stop_loss']*100:.1f}%")
+
+        # ③ 누적 study 정보 (접힌 상태, 작게)
+        existing_before = opt_r.get('existing_before', 0)
+        added_this_run = opt_r['total_complete'] - existing_before
+        _strategy_key = opt_r['params'].get('strategy', '?')
+        _sd = _bt_opt_p[0].replace('-', '') if _bt_opt_p else ''
+        _ed = _bt_opt_p[1].replace('-', '') if _bt_opt_p else ''
+        _sname = f"opt__{_strategy_key}__{_sd}__{_ed}__{opt_m}"
+        with st.expander("💾 누적 study 정보", expanded=False):
+            st.caption(f"📁 저장: `data/optuna_studies.db`")
+            st.caption(f"🔑 Study: `{_sname}`")
+            st.caption(f"이번 실행 전 누적: {existing_before}회 · 이번 추가: +{added_this_run}회 · 총: {opt_r['total_complete']}회")
 
 # ---------------------------------------------------------------------------
 # 결과 표시
@@ -350,77 +451,108 @@ if end_trades:
         )
 
 # ---------------------------------------------------------------------------
-# KPI 행
+# 검증 결과 컨테이너 (테두리)
 # ---------------------------------------------------------------------------
-summary = metrics.summary()
+with st.container(border=True):
 
-kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
-kpi1.metric("총 수익률", f"{summary['total_return']:+.2f}%")
-kpi2.metric("승률", f"{summary['win_rate']:.1f}%")
-kpi3.metric("MDD", f"{summary['max_drawdown']:.2f}%")
-kpi4.metric("샤프 비율", f"{summary['sharpe_ratio']:.2f}")
-kpi5.metric("총 거래", f"{summary['total_trades']}건")
-
-# ---------------------------------------------------------------------------
-# 차트 탭 (PlotlyVisualizer 재사용)
-# ---------------------------------------------------------------------------
-pv = PlotlyVisualizer(
-    trades=trades,
-    daily_values=result['daily_values'],
-    initial_capital=result['initial_capital'],
-)
-
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "수익률 곡선", "낙폭", "월별 수익률", "수익률 분포", "패턴별 성과", "거래 내역",
-])
-
-with tab1:
-    st.plotly_chart(pv.fig_equity_curve(), use_container_width=True)
-
-with tab2:
-    st.plotly_chart(pv.fig_drawdown(), use_container_width=True)
-
-with tab3:
-    st.plotly_chart(pv.fig_monthly_returns(), use_container_width=True)
-
-with tab4:
-    fig = pv.fig_return_distribution()
-    if fig:
-        st.plotly_chart(fig, use_container_width=True)
+    # 헤더
+    if _use_split and _val_p:
+        _opt_str = f"{_opt_p[0]} ~ {_opt_p[1]}" if _opt_p else ""
+        st.markdown(
+            f"""
+            <div style="
+                border-left: 4px solid #00c853;
+                padding: 10px 18px;
+                margin-bottom: 20px;
+                background-color: rgba(0, 200, 83, 0.07);
+                border-radius: 0 8px 8px 0;
+            ">
+                <div style="font-size: 1.25rem; font-weight: 700; color: #00c853; margin-bottom: 4px;">
+                    ✅ 검증 결과 (Out-of-Sample)
+                </div>
+                <div style="font-size: 0.82rem; color: #888; line-height: 1.5;">
+                    🔧 최적화 기간 <strong style="color:#aaa">{_opt_str}</strong> 에서 찾은 최적 파라미터를
+                    &nbsp;→&nbsp; 📅 검증 기간 <strong style="color:#aaa">{_val_p[0]} ~ {_val_p[1]}</strong> 에 적용한 실제 성과입니다.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
     else:
-        st.info("거래 데이터가 없습니다.")
+        st.subheader("📊 백테스트 결과")
 
-with tab5:
-    fig = pv.fig_pattern_performance()
-    if fig:
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("거래 데이터가 없습니다.")
+    # ---------------------------------------------------------------------------
+    # KPI 행
+    # ---------------------------------------------------------------------------
+    summary = metrics.summary()
 
-with tab6:
-    trade_df = pd.DataFrame([t.to_dict() for t in trades])
-    display_cols = [
-        'stock_name', 'stock_code', 'pattern', 'direction',
-        'entry_date', 'entry_price', 'exit_date', 'exit_price',
-        'return_pct', 'hold_days', 'exit_reason', 'signal_count',
-    ]
-    display_cols = [c for c in display_cols if c in trade_df.columns]
-    st.dataframe(
-        trade_df[display_cols],
-        use_container_width=True,
-        height=min(600, len(trade_df) * 40 + 40),
-        column_config={
-            "return_pct": st.column_config.NumberColumn("수익률 (%)", format="%.2f"),
-            "entry_price": st.column_config.NumberColumn("진입가", format="%,.0f"),
-            "exit_price": st.column_config.NumberColumn("청산가", format="%,.0f"),
-        },
+    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+    kpi1.metric("총 수익률", f"{summary['total_return']:+.2f}%")
+    kpi2.metric("승률", f"{summary['win_rate']:.1f}%")
+    kpi3.metric("MDD", f"{summary['max_drawdown']:.2f}%")
+    kpi4.metric("샤프 비율", f"{summary['sharpe_ratio']:.2f}")
+    kpi5.metric("총 거래", f"{summary['total_trades']}건")
+
+    # ---------------------------------------------------------------------------
+    # 차트 탭 (PlotlyVisualizer 재사용)
+    # ---------------------------------------------------------------------------
+    pv = PlotlyVisualizer(
+        trades=trades,
+        daily_values=result['daily_values'],
+        initial_capital=result['initial_capital'],
     )
 
-    # 다운로드 버튼
-    csv = trade_df[display_cols].to_csv(index=False, encoding='utf-8-sig')
-    st.download_button(
-        "거래 내역 CSV 다운로드",
-        csv,
-        file_name="backtest_trades.csv",
-        mime="text/csv",
-    )
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "수익률 곡선", "낙폭", "월별 수익률", "수익률 분포", "패턴별 성과", "거래 내역",
+    ])
+
+    with tab1:
+        st.plotly_chart(pv.fig_equity_curve(), use_container_width=True)
+
+    with tab2:
+        st.plotly_chart(pv.fig_drawdown(), use_container_width=True)
+
+    with tab3:
+        st.plotly_chart(pv.fig_monthly_returns(), use_container_width=True)
+
+    with tab4:
+        fig = pv.fig_return_distribution()
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("거래 데이터가 없습니다.")
+
+    with tab5:
+        fig = pv.fig_pattern_performance()
+        if fig:
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("거래 데이터가 없습니다.")
+
+    with tab6:
+        trade_df = pd.DataFrame([t.to_dict() for t in trades])
+        display_cols = [
+            'stock_name', 'stock_code', 'pattern', 'direction',
+            'entry_date', 'entry_price', 'exit_date', 'exit_price',
+            'return_pct', 'hold_days', 'exit_reason', 'signal_count',
+        ]
+        display_cols = [c for c in display_cols if c in trade_df.columns]
+        st.dataframe(
+            trade_df[display_cols],
+            use_container_width=True,
+            height=min(600, len(trade_df) * 40 + 40),
+            column_config={
+                "return_pct": st.column_config.NumberColumn("수익률 (%)", format="%.2f"),
+                "entry_price": st.column_config.NumberColumn("진입가", format="%,.0f"),
+                "exit_price": st.column_config.NumberColumn("청산가", format="%,.0f"),
+            },
+        )
+
+        # 다운로드 버튼
+        csv = trade_df[display_cols].to_csv(index=False, encoding='utf-8-sig')
+        st.download_button(
+            "거래 내역 CSV 다운로드",
+            csv,
+            file_name="backtest_trades.csv",
+            mime="text/csv",
+        )

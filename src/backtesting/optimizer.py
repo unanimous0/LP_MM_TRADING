@@ -4,7 +4,8 @@
 OptunaOptimizer 클래스:
 - Bayesian Optimization (--optimize 및 Walk-Forward Analysis 공용)
 - MedianPruner: 나쁜 Trial 조기 중단
-- 2단계 탐색: Phase 1 (넓은 범위) → Phase 2 (좋은 구간 집중)
+- Persistent Study: SQLite에 Trial 누적 저장 → 실행할수록 항상 최고값 보장
+  (study_storage=None이면 인메모리 일회성 실행 — Walk-Forward 기본값)
 """
 
 import sqlite3
@@ -46,18 +47,29 @@ class OptunaOptimizer:
     }
 
     def __init__(self, db_path: str, start_date: str, end_date: str,
-                 base_config: Optional[BacktestConfig] = None):
+                 base_config: Optional[BacktestConfig] = None,
+                 study_storage: Optional[str] = None):
         """
         Args:
             db_path: SQLite DB 파일 경로
             start_date: 백테스트 시작일 (YYYY-MM-DD)
             end_date: 백테스트 종료일 (YYYY-MM-DD)
             base_config: 기본 BacktestConfig (최적화 대상 외 파라미터)
+            study_storage: Optuna study 저장 경로 (예: "sqlite:///data/optuna_studies.db")
+                None이면 인메모리 (비지속, Walk-Forward 기본값)
         """
         self.db_path = db_path
         self.start_date = start_date
         self.end_date = end_date
         self.base_config = base_config or BacktestConfig()
+        self.study_storage = study_storage
+
+    def _make_study_name(self, metric: str) -> str:
+        """기간+전략+메트릭 기반 고유 study 이름 생성"""
+        strategy = self.base_config.strategy
+        sd = self.start_date.replace('-', '')
+        ed = self.end_date.replace('-', '')
+        return f"opt__{strategy}__{sd}__{ed}__{metric}"
 
     def _build_base_params(self) -> dict:
         """base_config에서 기본 파라미터 딕셔너리 생성"""
@@ -227,30 +239,30 @@ class OptunaOptimizer:
                  n_trials: int = 50,
                  metric: str = 'sharpe_ratio',
                  verbose: bool = True,
-                 progress_callback=None) -> Optional[dict]:
+                 progress_callback=None,
+                 reset: bool = False) -> Optional[dict]:
         """
-        2단계 Bayesian Optimization 실행
+        Persistent Bayesian Optimization 실행
 
-        Phase 1 (넓은 범위 탐색, n_trials//2 trials)
-          → 상위 25% Trial로 탐색 범위 좁히기
-          → Phase 2 (집중 탐색, 나머지 trials, Phase 1 최고값 seed)
+        study_storage가 지정된 경우 SQLite에 Trial을 누적 저장.
+        동일 기간+전략+메트릭으로 재실행하면 이전 Trial 위에 이어서 탐색하므로
+        실행 횟수가 많을수록 항상 최고값이 단조 증가(≥)함을 보장.
 
         Args:
-            param_space: 탐색 파라미터 공간
-                None이면 DEFAULT_PARAM_SPACE 사용
-                형식: {'param': {'type': 'float'/'int', 'low': ..., 'high': ...}}
-            n_trials: 총 Trial 수 (Phase 1: n//2, Phase 2: 나머지)
-            metric: 평가 지표
-                'sharpe_ratio', 'total_return', 'win_rate',
-                'profit_factor', 'max_drawdown'
+            param_space: 탐색 파라미터 공간 (None이면 DEFAULT_PARAM_SPACE)
+            n_trials: 이번 실행에서 추가할 Trial 수
+            metric: 평가 지표 ('sharpe_ratio', 'total_return', 'win_rate', 'profit_factor')
             verbose: 진행 상황 출력 여부
+            progress_callback: (current, total) 호출 콜백
+            reset: True이면 기존 누적 Trial을 삭제하고 새로 시작
 
         Returns:
             {
                 'params': BacktestConfig 파라미터 딕셔너리,
-                metric: float (최고 값),
-                'total_complete': int,
-                'total_pruned': int,
+                metric: float (누적 전체 최고값),
+                'total_complete': int (누적 완료 Trial),
+                'total_pruned': int (누적 중단 Trial),
+                'existing_before': int (이번 실행 전 누적 완료 Trial),
             }
             또는 None (완료 Trial 없음)
         """
@@ -261,25 +273,50 @@ class OptunaOptimizer:
         if param_space is None:
             param_space = self.DEFAULT_PARAM_SPACE
 
-        phase1_n = max(0, n_trials // 2)
-        phase2_n = n_trials - phase1_n
+        pruner = MedianPruner(n_startup_trials=5, n_warmup_steps=0)
+        study_name = self._make_study_name(metric)
+        storage = self.study_storage
+
+        # ── 기존 Study 초기화 (reset=True) ───────────────────────────────
+        if reset and storage:
+            try:
+                _optuna.delete_study(study_name=study_name, storage=storage)
+            except Exception:
+                pass
+
+        # ── Study 생성 또는 기존 Study 로드 ──────────────────────────────
+        if storage:
+            study = _optuna.create_study(
+                study_name=study_name,
+                storage=storage,
+                direction='maximize',
+                pruner=pruner,
+                load_if_exists=True,
+            )
+        else:
+            study = _optuna.create_study(direction='maximize', pruner=pruner)
+
+        # 이번 실행 전 누적 완료 Trial 수
+        existing_before = sum(
+            1 for t in study.trials
+            if t.state == _optuna.trial.TrialState.COMPLETE
+        )
 
         if verbose:
             print(f"\n{'='*60}")
-            print(f"🔮 Optuna Bayesian Optimization 시작")
-            print(f"{'='*60}")
-            print(f"기간: {self.start_date} ~ {self.end_date}")
-            print(f"총 Trial: {n_trials} (Phase 1: {phase1_n} | Phase 2: {phase2_n})")
-            print(f"평가 지표: {metric}")
-            print(f"파라미터: {list(param_space.keys())}")
-
-        pruner = MedianPruner(n_startup_trials=5, n_warmup_steps=0)
+            print(f"🔮 Optuna Persistent Study")
+            if storage:
+                print(f"Study: {study_name}")
+                print(f"기존 누적 Trial: {existing_before}개 → 이번 추가: {n_trials}개")
+            else:
+                print(f"Trial: {n_trials}개 (인메모리)")
+            print(f"기간: {self.start_date} ~ {self.end_date} | 지표: {metric}")
 
         # ── Precomputer 1회 실행 (모든 Trial 공유) ────────────────────────
         if progress_callback:
-            progress_callback(0, n_trials)  # 0% - 사전 계산 시작
+            progress_callback(0, n_trials)
         if verbose:
-            print(f"\n[Precompute] 사전 계산 중 (모든 Trial 공유)...")
+            print(f"\n[Precompute] 사전 계산 중...")
         conn_pre = sqlite3.connect(self.db_path)
         try:
             pc = BacktestPrecomputer(conn_pre, self.base_config.institution_weight)
@@ -289,94 +326,32 @@ class OptunaOptimizer:
         finally:
             conn_pre.close()
         if verbose:
-            print(f"[Precompute] 완료 → {n_trials} Trial에 공유\n")
+            print(f"[Precompute] 완료\n")
 
-        # ── 진행 콜백 (Trial 완료 시 호출) ────────────────────────────────
-        def _make_optuna_callback(phase_offset):
-            phase_counter = [0]
-            def _cb(study, trial):
-                phase_counter[0] += 1
-                if progress_callback:
-                    current = min(phase_offset + phase_counter[0], n_trials)
-                    progress_callback(current, n_trials)
-            return _cb
-
-        # ── Phase 1: 넓은 범위 탐색 ──────────────────────────────────────
-        study1 = _optuna.create_study(direction='maximize', pruner=pruner)
-        study2 = None
-
-        if phase1_n > 0:
-            if verbose:
-                print(f"[Phase 1] 넓은 범위 탐색 ({phase1_n} trials)...")
-            obj1 = self._build_objective(param_space, metric,
-                                         precomputed=shared_precomputed)
-            study1.optimize(obj1, n_trials=phase1_n, show_progress_bar=False,
-                            callbacks=[_make_optuna_callback(0)])
-
-            p1_complete = sum(
-                1 for t in study1.trials
-                if t.state == _optuna.trial.TrialState.COMPLETE
-            )
-            p1_pruned = sum(
-                1 for t in study1.trials
-                if t.state == _optuna.trial.TrialState.PRUNED
-            )
-            if verbose:
-                print(f"  완료: {p1_complete}개 | 중단(Pruned): {p1_pruned}개")
-                try:
-                    print(f"  Phase 1 최고 {metric}: {study1.best_value:.4f}")
-                except ValueError:
-                    pass
-
-        # ── Phase 2: 좋은 구간 집중 탐색 ────────────────────────────────
-        if phase2_n > 0:
-            narrowed_space = self._narrow_param_space(study1, param_space)
-            if verbose:
-                changed = [k for k in narrowed_space
-                           if narrowed_space[k] != param_space.get(k)]
-                print(f"\n[Phase 2] 집중 탐색 ({phase2_n} trials)...")
-                if changed:
-                    print(f"  좁혀진 파라미터: {changed}")
-
-            study2 = _optuna.create_study(direction='maximize', pruner=pruner)
-
-            # Phase 1 최고 파라미터를 seed trial로 추가
-            try:
-                if study1.best_trial and study1.best_trial.params:
-                    study2.enqueue_trial(study1.best_trial.params)
-            except (ValueError, AttributeError):
-                pass
-
-            obj2 = self._build_objective(narrowed_space, metric,
+        # ── Objective + 진행 콜백 ─────────────────────────────────────────
+        objective = self._build_objective(param_space, metric,
                                           precomputed=shared_precomputed)
-            study2.optimize(obj2, n_trials=phase2_n, show_progress_bar=False,
-                            callbacks=[_make_optuna_callback(phase1_n)])
+        trial_counter = [0]
 
-            p2_complete = sum(
-                1 for t in study2.trials
-                if t.state == _optuna.trial.TrialState.COMPLETE
-            )
-            p2_pruned = sum(
-                1 for t in study2.trials
-                if t.state == _optuna.trial.TrialState.PRUNED
-            )
-            if verbose:
-                print(f"  완료: {p2_complete}개 | 중단(Pruned): {p2_pruned}개")
-                try:
-                    print(f"  Phase 2 최고 {metric}: {study2.best_value:.4f}")
-                except ValueError:
-                    pass
+        def _cb(study, trial):
+            trial_counter[0] += 1
+            if progress_callback:
+                current = min(trial_counter[0], n_trials)
+                progress_callback(current, n_trials)
 
-        # ── 전체 결과에서 최고 Trial 선택 ────────────────────────────────
+        # ── 최적화 실행 (이번에 n_trials개 추가) ─────────────────────────
+        study.optimize(objective, n_trials=n_trials, show_progress_bar=False,
+                       callbacks=[_cb], catch=(Exception,))
+
+        # ── 누적 전체에서 최고 Trial 선택 ────────────────────────────────
         all_complete = [
-            t for t in study1.trials
+            t for t in study.trials
             if t.state == _optuna.trial.TrialState.COMPLETE
         ]
-        if study2:
-            all_complete += [
-                t for t in study2.trials
-                if t.state == _optuna.trial.TrialState.COMPLETE
-            ]
+        total_pruned = sum(
+            1 for t in study.trials
+            if t.state == _optuna.trial.TrialState.PRUNED
+        )
 
         if not all_complete:
             if verbose:
@@ -385,29 +360,20 @@ class OptunaOptimizer:
 
         best_trial = max(all_complete, key=lambda t: t.value)
 
-        # best_trial 파라미터 → BacktestConfig 파라미터 딕셔너리
         best_params = self._build_base_params()
         for name in param_space:
             if name in best_trial.params:
                 best_params[name] = best_trial.params[name]
 
-        all_trials = study1.trials + (study2.trials if study2 else [])
-        total_pruned = sum(
-            1 for t in all_trials
-            if t.state == _optuna.trial.TrialState.PRUNED
-        )
-
         if verbose:
             print(f"\n{'='*60}")
-            print(f"✅ Optuna 최적화 완료!")
-            print(f"완료 Trial: {len(all_complete)}개 | 중단 Trial: {total_pruned}개")
+            print(f"✅ 완료! 누적 {len(all_complete)}개 Trial 중 최고값")
             print(f"최고 {metric}: {best_trial.value:.4f}")
-            param_parts = []
-            for k in param_space:
-                v = best_params[k]
-                param_parts.append(
-                    f"{k}={v:.3f}" if isinstance(v, float) else f"{k}={v}"
-                )
+            param_parts = [
+                f"{k}={v:.3f}" if isinstance(v, float) else f"{k}={v}"
+                for k, v in best_params.items()
+                if k in param_space
+            ]
             print(f"최적 파라미터: {' | '.join(param_parts)}")
             print(f"{'='*60}\n")
 
@@ -416,6 +382,7 @@ class OptunaOptimizer:
             metric: best_trial.value,
             'total_complete': len(all_complete),
             'total_pruned': total_pruned,
+            'existing_before': existing_before,
         }
 
     def print_results(self, result: Optional[dict], metric: str = 'sharpe_ratio'):

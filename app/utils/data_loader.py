@@ -293,6 +293,10 @@ def run_backtest_with_progress(
 # Optuna 최적화
 # ---------------------------------------------------------------------------
 
+# Optuna study 누적 저장 경로 (메인 DB와 별개의 경량 SQLite)
+_OPTUNA_STORAGE = f"sqlite:///{_PROJECT_ROOT / 'data' / 'optuna_studies.db'}"
+
+
 def run_optuna_optimization(
     start_date: str,
     end_date: str,
@@ -304,12 +308,22 @@ def run_optuna_optimization(
     max_hold_days: int = 999,
     reverse_threshold: float = 60,
     progress_callback=None,
+    reset_study: bool = False,
 ) -> Optional[Dict]:
     """
-    Optuna Bayesian Optimization 실행
+    Optuna Persistent Bayesian Optimization 실행
+
+    동일 기간+전략+메트릭으로 재실행 시 이전 Trial 위에 누적 탐색.
+    실행 횟수가 많을수록 최고값이 단조 증가(≥)함을 보장.
 
     Returns:
-        {'params': dict, metric: float, 'total_complete': int, 'total_pruned': int}
+        {
+            'params': dict,
+            metric: float,
+            'total_complete': int,  # 누적 완료 Trial
+            'total_pruned': int,
+            'existing_before': int, # 이번 실행 전 누적 수
+        }
         또는 None (완료된 Trial이 없을 때)
     """
     from src.backtesting.optimizer import OptunaOptimizer
@@ -329,6 +343,7 @@ def run_optuna_optimization(
         start_date=start_date,
         end_date=end_date,
         base_config=base_config,
+        study_storage=_OPTUNA_STORAGE,
     )
 
     return optimizer.optimize(
@@ -336,4 +351,5 @@ def run_optuna_optimization(
         metric=metric,
         verbose=False,
         progress_callback=progress_callback,
+        reset=reset_study,
     )

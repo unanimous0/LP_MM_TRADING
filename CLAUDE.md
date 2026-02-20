@@ -88,6 +88,8 @@
 - **BacktestPrecomputer**: 백테스트 속도 165~262배 향상 (177초→1.1초)
 - **Optuna 최적화 UI**: 사이드바에서 파라미터 자동 최적화 → 결과 즉시 반영
 - **[수정] institution_weight 설계 개선**: 버그 수정 + 최적화 파라미터 분리 + Precomputer 공유 캐싱
+- **Persistent Optuna Study**: SQLite 누적 저장 → Trial 수 늘릴수록 최적값 단조 증가 보장
+- **백테스트 UI 개선**: 검증/최적화 결과 시각 구분 (색상 테두리), 사이드바 3섹션, 누적 Trial 표시
 - 258개 테스트 (100% 통과)
 
 **핵심 인사이트**:
@@ -758,6 +760,48 @@ src/backtesting/optimizer.py         (institution_weight 제거, Precomputer 1�
 tests/backtesting/test_optimizer.py  (테스트 2개 추가, mock 업데이트)
 app/pages/3_📈_백테스트.py           (institution_weight 참조 오류 4곳 수정)
 app/pages/4_🔄_워크포워드.py         (known_params에서 institution_weight 제거)
+```
+
+---
+
+### 2026-02-20 (Streamlit 백테스트 UI 개선 + Persistent Optuna Study)
+
+**목표**: 백테스트 결과 시각 구분 개선 + Optuna Trial 누적 저장으로 재현성 확보
+
+**구현 내용**:
+
+- ✅ **Persistent Optuna Study** (`src/backtesting/optimizer.py`)
+  - `study_storage` 파라미터 추가: SQLite 파일에 Study 누적 저장
+  - `_make_study_name(metric)`: 전략/기간/메트릭 기반 고유 Study 이름 (`opt__{strategy}__{sd}__{ed}__{metric}`)
+  - `load_if_exists=True`: 동일 이름 Study 재실행 시 기존 Trial 위에 누적 추가
+  - `reset=False` 기본 → 재실행할수록 최적값 단조 증가 (≥) 보장
+  - 반환값에 `existing_before` 추가 (이번 실행 전 누적 Trial 수)
+
+- ✅ **data_loader.py 수정**: `_OPTUNA_STORAGE` 상수 + `study_storage` 주입
+  - `_OPTUNA_STORAGE = f"sqlite:///{_PROJECT_ROOT / 'data' / 'optuna_studies.db'}"`
+  - `run_optuna_optimization()`: `reset_study` 파라미터 + `study_storage` 전달
+
+- ✅ **백테스트 UI 개선** (`app/pages/3_📈_백테스트.py`)
+  - **위젯 키 충돌 수정**: `_defaults` dict로 session_state 1회 초기화 → 슬라이더에서 `value=` 제거
+  - **최적화 결과 스타일**: `st.container(border=True)` + 주황색 좌측 테두리 헤더 (`#ff9800`)
+  - **검증 결과 스타일**: `st.container(border=True)` + 녹색 좌측 테두리 헤더 (`#00c853`)
+  - **CSS `:has()` 선택자**: `stVerticalBlockBorderWrapper:has([style*="ff9800"])` 등으로 테두리 색상 자동 구분
+  - **사이드바 3섹션 구조** (divider로 구분):
+    - ① 기간 분리 설정 (최상단) - 언체크 시 과적합 경고 항상 표시
+    - ② 파라미터 최적화 expander
+    - ③ 백테스트 설정
+  - **최적화 결과 레이아웃**: Sharpe / 완료 / 중단 (좌 3열) | 최적 파라미터 (우)
+  - **누적 Trial 표시** 3종:
+    - ① 사이드바 caption: 실행 전 예상 누적 수 ("이전 누적 N회 → 실행 후 약 M회")
+    - ② metric delta: 이전 best 대비 개선량 (`+0.0123` 형식)
+    - ③ collapsible expander: "💾 누적 study 정보" (study 이름/DB 경로/누적 수 상세)
+
+**파일**:
+```
+src/backtesting/optimizer.py       (Persistent Study: study_storage, _make_study_name, reset 파라미터)
+app/utils/data_loader.py           (_OPTUNA_STORAGE 상수, reset_study 파라미터)
+app/pages/3_📈_백테스트.py         (UI 개선 전반, 누적 Trial 표시 3종, 사이드바 구조 개선)
+data/optuna_studies.db             (신규 - SQLite Optuna 저장소)
 ```
 
 ---
