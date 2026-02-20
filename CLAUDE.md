@@ -22,6 +22,30 @@
                `app/utils/data_loader.py` (`run_optuna_optimization()` 기본값)
                `app/pages/3_📈_백테스트.py` (슬라이더 기본값)
 
+### TODO (수급 DB 교체 시 — 22년 데이터 전환)
+> **⚠️ 반드시 수행**: 수급 DB가 바뀌면 Optuna study 결과도 무효화됨
+
+**배경**: Optuna study 이름은 최적화 기간만 보고 생성됨 (`opt__long__20250101__20250930__sharpe_ratio`)
+- 기저 데이터(수급 DB)가 바뀌어도 이름이 동일 → 이전 DB 기반 trial 위에 누적됨
+- 22년 데이터 추가 시 Z-Score 계산 기준 자체가 달라지므로 기존 trial은 무효
+
+**DB 교체 시 수행 순서**:
+```bash
+# 1. 기존 Optuna study 삭제
+rm data/optuna_studies.db
+
+# 2. git에 반영 (양쪽 컴퓨터 동기화)
+git add data/optuna_studies.db
+git commit -m "Optuna study 초기화 (22년 DB 전환)"
+git push
+```
+
+**Optuna study DB 관리 정책**:
+- `data/optuna_studies.db` — git으로 관리 (집↔회사 컴퓨터 간 공유)
+- study 이름 = `opt__{strategy}__{시작일}__{종료일}__{metric}` (기간+전략+지표 조합)
+- 같은 컴퓨터에서 재시작/새로고침해도 누적 trial 유지됨
+- **DB 교체 시에만** 위 삭제 절차 수행
+
 ### TODO (데이터 개선 시)
 - [ ] **공유 한국주식 DB 연동** → 크롤링 제거 + 다중 프로젝트 공유
   - 여러 프로젝트에서 공동으로 사용하는 한국주식 DB 구축 중
