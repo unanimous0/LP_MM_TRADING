@@ -131,6 +131,13 @@ st.sidebar.divider()
 # ---------------------------------------------------------------------------
 # 사이드바 ② 파라미터 최적화
 # ---------------------------------------------------------------------------
+# strategy는 expander 안에서 get_optuna_trial_count()에 필요하므로 먼저 정의
+strategy = st.sidebar.selectbox(
+    "전략 방향",
+    options=['long', 'short', 'both'],
+    format_func=lambda x: {'long': 'Long (순매수)', 'short': 'Short (순매도)', 'both': 'Long+Short (병행)'}[x],
+)
+
 with st.sidebar.expander("⚡ 파라미터 최적화 (Optuna)"):
     opt_n_trials = st.slider("이번 추가 Trial 수", 10, 200, 50, step=10, key="w_opt_n_trials")
     opt_metric = st.selectbox(
@@ -171,13 +178,6 @@ st.sidebar.divider()
 # 사이드바 ③ 백테스트 설정
 # ---------------------------------------------------------------------------
 st.sidebar.header("백테스트 설정")
-
-# 전략
-strategy = st.sidebar.selectbox(
-    "전략 방향",
-    options=['long', 'short', 'both'],
-    format_func=lambda x: {'long': 'Long (순매수)', 'short': 'Short (순매도)', 'both': 'Long+Short (병행)'}[x],
-)
 
 # 진입 조건
 st.sidebar.subheader("진입 조건")
