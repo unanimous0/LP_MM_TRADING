@@ -419,8 +419,10 @@ elif _val_p:
 # 기간 종료 청산 종목 표시
 # ---------------------------------------------------------------------------
 end_trades = [t for t in trades if t.exit_reason == 'end']
-if end_trades:
-    with st.expander(f"⚠️ 기간 종료 시 청산된 포지션: {len(end_trades)}개", expanded=False):
+with st.expander(f"⚠️ 기간 종료 시 청산된 포지션: {len(end_trades)}개", expanded=False):
+    if not end_trades:
+        st.caption("기간 내 모든 포지션이 익절/손절/시간손절/반대수급으로 정상 청산되었습니다.")
+    else:
         st.caption(
             "익절/손절 조건을 충족하지 못한 채 백테스트 종료일까지 보유되어 "
             "마지막 날 종가로 청산된 종목입니다. "
