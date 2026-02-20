@@ -292,13 +292,13 @@ class OptunaOptimizer:
             print(f"[Precompute] 완료 → {n_trials} Trial에 공유\n")
 
         # ── 진행 콜백 (Trial 완료 시 호출) ────────────────────────────────
-        trial_counter = [0]
-
         def _make_optuna_callback(phase_offset):
+            phase_counter = [0]
             def _cb(study, trial):
-                trial_counter[0] += 1
+                phase_counter[0] += 1
                 if progress_callback:
-                    progress_callback(phase_offset + trial_counter[0], n_trials)
+                    current = min(phase_offset + phase_counter[0], n_trials)
+                    progress_callback(current, n_trials)
             return _cb
 
         # ── Phase 1: 넓은 범위 탐색 ──────────────────────────────────────
