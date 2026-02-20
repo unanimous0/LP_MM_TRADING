@@ -80,19 +80,27 @@ with tab1:
     if filtered_df.empty:
         st.info("조건에 맞는 종목이 없습니다.")
     else:
+        display_df = filtered_df.copy()
+        display_df['final_score'] = display_df['score'] + display_df.get('signal_count', 0) * 5
+
         display_cols = [
             'stock_code', 'stock_name', 'sector', 'pattern',
-            'score', 'signal_count', 'signal_list', 'entry_point', 'stop_loss',
+            'score', 'signal_count', 'final_score',
+            'signal_list', 'entry_point', 'stop_loss',
         ]
-        display_cols = [c for c in display_cols if c in filtered_df.columns]
+        display_cols = [c for c in display_cols if c in display_df.columns]
 
         st.dataframe(
-            filtered_df[display_cols].reset_index(drop=True),
+            display_df[display_cols].reset_index(drop=True),
             use_container_width=True,
-            height=min(600, len(filtered_df) * 40 + 40),
+            height=min(600, len(display_df) * 40 + 40),
             column_config={
                 "score": st.column_config.ProgressColumn(
-                    "점수", min_value=0, max_value=100, format="%.0f",
+                    "패턴 점수", min_value=0, max_value=100, format="%.0f",
+                ),
+                "signal_count": st.column_config.NumberColumn("시그널 수", format="%d"),
+                "final_score": st.column_config.ProgressColumn(
+                    "최종 점수", min_value=0, max_value=115, format="%.0f",
                 ),
             },
         )

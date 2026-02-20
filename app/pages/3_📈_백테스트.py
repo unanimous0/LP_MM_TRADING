@@ -20,6 +20,7 @@ from utils.data_loader import (
     run_backtest,
     run_backtest_with_progress,
     run_optuna_optimization,
+    get_optuna_trial_count,
     get_metrics_from_result,
     get_trades_from_result,
     get_date_range,
@@ -148,14 +149,20 @@ with st.sidebar.expander("⚡ 파라미터 최적화 (Optuna)"):
         value=False,
         help="체크 시 이전 누적 결과를 삭제하고 새로 시작합니다.",
     )
-    # ① 현재 누적 현황 (작게)
+    # ① 현재 누적 현황 (DB에서 직접 읽기 — 새로고침/재시작 후에도 유지)
     if opt_reset:
         st.caption("🔄 초기화 후 새로 시작")
-    elif 'opt_result' in st.session_state:
-        _acc = st.session_state['opt_result'].get('total_complete', 0)
-        st.caption(f"📊 이전 누적 {_acc}회 → 실행 후 약 {_acc + opt_n_trials}회")
     else:
-        st.caption("📊 첫 실행 (누적 없음)")
+        _acc = get_optuna_trial_count(
+            start_date=opt_start_date.strftime("%Y-%m-%d"),
+            end_date=opt_end_date.strftime("%Y-%m-%d"),
+            strategy=strategy,
+            metric=opt_metric,
+        )
+        if _acc > 0:
+            st.caption(f"📊 이전 누적 {_acc}회 → 실행 후 약 {_acc + opt_n_trials}회")
+        else:
+            st.caption("📊 첫 실행 (누적 없음)")
     opt_clicked = st.button("최적 파라미터 찾기", use_container_width=True, type="primary")
 
 st.sidebar.divider()
@@ -326,25 +333,14 @@ if 'opt_result' in st.session_state:
     metric_display = f"{metric_val:.2f}%" if opt_m in ('total_return', 'win_rate') else f"{metric_val:.4f}"
 
     with st.container(border=True):
+        existing_before = opt_r.get('existing_before', 0)
+        added_this_run = opt_r['total_complete'] - existing_before
+        _add_str = f"&nbsp;(이번 +{added_this_run}회 추가)" if existing_before > 0 else ""
         st.markdown(
-            f"""
-            <div style="
-                border-left: 4px solid #ff9800;
-                padding: 10px 18px;
-                margin-bottom: 20px;
-                background-color: rgba(255, 152, 0, 0.07);
-                border-radius: 0 8px 8px 0;
-            ">
-                <div style="font-size: 1.25rem; font-weight: 700; color: #ff9800; margin-bottom: 4px;">
-                    🔧 최적화 결과 (In-Sample)
-                </div>
-                <div style="font-size: 0.82rem; color: #888; line-height: 1.5;">
-                    최적화 기간 <strong style="color:#aaa">{_opt_period_str}</strong>
-                    &nbsp;·&nbsp; 누적 <strong style="color:#ff9800">{opt_r['total_complete']}회</strong> trial
-                    {"(이번 +" + str(opt_r['total_complete'] - opt_r.get('existing_before', 0)) + "회 추가)" if opt_r.get('existing_before', 0) > 0 else ""}
-                </div>
-            </div>
-            """,
+            '<div style="border-left:4px solid #ff9800;padding:10px 18px;margin-bottom:20px;background-color:rgba(255,152,0,0.07);border-radius:0 8px 8px 0;">'
+            f'<div style="font-size:1.25rem;font-weight:700;color:#ff9800;margin-bottom:4px;">🔧 최적화 결과 (In-Sample)</div>'
+            f'<div style="font-size:0.82rem;color:#888;line-height:1.5;">최적화 기간 <strong style="color:#aaa">{_opt_period_str}</strong>&nbsp;·&nbsp;누적 <strong style="color:#ff9800">{opt_r["total_complete"]}회</strong> trial{_add_str}</div>'
+            '</div>',
             unsafe_allow_html=True,
         )
 
@@ -459,23 +455,10 @@ with st.container(border=True):
     if _use_split and _val_p:
         _opt_str = f"{_opt_p[0]} ~ {_opt_p[1]}" if _opt_p else ""
         st.markdown(
-            f"""
-            <div style="
-                border-left: 4px solid #00c853;
-                padding: 10px 18px;
-                margin-bottom: 20px;
-                background-color: rgba(0, 200, 83, 0.07);
-                border-radius: 0 8px 8px 0;
-            ">
-                <div style="font-size: 1.25rem; font-weight: 700; color: #00c853; margin-bottom: 4px;">
-                    ✅ 검증 결과 (Out-of-Sample)
-                </div>
-                <div style="font-size: 0.82rem; color: #888; line-height: 1.5;">
-                    🔧 최적화 기간 <strong style="color:#aaa">{_opt_str}</strong> 에서 찾은 최적 파라미터를
-                    &nbsp;→&nbsp; 📅 검증 기간 <strong style="color:#aaa">{_val_p[0]} ~ {_val_p[1]}</strong> 에 적용한 실제 성과입니다.
-                </div>
-            </div>
-            """,
+            '<div style="border-left:4px solid #00c853;padding:10px 18px;margin-bottom:20px;background-color:rgba(0,200,83,0.07);border-radius:0 8px 8px 0;">'
+            '<div style="font-size:1.25rem;font-weight:700;color:#00c853;margin-bottom:4px;">✅ 검증 결과 (Out-of-Sample)</div>'
+            f'<div style="font-size:0.82rem;color:#888;line-height:1.5;">🔧 최적화 기간 <strong style="color:#aaa">{_opt_str}</strong> 에서 찾은 최적 파라미터를 &nbsp;→&nbsp; 📅 검증 기간 <strong style="color:#aaa">{_val_p[0]} ~ {_val_p[1]}</strong> 에 적용한 실제 성과입니다.</div>'
+            '</div>',
             unsafe_allow_html=True,
         )
     else:
@@ -531,10 +514,15 @@ with st.container(border=True):
 
     with tab6:
         trade_df = pd.DataFrame([t.to_dict() for t in trades])
+        # score = final_score (패턴점수 + 시그널수×5), pattern_score 역산
+        if 'score' in trade_df.columns and 'signal_count' in trade_df.columns:
+            trade_df['pattern_score'] = trade_df['score'] - trade_df['signal_count'] * 5
+            trade_df = trade_df.rename(columns={'score': 'final_score'})
         display_cols = [
             'stock_name', 'stock_code', 'pattern', 'direction',
             'entry_date', 'entry_price', 'exit_date', 'exit_price',
-            'return_pct', 'hold_days', 'exit_reason', 'signal_count',
+            'return_pct', 'hold_days', 'exit_reason',
+            'pattern_score', 'signal_count', 'final_score',
         ]
         display_cols = [c for c in display_cols if c in trade_df.columns]
         st.dataframe(
@@ -545,11 +533,17 @@ with st.container(border=True):
                 "return_pct": st.column_config.NumberColumn("수익률 (%)", format="%.2f"),
                 "entry_price": st.column_config.NumberColumn("진입가", format="%,.0f"),
                 "exit_price": st.column_config.NumberColumn("청산가", format="%,.0f"),
+                "pattern_score": st.column_config.NumberColumn("패턴 점수", format="%.0f"),
+                "signal_count": st.column_config.NumberColumn("시그널 수", format="%d"),
+                "final_score": st.column_config.NumberColumn("최종 점수", format="%.0f"),
             },
         )
 
-        # 다운로드 버튼
-        csv = trade_df[display_cols].to_csv(index=False, encoding='utf-8-sig')
+        # 다운로드 버튼 (컬럼명 한글 변환)
+        csv_df = trade_df[display_cols].rename(columns={
+            'pattern_score': '패턴점수', 'signal_count': '시그널수', 'final_score': '최종점수',
+        })
+        csv = csv_df.to_csv(index=False, encoding='utf-8-sig')
         st.download_button(
             "거래 내역 CSV 다운로드",
             csv,
