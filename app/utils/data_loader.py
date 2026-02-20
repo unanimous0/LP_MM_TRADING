@@ -80,47 +80,94 @@ def get_date_range() -> Tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Stage 1-3 분석 파이프라인
+# Stage 1-3 분석 파이프라인 (단계별 캐시 분리)
 # ---------------------------------------------------------------------------
 
-@st.cache_data(ttl=600, show_spinner="분석 중...")
-def run_analysis_pipeline(
-    end_date: Optional[str] = None,
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """
-    Stage 1-3 전체 파이프라인 실행
-
-    Returns:
-        (zscore_matrix, classified_df, signals_df, report_df)
-    """
+@st.cache_data(ttl=600, show_spinner=False)
+def _stage_zscore(end_date: Optional[str] = None) -> pd.DataFrame:
+    """Stage 1+2: 수급 정규화 + 멀티 기간 Z-Score"""
     conn = get_db_connection()
-
-    # Stage 1: 정규화
     normalizer = SupplyNormalizer(conn)
-
-    # Stage 2: 멀티 기간 Z-Score
     calculator = OptimizedMultiPeriodCalculator(normalizer, enable_caching=True)
     zscore_matrix = calculator.calculate_multi_period_zscores(
         DEFAULT_CONFIG['periods'], end_date=end_date
     )
-    zscore_matrix = zscore_matrix.reset_index()
+    return zscore_matrix.reset_index()
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _stage_classify(end_date: Optional[str] = None) -> pd.DataFrame:
+    """Stage 3a: 패턴 분류"""
+    zscore_matrix = _stage_zscore(end_date=end_date)
+    if zscore_matrix.empty:
+        return pd.DataFrame()
+    classifier = PatternClassifier()
+    return classifier.classify_all(zscore_matrix)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _stage_signals(end_date: Optional[str] = None) -> pd.DataFrame:
+    """Stage 3b: 시그널 탐지"""
+    conn = get_db_connection()
+    detector = SignalDetector(conn)
+    return detector.detect_all_signals(end_date=end_date)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _stage_report(end_date: Optional[str] = None) -> pd.DataFrame:
+    """Stage 3c: 통합 리포트"""
+    classified_df = _stage_classify(end_date=end_date)
+    signals_df = _stage_signals(end_date=end_date)
+    if classified_df.empty:
+        return pd.DataFrame()
+    conn = get_db_connection()
+    report_gen = IntegratedReport(conn)
+    return report_gen.generate_report(classified_df, signals_df)
+
+
+def run_analysis_pipeline(
+    end_date: Optional[str] = None,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Stage 1-3 전체 파이프라인 (progress bar 없는 버전)"""
+    return run_analysis_pipeline_with_progress(end_date=end_date, progress_bar=None)
+
+
+def run_analysis_pipeline_with_progress(
+    end_date: Optional[str] = None,
+    progress_bar=None,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Stage 1-3 전체 파이프라인 (단계별 진행률 표시 지원)
+
+    Args:
+        end_date: 분석 기준 날짜
+        progress_bar: st.progress 위젯 (None이면 진행률 표시 안 함)
+
+    Returns:
+        (zscore_matrix, classified_df, signals_df, report_df)
+    """
+    def _upd(pct: float, msg: str):
+        if progress_bar is not None:
+            progress_bar.progress(pct, text=msg)
+
+    _upd(0.05, "📐 수급 데이터 정규화 중... 5%")
+    zscore_matrix = _stage_zscore(end_date=end_date)
 
     if zscore_matrix.empty:
+        _upd(1.0, "✅ 완료 100%")
         empty = pd.DataFrame()
         return zscore_matrix, empty, empty, empty
 
-    # Stage 3: 패턴 분류
-    classifier = PatternClassifier()
-    classified_df = classifier.classify_all(zscore_matrix)
+    _upd(0.40, "📊 Z-Score 계산 완료 → 패턴 분류 중... 40%")
+    classified_df = _stage_classify(end_date=end_date)
 
-    # Stage 3: 시그널 탐지
-    detector = SignalDetector(conn)
-    signals_df = detector.detect_all_signals(end_date=end_date)
+    _upd(0.65, "🔍 패턴 분류 완료 → 시그널 탐지 중... 65%")
+    signals_df = _stage_signals(end_date=end_date)
 
-    # Stage 3: 통합 리포트
-    report_gen = IntegratedReport(conn)
-    report_df = report_gen.generate_report(classified_df, signals_df)
+    _upd(0.85, "📡 시그널 탐지 완료 → 리포트 생성 중... 85%")
+    report_df = _stage_report(end_date=end_date)
 
+    _upd(1.0, "✅ 분석 완료 100%")
     return zscore_matrix, classified_df, signals_df, report_df
 
 

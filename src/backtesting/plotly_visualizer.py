@@ -19,6 +19,16 @@ import plotly.io as pio
 from .portfolio import Trade
 
 
+# ---------------------------------------------------------------------------
+# 다크 테마 상수
+# ---------------------------------------------------------------------------
+_BG_PLOT  = '#0f172a'   # slate-900  (차트 내부)
+_BG_PAPER = '#1e293b'   # slate-800  (차트 외곽)
+_GRID     = '#334155'   # slate-700  (그리드 선)
+_TEXT     = '#e2e8f0'   # slate-200  (일반 텍스트)
+_MUTED    = '#94a3b8'   # slate-400  (보조 텍스트)
+
+
 # HTML 리포트 헤더/푸터 템플릿
 _HTML_HEADER = """\
 <!DOCTYPE html>
@@ -28,24 +38,25 @@ _HTML_HEADER = """\
   <title>백테스트 결과 리포트</title>
   <style>
     body {{ font-family: 'Segoe UI', Arial, sans-serif; margin: 0;
-           background: #f0f2f5; color: #333; }}
-    .header {{ background: #2E86AB; color: white;
-               padding: 24px 32px; }}
-    .header h1 {{ margin: 0; font-size: 22px; }}
-    .header p  {{ margin: 6px 0 0 0; opacity: 0.85; font-size: 13px; }}
+           background: #0f172a; color: #e2e8f0; }}
+    .header {{ background: linear-gradient(135deg, #1e40af 0%, #0f172a 100%);
+               padding: 24px 32px; border-bottom: 1px solid #334155; }}
+    .header h1 {{ margin: 0; font-size: 22px; color: #f1f5f9; }}
+    .header p  {{ margin: 6px 0 0 0; opacity: 0.7; font-size: 13px; color: #94a3b8; }}
     .container {{ max-width: 1200px; margin: 0 auto; padding: 24px 16px; }}
-    .card {{ background: white; margin: 16px 0; padding: 20px;
-             border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }}
-    .card h2 {{ margin: 0 0 12px 0; font-size: 15px; color: #444;
-                border-left: 4px solid #2E86AB; padding-left: 10px; }}
+    .card {{ background: #1e293b; margin: 16px 0; padding: 20px;
+             border-radius: 12px; border: 1px solid #334155; }}
+    .card h2 {{ margin: 0 0 12px 0; font-size: 15px; color: #e2e8f0;
+                border-left: 4px solid #38bdf8; padding-left: 10px; }}
     .summary-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr));
                      gap: 12px; margin-bottom: 8px; }}
-    .kpi {{ background: #f8f9fa; border-radius: 6px; padding: 14px 16px; text-align: center; }}
-    .kpi .label {{ font-size: 12px; color: #888; margin-bottom: 4px; }}
+    .kpi {{ background: #0f172a; border-radius: 8px; padding: 14px 16px;
+            text-align: center; border: 1px solid #334155; }}
+    .kpi .label {{ font-size: 12px; color: #64748b; margin-bottom: 4px; }}
     .kpi .value {{ font-size: 20px; font-weight: bold; }}
-    .positive {{ color: #06A77D; }}
-    .negative {{ color: #D62828; }}
-    .neutral  {{ color: #555; }}
+    .positive {{ color: #4ade80; }}
+    .negative {{ color: #f87171; }}
+    .neutral  {{ color: #94a3b8; }}
   </style>
 </head>
 <body>
@@ -66,41 +77,29 @@ _HTML_FOOTER = """\
 class PlotlyVisualizer:
     """Plotly 기반 백테스트 결과 인터랙티브 시각화 클래스"""
 
-    # 색상 테마 (matplotlib 버전과 동일)
     COLORS = {
-        'long':      '#2E86AB',
-        'short':     '#A23B72',
-        'both':      '#F18F01',
-        'profit':    '#06A77D',
-        'loss':      '#D62828',
-        'benchmark': '#6C757D',
-        'neutral':   '#AAAAAA',
+        'long':      '#38bdf8',  # sky-400
+        'short':     '#f472b6',  # pink-400
+        'both':      '#fb923c',  # orange-400
+        'profit':    '#4ade80',  # green-400
+        'loss':      '#f87171',  # red-400
+        'benchmark': '#94a3b8',  # slate-400
+        'neutral':   '#64748b',  # slate-500
     }
 
     def __init__(self, trades: List[Trade], daily_values: pd.DataFrame,
                  initial_capital: float):
-        """
-        초기화
-
-        Args:
-            trades: 거래 내역 리스트
-            daily_values: 일별 포트폴리오 가치 (컬럼: date, value, ...)
-            initial_capital: 초기 자본금
-        """
         self.trades = trades
         self.daily_values = daily_values.copy()
         self.initial_capital = initial_capital
 
-        # 날짜 변환 및 정렬
         if not self.daily_values.empty and 'date' in self.daily_values.columns:
             self.daily_values['date'] = pd.to_datetime(self.daily_values['date'])
             self.daily_values = self.daily_values.sort_values('date').reset_index(drop=True)
-            # 누적 수익률 (%)
             self.daily_values['return_pct'] = (
                 self.daily_values['value'] / self.initial_capital - 1
             ) * 100
 
-        # 거래 날짜 → return_pct 룩업 딕셔너리 (거래 마커용)
         if not self.daily_values.empty and 'date' in self.daily_values.columns:
             self._date_to_return = dict(zip(
                 self.daily_values['date'].dt.strftime('%Y-%m-%d'),
@@ -110,29 +109,61 @@ class PlotlyVisualizer:
             self._date_to_return = {}
 
     # ------------------------------------------------------------------ #
+    # 다크 테마 공통 적용                                                    #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _apply_theme(fig: go.Figure) -> go.Figure:
+        """모든 차트에 다크 테마 공통 스타일 적용"""
+        fig.update_layout(
+            template='plotly_dark',   # 다크 기본 템플릿 강제 적용
+            plot_bgcolor=_BG_PLOT,
+            paper_bgcolor=_BG_PAPER,
+            font=dict(color=_TEXT, size=12),
+            title_font=dict(color=_TEXT, size=15, family='Segoe UI, Arial, sans-serif'),
+            legend=dict(
+                bgcolor='rgba(15,23,42,0.85)',
+                bordercolor=_GRID,
+                borderwidth=1,
+                font=dict(color=_TEXT),
+            ),
+        )
+        fig.update_xaxes(
+            showgrid=True, gridcolor=_GRID, gridwidth=1,
+            linecolor=_GRID, linewidth=1,
+            tickfont=dict(color=_MUTED),
+            title_font=dict(color=_MUTED),
+            zerolinecolor=_GRID, zerolinewidth=1,
+        )
+        fig.update_yaxes(
+            showgrid=True, gridcolor=_GRID, gridwidth=1,
+            linecolor=_GRID, linewidth=1,
+            tickfont=dict(color=_MUTED),
+            title_font=dict(color=_MUTED),
+            zerolinecolor=_GRID, zerolinewidth=1,
+        )
+        return fig
+
+    # ------------------------------------------------------------------ #
     # 개별 차트 메서드                                                       #
     # ------------------------------------------------------------------ #
 
     def fig_equity_curve(self) -> go.Figure:
-        """
-        누적 수익률 곡선 + 거래 진입/청산 마커
-
-        Returns:
-            go.Figure: 인터랙티브 수익률 곡선
-        """
+        """누적 수익률 곡선 + 거래 진입/청산 마커"""
         fig = go.Figure()
 
         if self.daily_values.empty:
             fig.update_layout(title='누적 수익률 곡선 (데이터 없음)')
-            return fig
+            return self._apply_theme(fig)
 
-        # 수익률 곡선
         fig.add_trace(go.Scatter(
             x=self.daily_values['date'],
             y=self.daily_values['return_pct'],
             mode='lines',
             name='전략 수익률',
-            line=dict(color=self.COLORS['both'], width=2),
+            line=dict(color=self.COLORS['both'], width=2.5),
+            fill='tozeroy',
+            fillcolor='rgba(251,146,60,0.07)',
             customdata=self.daily_values['value'],
             hovertemplate=(
                 '%{x|%Y-%m-%d}<br>'
@@ -142,10 +173,8 @@ class PlotlyVisualizer:
             ),
         ))
 
-        # 0% 기준선
-        fig.add_hline(y=0, line_dash='dash', line_color='rgba(0,0,0,0.4)', line_width=1)
+        fig.add_hline(y=0, line_dash='dash', line_color='rgba(148,163,184,0.4)', line_width=1)
 
-        # 거래 마커 (진입 ▲ / 청산 ▼)
         if self.trades:
             entry_x, entry_y, entry_text = [], [], []
             exit_x, exit_y, exit_text = [], [], []
@@ -166,7 +195,6 @@ class PlotlyVisualizer:
                 if exit_ret is not None:
                     exit_x.append(t.exit_date)
                     exit_y.append(exit_ret)
-                    color = self.COLORS['profit'] if t.return_pct > 0 else self.COLORS['loss']
                     exit_text.append(
                         f'{t.stock_name}({t.stock_code})<br>'
                         f'청산: {t.exit_price:,.0f}원<br>'
@@ -177,8 +205,8 @@ class PlotlyVisualizer:
                 fig.add_trace(go.Scatter(
                     x=entry_x, y=entry_y, mode='markers',
                     marker=dict(symbol='triangle-up', size=9,
-                                color=self.COLORS['long'], opacity=0.8,
-                                line=dict(color='white', width=1)),
+                                color=self.COLORS['long'], opacity=0.9,
+                                line=dict(color=_BG_PAPER, width=1)),
                     name='진입',
                     text=entry_text,
                     hovertemplate='%{text}<extra></extra>',
@@ -188,8 +216,8 @@ class PlotlyVisualizer:
                 fig.add_trace(go.Scatter(
                     x=exit_x, y=exit_y, mode='markers',
                     marker=dict(symbol='triangle-down', size=9,
-                                color=self.COLORS['loss'], opacity=0.8,
-                                line=dict(color='white', width=1)),
+                                color=self.COLORS['loss'], opacity=0.9,
+                                line=dict(color=_BG_PAPER, width=1)),
                     name='청산',
                     text=exit_text,
                     hovertemplate='%{text}<extra></extra>',
@@ -200,48 +228,34 @@ class PlotlyVisualizer:
             xaxis_title='날짜',
             yaxis_title='누적 수익률 (%)',
             hovermode='x unified',
-            legend=dict(orientation='h', yanchor='bottom', y=1.02,
-                        xanchor='right', x=1),
-            plot_bgcolor='white',
-            paper_bgcolor='white',
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
             height=450,
         )
-        fig.update_xaxes(showgrid=True, gridcolor='#f0f0f0')
-        fig.update_yaxes(showgrid=True, gridcolor='#f0f0f0')
-
-        return fig
+        return self._apply_theme(fig)
 
     def fig_drawdown(self) -> go.Figure:
-        """
-        낙폭(Drawdown) 추이
-
-        Returns:
-            go.Figure: 낙폭 fill-area 차트
-        """
+        """낙폭(Drawdown) 추이"""
         fig = go.Figure()
 
         if self.daily_values.empty:
             fig.update_layout(title='낙폭 추이 (데이터 없음)')
-            return fig
+            return self._apply_theme(fig)
 
-        # 낙폭 계산
         values = self.daily_values['value'].values
         running_max = np.maximum.accumulate(values)
         drawdown = (values - running_max) / running_max * 100
 
-        # 낙폭 fill
         fig.add_trace(go.Scatter(
             x=self.daily_values['date'],
             y=drawdown,
             fill='tozeroy',
-            fillcolor=f'rgba(214,40,40,0.2)',
+            fillcolor='rgba(248,113,113,0.15)',
             mode='lines',
             name='낙폭',
             line=dict(color=self.COLORS['loss'], width=1.5),
             hovertemplate='%{x|%Y-%m-%d}<br>낙폭: %{y:.2f}%<extra></extra>',
         ))
 
-        # 최대 낙폭 마커
         max_dd_idx = int(np.argmin(drawdown))
         max_dd_value = float(drawdown[max_dd_idx])
         max_dd_date = self.daily_values['date'].iloc[max_dd_idx]
@@ -253,39 +267,29 @@ class PlotlyVisualizer:
             marker=dict(symbol='star', size=14, color=self.COLORS['loss']),
             text=[f'MDD: {max_dd_value:.2f}%'],
             textposition='top right',
-            name=f'최대 낙폭',
+            textfont=dict(color=self.COLORS['loss'], size=11),
+            name='최대 낙폭',
             hovertemplate=f'최대 낙폭: {max_dd_value:.2f}%<extra></extra>',
             showlegend=True,
         ))
 
-        # 0% 기준선
-        fig.add_hline(y=0, line_dash='dash', line_color='rgba(0,0,0,0.4)', line_width=1)
+        fig.add_hline(y=0, line_dash='dash', line_color='rgba(148,163,184,0.4)', line_width=1)
 
         fig.update_layout(
             title='포트폴리오 낙폭(Drawdown) 추이',
             xaxis_title='날짜',
             yaxis_title='낙폭 (%)',
             hovermode='x unified',
-            plot_bgcolor='white',
-            paper_bgcolor='white',
             height=380,
         )
-        fig.update_xaxes(showgrid=True, gridcolor='#f0f0f0')
-        fig.update_yaxes(showgrid=True, gridcolor='#f0f0f0')
-
-        return fig
+        return self._apply_theme(fig)
 
     def fig_monthly_returns(self) -> go.Figure:
-        """
-        월별 수익률 히트맵
-
-        Returns:
-            go.Figure: 연×월 히트맵
-        """
+        """월별 수익률 히트맵"""
         if self.daily_values.empty:
             fig = go.Figure()
             fig.update_layout(title='월별 수익률 (데이터 없음)')
-            return fig
+            return self._apply_theme(fig)
 
         df = self.daily_values.copy()
         df['year'] = df['date'].dt.year
@@ -293,7 +297,6 @@ class PlotlyVisualizer:
 
         monthly = df.groupby(['year', 'month'])['value'].last().reset_index()
         monthly['monthly_return'] = monthly['value'].pct_change() * 100
-
         pivot = monthly.pivot(index='year', columns='month', values='monthly_return')
 
         MONTH_NAMES = ['1월', '2월', '3월', '4월', '5월', '6월',
@@ -307,36 +310,44 @@ class PlotlyVisualizer:
             for row in pivot.values
         ]
 
+        # 다크 배경에 잘 보이는 커스텀 컬러스케일
+        colorscale = [
+            [0.0,  '#ef4444'],   # 강한 손실 - red-500
+            [0.35, '#fca5a5'],   # 약한 손실 - red-300
+            [0.5,  '#334155'],   # 중립 - slate-700 (배경과 조화)
+            [0.65, '#86efac'],   # 약한 수익 - green-300
+            [1.0,  '#22c55e'],   # 강한 수익 - green-500
+        ]
+
         fig = go.Figure(data=go.Heatmap(
             z=z_values,
             x=x_labels,
             y=y_labels,
-            colorscale='RdYlGn',
+            colorscale=colorscale,
             zmid=0,
             text=text_values,
             texttemplate='%{text}',
+            textfont=dict(color='#0f172a', size=11),
             hovertemplate='%{y}년 %{x}<br>수익률: %{z:.2f}%<extra></extra>',
-            colorbar=dict(title='수익률 (%)'),
+            colorbar=dict(
+                title=dict(text='수익률 (%)', font=dict(color=_TEXT)),
+                tickfont=dict(color=_MUTED),
+                bgcolor=_BG_PAPER,
+                bordercolor=_GRID,
+                borderwidth=1,
+            ),
         ))
 
         fig.update_layout(
             title='월별 수익률 히트맵',
             xaxis_title='월',
             yaxis_title='연도',
-            plot_bgcolor='white',
-            paper_bgcolor='white',
             height=max(280, len(pivot) * 60 + 120),
         )
-
-        return fig
+        return self._apply_theme(fig)
 
     def fig_return_distribution(self) -> Optional[go.Figure]:
-        """
-        거래별 수익률 분포 히스토그램
-
-        Returns:
-            go.Figure 또는 None (거래 없을 시)
-        """
+        """거래별 수익률 분포 히스토그램"""
         if not self.trades:
             return None
 
@@ -346,41 +357,42 @@ class PlotlyVisualizer:
 
         fig = go.Figure()
 
-        # 손실 히스토그램 (빨강)
         if losses:
             fig.add_trace(go.Histogram(
                 x=losses,
-                name=f'패배 ({len(losses)}건)',
+                name=f'손실 ({len(losses)}건)',
                 marker_color=self.COLORS['loss'],
-                opacity=0.75,
+                marker_line=dict(color=_BG_PAPER, width=0.5),
+                opacity=0.85,
                 nbinsx=20,
                 hovertemplate='수익률: %{x:.2f}%<br>건수: %{y}<extra></extra>',
             ))
 
-        # 수익 히스토그램 (녹색)
         if wins:
             fig.add_trace(go.Histogram(
                 x=wins,
-                name=f'승리 ({len(wins)}건)',
+                name=f'수익 ({len(wins)}건)',
                 marker_color=self.COLORS['profit'],
-                opacity=0.75,
+                marker_line=dict(color=_BG_PAPER, width=0.5),
+                opacity=0.85,
                 nbinsx=20,
                 hovertemplate='수익률: %{x:.2f}%<br>건수: %{y}<extra></extra>',
             ))
 
-        # 평균/중앙값 수직선
         mean_r = float(np.mean(returns))
         median_r = float(np.median(returns))
 
-        fig.add_vline(x=0, line_color='black', line_width=1, opacity=0.5)
+        fig.add_vline(x=0, line_color='rgba(148,163,184,0.5)', line_width=1)
         fig.add_vline(
-            x=mean_r, line_dash='dash', line_color='navy', line_width=1.5,
+            x=mean_r, line_dash='dash', line_color='#60a5fa', line_width=1.5,
             annotation_text=f'평균 {mean_r:+.2f}%',
+            annotation_font=dict(color='#60a5fa', size=11),
             annotation_position='top right',
         )
         fig.add_vline(
-            x=median_r, line_dash='dot', line_color='darkgreen', line_width=1.5,
+            x=median_r, line_dash='dot', line_color='#4ade80', line_width=1.5,
             annotation_text=f'중앙값 {median_r:+.2f}%',
+            annotation_font=dict(color='#4ade80', size=11),
             annotation_position='top left',
         )
 
@@ -390,22 +402,12 @@ class PlotlyVisualizer:
             yaxis_title='거래 횟수',
             barmode='overlay',
             hovermode='x',
-            plot_bgcolor='white',
-            paper_bgcolor='white',
             height=380,
         )
-        fig.update_xaxes(showgrid=True, gridcolor='#f0f0f0')
-        fig.update_yaxes(showgrid=True, gridcolor='#f0f0f0')
-
-        return fig
+        return self._apply_theme(fig)
 
     def fig_pattern_performance(self) -> Optional[go.Figure]:
-        """
-        패턴별 성과 (평균 수익률 / 승률 / 거래 횟수)
-
-        Returns:
-            go.Figure 또는 None (거래 없을 시)
-        """
+        """패턴별 성과 (평균 수익률 / 승률 / 거래 횟수)"""
         if not self.trades:
             return None
 
@@ -416,14 +418,12 @@ class PlotlyVisualizer:
             win_rate=('return_pct', lambda x: (x > 0).mean() * 100),
         ).reset_index().sort_values('avg_return', ascending=True)
 
-        # 3개 서브플롯 (평균수익률 / 승률 / 거래 수)
         fig = make_subplots(
             rows=1, cols=3,
             subplot_titles=['평균 수익률 (%)', '승률 (%)', '거래 횟수'],
             shared_yaxes=True,
         )
 
-        # 색상 (평균 수익률 기준)
         bar_colors = [
             self.COLORS['profit'] if v >= 0 else self.COLORS['loss']
             for v in stats['avg_return']
@@ -433,6 +433,7 @@ class PlotlyVisualizer:
             y=stats['pattern'], x=stats['avg_return'],
             orientation='h', name='평균 수익률',
             marker_color=bar_colors,
+            marker_line=dict(color=_BG_PAPER, width=0.5),
             hovertemplate='%{y}<br>평균 수익률: %{x:.2f}%<extra></extra>',
         ), row=1, col=1)
 
@@ -440,6 +441,7 @@ class PlotlyVisualizer:
             y=stats['pattern'], x=stats['win_rate'],
             orientation='h', name='승률',
             marker_color=self.COLORS['both'],
+            marker_line=dict(color=_BG_PAPER, width=0.5),
             hovertemplate='%{y}<br>승률: %{x:.1f}%<extra></extra>',
         ), row=1, col=2)
 
@@ -447,26 +449,26 @@ class PlotlyVisualizer:
             y=stats['pattern'], x=stats['count'],
             orientation='h', name='거래 수',
             marker_color=self.COLORS['neutral'],
+            marker_line=dict(color=_BG_PAPER, width=0.5),
             hovertemplate='%{y}<br>거래: %{x}건<extra></extra>',
         ), row=1, col=3)
 
-        # 50% 기준선 (승률 패널)
-        fig.add_vline(x=50, line_dash='dash', line_color='rgba(0,0,0,0.3)',
+        fig.add_vline(x=50, line_dash='dash', line_color='rgba(148,163,184,0.4)',
                       line_width=1, row=1, col=2)
-        # 0% 기준선 (평균 수익률 패널)
-        fig.add_vline(x=0, line_color='rgba(0,0,0,0.3)',
+        fig.add_vline(x=0, line_color='rgba(148,163,184,0.3)',
                       line_width=1, row=1, col=1)
+
+        # 서브플롯 타이틀 색상
+        for ann in fig.layout.annotations:
+            ann.font.color = _MUTED
+            ann.font.size = 12
 
         fig.update_layout(
             title='패턴별 성과',
             showlegend=False,
-            plot_bgcolor='white',
-            paper_bgcolor='white',
             height=max(300, len(stats) * 80 + 100),
         )
-        fig.update_xaxes(showgrid=True, gridcolor='#f0f0f0')
-
-        return fig
+        return self._apply_theme(fig)
 
     # ------------------------------------------------------------------ #
     # 대시보드 생성                                                          #
@@ -475,24 +477,9 @@ class PlotlyVisualizer:
     def create_dashboard(self, save_html: Optional[str] = None,
                          show: bool = True,
                          cdn: bool = False) -> str:
-        """
-        모든 차트를 하나의 HTML 파일로 결합
-
-        Args:
-            save_html: 저장 경로 (None이면 저장 안 함)
-            show: 브라우저에서 즉시 열기 (기본: True)
-            cdn: True이면 CDN에서 Plotly.js 로드 (인터넷 필요, 파일 경량),
-                 False이면 Plotly.js를 HTML에 내장 (오프라인 가능, ~3MB)
-
-        Returns:
-            str: 생성된 HTML 문자열
-        """
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-        # 요약 KPI 섹션
         kpi_html = self._build_kpi_html()
 
-        # 차트 목록 (타이틀, figure_method)
         chart_defs = [
             ('1. 누적 수익률 곡선', self.fig_equity_curve),
             ('2. 낙폭(Drawdown) 추이', self.fig_drawdown),
@@ -512,17 +499,11 @@ class PlotlyVisualizer:
             if cdn:
                 include_js = 'cdn' if not plotlyjs_included else False
             else:
-                include_js = (not plotlyjs_included)  # True for first, False for rest
+                include_js = (not plotlyjs_included)
 
-            div_html = pio.to_html(
-                fig,
-                include_plotlyjs=include_js,
-                full_html=False,
-            )
+            div_html = pio.to_html(fig, include_plotlyjs=include_js, full_html=False)
             plotlyjs_included = True
-            html_parts.append(
-                f'<div class="card"><h2>{title}</h2>{div_html}</div>\n'
-            )
+            html_parts.append(f'<div class="card"><h2>{title}</h2>{div_html}</div>\n')
 
         html_parts.append(_HTML_FOOTER)
         full_html = ''.join(html_parts)
@@ -549,7 +530,6 @@ class PlotlyVisualizer:
     # ------------------------------------------------------------------ #
 
     def _build_kpi_html(self) -> str:
-        """요약 KPI 카드 HTML 생성"""
         if not self.trades:
             return ''
 
@@ -564,7 +544,6 @@ class PlotlyVisualizer:
         win_rate = len(wins) / len(returns) * 100 if returns else 0
         avg_return = float(np.mean(returns)) if returns else 0
 
-        # MDD
         if not self.daily_values.empty:
             v = self.daily_values['value'].values
             mdd = float((v - np.maximum.accumulate(v)).min() / np.maximum.accumulate(v).max() * 100)

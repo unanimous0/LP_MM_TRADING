@@ -16,7 +16,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-from utils.data_loader import run_analysis_pipeline, get_stock_list, get_sectors, get_date_range
+from utils.data_loader import run_analysis_pipeline_with_progress, get_stock_list, get_sectors, get_date_range
 from utils.charts import create_zscore_heatmap
 
 st.set_page_config(page_title="히트맵", page_icon="📊", layout="wide")
@@ -58,7 +58,11 @@ selected_sector = st.sidebar.selectbox("섹터 필터", options=["전체"] + sec
 # ---------------------------------------------------------------------------
 # 데이터 로드
 # ---------------------------------------------------------------------------
-zscore_matrix, classified_df, signals_df, report_df = run_analysis_pipeline(end_date=end_date_str)
+_prog = st.progress(0, text="분석 준비 중... 0%")
+zscore_matrix, classified_df, signals_df, report_df = run_analysis_pipeline_with_progress(
+    end_date=end_date_str, progress_bar=_prog,
+)
+_prog.empty()
 
 if zscore_matrix.empty:
     st.warning("Z-Score 데이터가 없습니다.")
@@ -79,7 +83,7 @@ if selected_sector != "전체":
 # ---------------------------------------------------------------------------
 stock_names = get_stock_list()
 fig = create_zscore_heatmap(zscore_matrix, sort_by=sort_by, top_n=top_n, stock_names=stock_names)
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, use_container_width=True, theme=None)
 
 # ---------------------------------------------------------------------------
 # 통계

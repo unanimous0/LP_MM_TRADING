@@ -30,6 +30,19 @@ from src.backtesting.plotly_visualizer import PlotlyVisualizer
 st.set_page_config(page_title="백테스트", page_icon="📈", layout="wide")
 st.title("백테스트 실행")
 
+st.markdown("""
+<style>
+/* 사이드바 너비 확장 */
+section[data-testid="stSidebar"] { min-width: 340px !important; max-width: 340px !important; }
+section[data-testid="stSidebar"] > div:first-child { width: 340px !important; }
+
+/* 슬라이더-입력박스 세로 중앙 정렬 (마지막 컬럼을 하단 정렬) */
+section[data-testid="stSidebar"] div.stHorizontalBlock > div.stColumn:last-child {
+    display: flex; flex-direction: column; justify-content: flex-end; padding-bottom: 0.4rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
 
 # ---------------------------------------------------------------------------
 # 헬퍼: 위젯 step에 맞춰 반올림
@@ -40,6 +53,37 @@ def _snap(value, step, lo, hi):
     return max(lo, min(hi, round(snapped, 10)))
 
 
+def _synced_slider(label, min_val, max_val, step, key, is_int=False):
+    """슬라이더(드래그) + 숫자 직접 입력 연동 위젯"""
+    ni_key = f"{key}_ni"
+    # number_input 키 초기화
+    if ni_key not in st.session_state:
+        st.session_state[ni_key] = st.session_state.get(key, min_val)
+
+    def _on_slider():
+        st.session_state[ni_key] = st.session_state[key]
+
+    def _on_input():
+        v = st.session_state[ni_key]
+        if is_int:
+            v = int(max(min_val, min(max_val, v)))
+        else:
+            v = float(max(min_val, min(max_val, v)))
+        st.session_state[key] = v
+
+    col_s, col_n = st.sidebar.columns([3, 1])
+    with col_s:
+        val = st.slider(label, min_val, max_val, step=step, key=key, on_change=_on_slider)
+    with col_n:
+        # 슬라이더 라벨 높이만큼 spacer → 세로 중앙 정렬
+        st.markdown('<div style="height:1.65rem"></div>', unsafe_allow_html=True)
+        st.number_input(
+            "　", min_value=min_val, max_value=max_val, step=step,
+            key=ni_key, on_change=_on_input, label_visibility="collapsed",
+        )
+    return val
+
+
 # ---------------------------------------------------------------------------
 # 위젯 기본값 초기화 (최초 1회만 - key+value 동시 지정 경고 방지)
 # ---------------------------------------------------------------------------
@@ -48,6 +92,8 @@ _defaults = {
     'w_min_signals': 1,
     'w_target_return': 15.0,
     'w_stop_loss': -7.5,
+    'w_reverse_threshold': 60.0,
+    'w_max_positions': 5,
 }
 for _k, _v in _defaults.items():
     if _k not in st.session_state:
@@ -61,8 +107,11 @@ if 'pending_opt_params' in st.session_state:
     p = st.session_state['pending_opt_params']
     st.session_state['w_min_score'] = _snap(p.get('min_score', 60.0), 5.0, 0.0, 100.0)
     st.session_state['w_min_signals'] = int(max(0, min(3, p.get('min_signals', 1))))
-    st.session_state['w_target_return'] = _snap(p.get('target_return', 0.15) * 100, 1.0, 1.0, 50.0)
-    st.session_state['w_stop_loss'] = _snap(p.get('stop_loss', -0.075) * 100, 0.5, -30.0, -1.0)
+    st.session_state['w_target_return'] = _snap(p.get('target_return', 0.15) * 100, 1.0, 1.0, 200.0)
+    st.session_state['w_stop_loss'] = _snap(p.get('stop_loss', -0.075) * 100, 0.5, -100.0, -1.0)
+    # number_input(_ni) 키도 슬라이더와 동기화
+    for _k in ['w_min_score', 'w_min_signals', 'w_target_return', 'w_stop_loss']:
+        st.session_state[f'{_k}_ni'] = st.session_state[_k]
     del st.session_state['pending_opt_params']
 
 
@@ -185,20 +234,20 @@ st.sidebar.header("백테스트 설정")
 
 # 진입 조건
 st.sidebar.subheader("진입 조건")
-min_score = st.sidebar.slider("최소 점수", 0.0, 100.0, step=5.0, key="w_min_score")
-min_signals = st.sidebar.slider("최소 시그널 수", 0, 3, key="w_min_signals")
+min_score = _synced_slider("최소 점수", 0.0, 100.0, 5.0, "w_min_score")
+min_signals = _synced_slider("최소 시그널 수", 0, 3, 1, "w_min_signals", is_int=True)
 
 # 청산 조건
 st.sidebar.subheader("청산 조건")
-target_return = st.sidebar.slider("목표 수익률 (%)", 1.0, 50.0, step=1.0, key="w_target_return") / 100
-stop_loss = st.sidebar.slider("손절 비율 (%)", -30.0, -1.0, step=0.5, key="w_stop_loss") / 100
+target_return = _synced_slider("목표 수익률 (%)", 1.0, 200.0, 1.0, "w_target_return") / 100
+stop_loss = _synced_slider("손절 비율 (%)", -100.0, -1.0, 0.5, "w_stop_loss") / 100
 max_hold_days = st.sidebar.number_input("최대 보유 기간 (일)", 1, 999, 999)
-reverse_threshold = st.sidebar.slider("반대 수급 청산 점수", 0.0, 100.0, 60.0, step=5.0)
+reverse_threshold = _synced_slider("반대 수급 청산 점수", 0.0, 100.0, 5.0, "w_reverse_threshold")
 
 # 포트폴리오
 st.sidebar.subheader("포트폴리오")
 initial_capital = st.sidebar.number_input("초기 자본금 (원)", 1_000_000, 1_000_000_000, 10_000_000, step=1_000_000)
-max_positions = st.sidebar.slider("최대 동시 포지션", 1, 20, 5)
+max_positions = _synced_slider("최대 동시 포지션", 1, 20, 1, "w_max_positions", is_int=True)
 
 # 고급 설정
 with st.sidebar.expander("고급 설정"):
@@ -496,25 +545,25 @@ with st.container(border=True):
     ])
 
     with tab1:
-        st.plotly_chart(pv.fig_equity_curve(), use_container_width=True)
+        st.plotly_chart(pv.fig_equity_curve(), use_container_width=True, theme=None)
 
     with tab2:
-        st.plotly_chart(pv.fig_drawdown(), use_container_width=True)
+        st.plotly_chart(pv.fig_drawdown(), use_container_width=True, theme=None)
 
     with tab3:
-        st.plotly_chart(pv.fig_monthly_returns(), use_container_width=True)
+        st.plotly_chart(pv.fig_monthly_returns(), use_container_width=True, theme=None)
 
     with tab4:
         fig = pv.fig_return_distribution()
         if fig:
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, theme=None)
         else:
             st.info("거래 데이터가 없습니다.")
 
     with tab5:
         fig = pv.fig_pattern_performance()
         if fig:
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, theme=None)
         else:
             st.info("거래 데이터가 없습니다.")
 

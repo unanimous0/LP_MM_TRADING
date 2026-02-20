@@ -17,7 +17,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-from utils.data_loader import run_analysis_pipeline, get_sectors, get_date_range
+from utils.data_loader import run_analysis_pipeline_with_progress, get_sectors, get_date_range
 from utils.charts import create_signal_distribution_chart
 from src.analyzer.integrated_report import IntegratedReport
 from utils.data_loader import get_db_connection
@@ -53,7 +53,11 @@ min_signals = st.sidebar.slider("최소 시그널 수", 0, 3, 0)
 # ---------------------------------------------------------------------------
 # 데이터 로드 & 필터링
 # ---------------------------------------------------------------------------
-zscore_matrix, classified_df, signals_df, report_df = run_analysis_pipeline(end_date=end_date_str)
+_prog = st.progress(0, text="분석 준비 중... 0%")
+zscore_matrix, classified_df, signals_df, report_df = run_analysis_pipeline_with_progress(
+    end_date=end_date_str, progress_bar=_prog,
+)
+_prog.empty()
 
 if report_df.empty:
     st.warning("분석 데이터가 없습니다.")
@@ -113,7 +117,7 @@ with tab2:
 
 with tab3:
     fig_signal = create_signal_distribution_chart(report_df)
-    st.plotly_chart(fig_signal, use_container_width=True)
+    st.plotly_chart(fig_signal, use_container_width=True, theme=None)
 
 # ---------------------------------------------------------------------------
 # 종목 상세

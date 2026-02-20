@@ -15,7 +15,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 import streamlit as st
 import pandas as pd
 
-from utils.data_loader import run_analysis_pipeline, get_date_range
+from utils.data_loader import run_analysis_pipeline_with_progress, get_date_range
 from utils.charts import create_pattern_pie_chart, create_score_histogram
 
 # ---------------------------------------------------------------------------
@@ -37,7 +37,11 @@ st.caption("외국인/기관 투자자 수급 기반 종목 분석 시스템")
 min_date, max_date = get_date_range()
 st.sidebar.markdown(f"**DB 기간**: {min_date} ~ {max_date}")
 
-zscore_matrix, classified_df, signals_df, report_df = run_analysis_pipeline()
+_prog = st.progress(0, text="분석 준비 중... 0%")
+zscore_matrix, classified_df, signals_df, report_df = run_analysis_pipeline_with_progress(
+    progress_bar=_prog,
+)
+_prog.empty()
 
 if report_df.empty:
     st.warning("분석 데이터가 없습니다. DB를 확인하세요.")
@@ -62,11 +66,11 @@ chart_col1, chart_col2 = st.columns(2)
 
 with chart_col1:
     fig_pie = create_pattern_pie_chart(report_df)
-    st.plotly_chart(fig_pie, use_container_width=True)
+    st.plotly_chart(fig_pie, use_container_width=True, theme=None)
 
 with chart_col2:
     fig_hist = create_score_histogram(report_df)
-    st.plotly_chart(fig_hist, use_container_width=True)
+    st.plotly_chart(fig_hist, use_container_width=True, theme=None)
 
 # ---------------------------------------------------------------------------
 # 관심 종목 테이블 (score>=70, signal_count>=2)
