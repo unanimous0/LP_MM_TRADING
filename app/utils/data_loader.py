@@ -189,7 +189,7 @@ def run_backtest(
         allowed_patterns=allowed_patterns,
         strategy=strategy,
         institution_weight=institution_weight,
-        force_exit_on_end=False,
+        force_exit_on_end=True,
     )
 
     engine = BacktestEngine(conn, config)
@@ -264,6 +264,7 @@ def run_optuna_optimization(
         max_positions=max_positions,
         max_hold_days=max_hold_days,
         reverse_signal_threshold=reverse_threshold,
+        force_exit_on_end=True,
     )
 
     optimizer = OptunaOptimizer(

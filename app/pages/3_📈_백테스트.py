@@ -300,6 +300,37 @@ elif _val_p:
     st.caption(f"백테스트 기간: {_val_p[0]} ~ {_val_p[1]}")
 
 # ---------------------------------------------------------------------------
+# 기간 종료 청산 종목 표시
+# ---------------------------------------------------------------------------
+end_trades = [t for t in trades if t.exit_reason == 'end']
+if end_trades:
+    with st.expander(f"⚠️ 기간 종료 시 청산된 포지션: {len(end_trades)}개", expanded=False):
+        st.caption(
+            "익절/손절 조건을 충족하지 못한 채 백테스트 종료일까지 보유되어 "
+            "마지막 날 종가로 청산된 종목입니다. "
+            "보유 기간이 짧아 전략 효과가 반영되지 않았을 수 있습니다."
+        )
+        end_df = pd.DataFrame([{
+            '종목명': t.stock_name,
+            '종목코드': t.stock_code,
+            '진입일': t.entry_date,
+            '보유일': t.hold_days,
+            '수익률(%)': round(t.return_pct, 2),
+            '진입가': int(t.entry_price),
+            '청산가(종료일 종가)': int(t.exit_price),
+        } for t in end_trades])
+        st.dataframe(
+            end_df,
+            use_container_width=True,
+            column_config={
+                "수익률(%)": st.column_config.NumberColumn(format="%.2f"),
+                "진입가": st.column_config.NumberColumn(format="%,d"),
+                "청산가(종료일 종가)": st.column_config.NumberColumn(format="%,d"),
+            },
+            hide_index=True,
+        )
+
+# ---------------------------------------------------------------------------
 # KPI 행
 # ---------------------------------------------------------------------------
 summary = metrics.summary()
