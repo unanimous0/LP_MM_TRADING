@@ -81,18 +81,20 @@ if not use_split:
 
 if use_split:
     st.sidebar.caption("🔧 최적화 기간 (파라미터 탐색)")
+    _max_dt = datetime.strptime(max_date, "%Y-%m-%d")
+    _max_value = _max_dt.replace(month=12, day=31)
     opt_start_date = st.sidebar.date_input(
         "최적화 시작일",
         value=datetime.strptime("2025-01-01", "%Y-%m-%d"),
         min_value=datetime.strptime(min_date, "%Y-%m-%d"),
-        max_value=datetime.strptime(max_date, "%Y-%m-%d"),
+        max_value=_max_value,
         key="w_opt_start",
     )
     opt_end_date = st.sidebar.date_input(
         "최적화 종료일",
         value=datetime.strptime("2025-09-30", "%Y-%m-%d"),
         min_value=datetime.strptime(min_date, "%Y-%m-%d"),
-        max_value=datetime.strptime(max_date, "%Y-%m-%d"),
+        max_value=_max_value,
         key="w_opt_end",
     )
     st.sidebar.caption("✅ 검증 기간 (백테스트 실행)")
@@ -100,28 +102,30 @@ if use_split:
         "검증 시작일",
         value=datetime.strptime("2025-10-01", "%Y-%m-%d"),
         min_value=datetime.strptime(min_date, "%Y-%m-%d"),
-        max_value=datetime.strptime(max_date, "%Y-%m-%d"),
+        max_value=_max_value,
         key="w_val_start",
     )
     val_end_date = st.sidebar.date_input(
         "검증 종료일",
-        value=datetime.strptime(max_date, "%Y-%m-%d"),
+        value=_max_dt,
         min_value=datetime.strptime(min_date, "%Y-%m-%d"),
-        max_value=datetime.strptime(max_date, "%Y-%m-%d"),
+        max_value=_max_value,
         key="w_val_end",
     )
 else:
+    _max_dt = datetime.strptime(max_date, "%Y-%m-%d")
+    _max_value = _max_dt.replace(month=12, day=31)
     _start = st.sidebar.date_input(
         "시작일",
         value=datetime.strptime("2025-01-01", "%Y-%m-%d"),
         min_value=datetime.strptime(min_date, "%Y-%m-%d"),
-        max_value=datetime.strptime(max_date, "%Y-%m-%d"),
+        max_value=_max_value,
     )
     _end = st.sidebar.date_input(
         "종료일",
-        value=datetime.strptime(max_date, "%Y-%m-%d"),
+        value=_max_dt,
         min_value=datetime.strptime(min_date, "%Y-%m-%d"),
-        max_value=datetime.strptime(max_date, "%Y-%m-%d"),
+        max_value=_max_value,
     )
     opt_start_date = val_start_date = _start
     opt_end_date = val_end_date = _end

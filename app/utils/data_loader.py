@@ -297,6 +297,25 @@ def run_backtest_with_progress(
 _OPTUNA_STORAGE = f"sqlite:///{_PROJECT_ROOT / 'data' / 'optuna_studies.db'}"
 
 
+def get_optuna_trial_count(
+    start_date: str,
+    end_date: str,
+    strategy: str = 'long',
+    metric: str = 'sharpe_ratio',
+) -> int:
+    """저장된 Optuna study의 누적 완료 Trial 수 반환 (study 없으면 0)"""
+    try:
+        import optuna
+        optuna.logging.set_verbosity(optuna.logging.WARNING)
+        sd = start_date.replace('-', '')
+        ed = end_date.replace('-', '')
+        study_name = f"opt__{strategy}__{sd}__{ed}__{metric}"
+        study = optuna.load_study(study_name=study_name, storage=_OPTUNA_STORAGE)
+        return sum(1 for t in study.trials if t.state.name == 'COMPLETE')
+    except Exception:
+        return 0
+
+
 def run_optuna_optimization(
     start_date: str,
     end_date: str,

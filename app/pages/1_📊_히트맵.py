@@ -26,11 +26,12 @@ st.title("Z-Score 수급 히트맵")
 # 사이드바 필터
 # ---------------------------------------------------------------------------
 min_date, max_date = get_date_range()
+_max_dt = datetime.strptime(max_date, "%Y-%m-%d")
 end_date = st.sidebar.date_input(
     "기준 날짜",
-    value=datetime.strptime(max_date, "%Y-%m-%d"),
+    value=_max_dt,
     min_value=datetime.strptime(min_date, "%Y-%m-%d"),
-    max_value=datetime.strptime(max_date, "%Y-%m-%d"),
+    max_value=_max_dt.replace(month=12, day=31),
     help="해당 날짜 기준으로 Z-Score를 계산합니다. 과거 날짜를 선택하면 당시 수급 상태를 볼 수 있습니다.",
 )
 end_date_str = end_date.strftime("%Y-%m-%d")
