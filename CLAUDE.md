@@ -617,6 +617,38 @@ LP_MM_TRADING/
 
 ---
 
+## [UI 테마 / 색상]
+
+**Streamlit 앱 테마** (`.streamlit/config.toml`):
+- `base = "dark"` — 다크 모드 기반
+- `primaryColor = "#38bdf8"` — sky-400 (강조색, 버튼/링크)
+- `backgroundColor = "#0f172a"` — slate-900 (페이지 배경)
+- `secondaryBackgroundColor = "#1e293b"` — slate-800 (사이드바/카드 배경)
+- `textColor = "#e2e8f0"` — slate-200 (기본 텍스트)
+- `font = "sans serif"`
+
+**Plotly 차트 색상** (`src/backtesting/plotly_visualizer.py`):
+
+| 역할 | 색상코드 | Tailwind 이름 | 설명 |
+|------|---------|--------------|------|
+| 차트 내부 배경 | `#0f172a` | slate-900 | `plot_bgcolor` |
+| 차트 외곽 배경 | `#1e293b` | slate-800 | `paper_bgcolor` |
+| 그리드 선 | `#334155` | slate-700 | 축/그리드 |
+| 일반 텍스트 | `#e2e8f0` | slate-200 | 레이블/제목 |
+| 보조 텍스트 | `#94a3b8` | slate-400 | 부제목/벤치마크 |
+| Long 전략 | `#38bdf8` | sky-400 | 수익률 곡선 |
+| Short 전략 | `#f472b6` | pink-400 | 수익률 곡선 |
+| Both 전략 | `#fb923c` | orange-400 | 수익률 곡선 |
+| 수익 (양수) | `#4ade80` | green-400 | 거래 수익/양봉 |
+| 손실 (음수) | `#f87171` | red-400 | 거래 손실/음봉 |
+| 평균선 | `#60a5fa` | blue-400 | 분포 차트 평균 |
+| 중앙값선 | `#4ade80` | green-400 | 분포 차트 중앙값 |
+| 무관심 구간 | `#64748b` | slate-500 | 중립 색상 |
+
+**테마 팔레트**: Tailwind CSS Slate 계열 (어두운 남색 계통) + 파스텔 강조색
+
+---
+
 ## [Data]
 - **171,227 레코드** (2024-01-02 ~ 2026-01-20)
 - **345개 핵심 종목** (KOSPI200 + KOSDAQ150)
