@@ -14,8 +14,9 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 
-from utils.data_loader import run_analysis_pipeline, get_stock_list, get_sectors
+from utils.data_loader import run_analysis_pipeline, get_stock_list, get_sectors, get_date_range
 from utils.charts import create_zscore_heatmap
 
 st.set_page_config(page_title="히트맵", page_icon="📊", layout="wide")
@@ -24,6 +25,18 @@ st.title("Z-Score 수급 히트맵")
 # ---------------------------------------------------------------------------
 # 사이드바 필터
 # ---------------------------------------------------------------------------
+min_date, max_date = get_date_range()
+end_date = st.sidebar.date_input(
+    "기준 날짜",
+    value=datetime.strptime(max_date, "%Y-%m-%d"),
+    min_value=datetime.strptime(min_date, "%Y-%m-%d"),
+    max_value=datetime.strptime(max_date, "%Y-%m-%d"),
+    help="해당 날짜 기준으로 Z-Score를 계산합니다. 과거 날짜를 선택하면 당시 수급 상태를 볼 수 있습니다.",
+)
+end_date_str = end_date.strftime("%Y-%m-%d")
+
+st.sidebar.divider()
+
 sort_options = {
     'recent': '최근 수급 (1W 기준)',
     'momentum': '모멘텀 (단기-장기 차이)',
@@ -44,7 +57,7 @@ selected_sector = st.sidebar.selectbox("섹터 필터", options=["전체"] + sec
 # ---------------------------------------------------------------------------
 # 데이터 로드
 # ---------------------------------------------------------------------------
-zscore_matrix, classified_df, signals_df, report_df = run_analysis_pipeline()
+zscore_matrix, classified_df, signals_df, report_df = run_analysis_pipeline(end_date=end_date_str)
 
 if zscore_matrix.empty:
     st.warning("Z-Score 데이터가 없습니다.")

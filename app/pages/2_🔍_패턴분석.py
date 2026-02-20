@@ -15,8 +15,9 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 
-from utils.data_loader import run_analysis_pipeline, get_sectors
+from utils.data_loader import run_analysis_pipeline, get_sectors, get_date_range
 from utils.charts import create_signal_distribution_chart
 from src.analyzer.integrated_report import IntegratedReport
 from utils.data_loader import get_db_connection
@@ -27,6 +28,18 @@ st.title("패턴 분류 & 시그널 분석")
 # ---------------------------------------------------------------------------
 # 사이드바 필터
 # ---------------------------------------------------------------------------
+min_date, max_date = get_date_range()
+end_date = st.sidebar.date_input(
+    "기준 날짜",
+    value=datetime.strptime(max_date, "%Y-%m-%d"),
+    min_value=datetime.strptime(min_date, "%Y-%m-%d"),
+    max_value=datetime.strptime(max_date, "%Y-%m-%d"),
+    help="해당 날짜 기준으로 패턴/시그널을 분석합니다. 과거 날짜를 선택하면 당시 상태를 볼 수 있습니다.",
+)
+end_date_str = end_date.strftime("%Y-%m-%d")
+
+st.sidebar.divider()
+
 pattern_options = ['전체', '모멘텀형', '지속형', '전환형', '기타']
 selected_pattern = st.sidebar.selectbox("패턴", pattern_options)
 
@@ -39,7 +52,7 @@ min_signals = st.sidebar.slider("최소 시그널 수", 0, 3, 0)
 # ---------------------------------------------------------------------------
 # 데이터 로드 & 필터링
 # ---------------------------------------------------------------------------
-zscore_matrix, classified_df, signals_df, report_df = run_analysis_pipeline()
+zscore_matrix, classified_df, signals_df, report_df = run_analysis_pipeline(end_date=end_date_str)
 
 if report_df.empty:
     st.warning("분석 데이터가 없습니다.")
