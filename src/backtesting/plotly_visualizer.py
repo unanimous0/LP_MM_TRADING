@@ -285,64 +285,67 @@ class PlotlyVisualizer:
         return self._apply_theme(fig)
 
     def fig_monthly_returns(self) -> go.Figure:
-        """월별 수익률 히트맵"""
+        """월별 수익률 바차트 (x=기간 시간순, y=수익률)"""
         if self.daily_values.empty:
             fig = go.Figure()
             fig.update_layout(title='월별 수익률 (데이터 없음)')
             return self._apply_theme(fig)
 
         df = self.daily_values.copy()
-        df['year'] = df['date'].dt.year
-        df['month'] = df['date'].dt.month
+        df['ym'] = df['date'].dt.year * 100 + df['date'].dt.month
 
-        monthly = df.groupby(['year', 'month'])['value'].last().reset_index()
-        monthly['monthly_return'] = monthly['value'].pct_change() * 100
-        pivot = monthly.pivot(index='year', columns='month', values='monthly_return')
+        # 월별 마지막 값 기준, 시간순 정렬
+        monthly = df.groupby('ym')['value'].last().reset_index()
+        monthly = monthly.sort_values('ym').reset_index(drop=True)
 
-        MONTH_NAMES = ['1월', '2월', '3월', '4월', '5월', '6월',
-                       '7월', '8월', '9월', '10월', '11월', '12월']
-        x_labels = [MONTH_NAMES[int(m) - 1] for m in pivot.columns]
-        y_labels = [str(y) for y in pivot.index]
+        # 첫 달도 포함: initial_capital 대비 수익률 계산 (pct_change는 첫 달 NaN 제거해버림)
+        prev_values = monthly['value'].shift(1)
+        prev_values.iloc[0] = self.initial_capital
+        monthly['monthly_return'] = (monthly['value'] / prev_values - 1) * 100
 
-        z_values = pivot.values.tolist()
-        text_values = [
-            [f'{v:.2f}%' if not np.isnan(v) else '' for v in row]
-            for row in pivot.values
+        if monthly.empty:
+            fig = go.Figure()
+            fig.update_layout(title='월별 수익률 (데이터 부족)')
+            return self._apply_theme(fig)
+
+        # x축 라벨: "2025년 6월" 형태
+        monthly['label'] = monthly['ym'].apply(
+            lambda ym: f"{ym // 100}년 {ym % 100}월"
+        )
+
+        colors = [
+            self.COLORS['profit'] if r >= 0 else self.COLORS['loss']
+            for r in monthly['monthly_return']
         ]
 
-        # 다크 배경에 잘 보이는 커스텀 컬러스케일
-        colorscale = [
-            [0.0,  '#ef4444'],   # 강한 손실 - red-500
-            [0.35, '#fca5a5'],   # 약한 손실 - red-300
-            [0.5,  '#334155'],   # 중립 - slate-700 (배경과 조화)
-            [0.65, '#86efac'],   # 약한 수익 - green-300
-            [1.0,  '#22c55e'],   # 강한 수익 - green-500
-        ]
+        hover_texts = [f'{r:+.2f}%' for r in monthly['monthly_return']]
 
-        fig = go.Figure(data=go.Heatmap(
-            z=z_values,
-            x=x_labels,
-            y=y_labels,
-            colorscale=colorscale,
-            zmid=0,
-            text=text_values,
-            texttemplate='%{text}',
-            textfont=dict(color='#0f172a', size=11),
-            hovertemplate='%{y}년 %{x}<br>수익률: %{z:.2f}%<extra></extra>',
-            colorbar=dict(
-                title=dict(text='수익률 (%)', font=dict(color=_TEXT)),
-                tickfont=dict(color=_MUTED),
-                bgcolor=_BG_PAPER,
-                bordercolor=_GRID,
-                borderwidth=1,
-            ),
+        fig = go.Figure(data=go.Bar(
+            x=monthly['label'],
+            y=monthly['monthly_return'],
+            customdata=hover_texts,
+            marker_color=colors,
+            marker_line=dict(color=_BG_PAPER, width=0.5),
+            text=hover_texts,
+            textposition='outside',
+            textfont=dict(color=_TEXT, size=13),
+            hovertemplate='%{x}<br>수익률: %{customdata}<extra></extra>',
         ))
 
+        fig.add_hline(y=0, line_dash='dash', line_color='rgba(148,163,184,0.4)', line_width=1)
+
+        # 텍스트 잘림 방지: y축 범위에 30% 여백 추가
+        max_r = monthly['monthly_return'].max()
+        min_r = monthly['monthly_return'].min()
+        pad = max(abs(max_r), abs(min_r), 1.0) * 0.35
+        fig.update_yaxes(range=[min(0, min_r) - pad, max(0, max_r) + pad])
+
         fig.update_layout(
-            title='월별 수익률 히트맵',
-            xaxis_title='월',
-            yaxis_title='연도',
-            height=max(280, len(pivot) * 60 + 120),
+            title='월별 수익률',
+            xaxis_title='기간',
+            yaxis_title='수익률 (%)',
+            xaxis=dict(tickfont=dict(size=13)),
+            height=420,
         )
         return self._apply_theme(fig)
 
@@ -383,18 +386,21 @@ class PlotlyVisualizer:
         median_r = float(np.median(returns))
 
         fig.add_vline(x=0, line_color='rgba(148,163,184,0.5)', line_width=1)
-        fig.add_vline(
-            x=mean_r, line_dash='dash', line_color='#60a5fa', line_width=1.5,
-            annotation_text=f'평균 {mean_r:+.2f}%',
-            annotation_font=dict(color='#60a5fa', size=11),
-            annotation_position='top right',
-        )
-        fig.add_vline(
-            x=median_r, line_dash='dot', line_color='#4ade80', line_width=1.5,
-            annotation_text=f'중앙값 {median_r:+.2f}%',
-            annotation_font=dict(color='#4ade80', size=11),
-            annotation_position='top left',
-        )
+        # 선만 표시 (annotation은 차트 밖으로 분리)
+        fig.add_vline(x=mean_r, line_dash='dash', line_color='#60a5fa', line_width=1.5)
+        fig.add_vline(x=median_r, line_dash='dot', line_color='#4ade80', line_width=1.5)
+
+        # 평균/중앙값 차트 밖에 별도 표시 (손실/수익 범례처럼)
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode='lines',
+            line=dict(color='#60a5fa', width=2, dash='dash'),
+            name=f'평균 {mean_r:+.2f}%',
+        ))
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None], mode='lines',
+            line=dict(color='#4ade80', width=2, dash='dot'),
+            name=f'중앙값 {median_r:+.2f}%',
+        ))
 
         fig.update_layout(
             title='거래별 수익률 분포',
@@ -402,7 +408,15 @@ class PlotlyVisualizer:
             yaxis_title='거래 횟수',
             barmode='overlay',
             hovermode='x',
-            height=380,
+            height=420,
+            legend=dict(
+                orientation='h',
+                yanchor='bottom',
+                y=1.02,
+                xanchor='left',
+                x=0,
+            ),
+            margin=dict(t=80),
         )
         return self._apply_theme(fig)
 

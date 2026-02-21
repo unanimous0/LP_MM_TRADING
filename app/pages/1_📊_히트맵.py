@@ -79,14 +79,7 @@ if selected_sector != "전체":
         st.stop()
 
 # ---------------------------------------------------------------------------
-# 히트맵
-# ---------------------------------------------------------------------------
-stock_names = get_stock_list()
-fig = create_zscore_heatmap(zscore_matrix, sort_by=sort_by, top_n=top_n, stock_names=stock_names)
-st.plotly_chart(fig, use_container_width=True, theme=None)
-
-# ---------------------------------------------------------------------------
-# 통계
+# 통계 (히트맵 위)
 # ---------------------------------------------------------------------------
 period_cols = [c for c in zscore_matrix.columns if c != 'stock_code']
 if '1W' in period_cols:
@@ -95,3 +88,10 @@ if '1W' in period_cols:
     col2.metric("평균 1W Z-Score", f"{zscore_matrix['1W'].mean():.2f}")
     strong_buy = (zscore_matrix['1W'] > 2).sum()
     col3.metric("강한 매수 (Z>2)", f"{strong_buy}개")
+
+# ---------------------------------------------------------------------------
+# 히트맵
+# ---------------------------------------------------------------------------
+stock_names = get_stock_list()
+fig = create_zscore_heatmap(zscore_matrix, sort_by=sort_by, top_n=top_n, stock_names=stock_names)
+st.plotly_chart(fig, width="stretch", theme=None)

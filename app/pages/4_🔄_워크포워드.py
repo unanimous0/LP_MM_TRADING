@@ -120,7 +120,7 @@ if return_col:
     # ---------------------------------------------------------------------------
     st.subheader("기간별 검증 수익률")
     fig = create_wf_period_returns_chart(wf_df)
-    st.plotly_chart(fig, use_container_width=True, theme=None)
+    st.plotly_chart(fig, width="stretch", theme=None)
 
 # ---------------------------------------------------------------------------
 # 파라미터 변화 추이

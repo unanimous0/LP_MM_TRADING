@@ -66,11 +66,11 @@ chart_col1, chart_col2 = st.columns(2)
 
 with chart_col1:
     fig_pie = create_pattern_pie_chart(report_df)
-    st.plotly_chart(fig_pie, use_container_width=True, theme=None)
+    st.plotly_chart(fig_pie, width="stretch", theme=None)
 
 with chart_col2:
     fig_hist = create_score_histogram(report_df)
-    st.plotly_chart(fig_hist, use_container_width=True, theme=None)
+    st.plotly_chart(fig_hist, width="stretch", theme=None)
 
 # ---------------------------------------------------------------------------
 # 관심 종목 테이블 (score>=70, signal_count>=2)

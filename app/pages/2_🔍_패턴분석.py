@@ -117,7 +117,7 @@ with tab2:
 
 with tab3:
     fig_signal = create_signal_distribution_chart(report_df)
-    st.plotly_chart(fig_signal, use_container_width=True, theme=None)
+    st.plotly_chart(fig_signal, width="stretch", theme=None)
 
 # ---------------------------------------------------------------------------
 # 종목 상세

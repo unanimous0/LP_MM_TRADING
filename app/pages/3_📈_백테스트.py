@@ -24,6 +24,7 @@ from utils.data_loader import (
     get_metrics_from_result,
     get_trades_from_result,
     get_date_range,
+    get_db_connection,
 )
 from src.backtesting.plotly_visualizer import PlotlyVisualizer
 
@@ -545,25 +546,25 @@ with st.container(border=True):
     ])
 
     with tab1:
-        st.plotly_chart(pv.fig_equity_curve(), use_container_width=True, theme=None)
+        st.plotly_chart(pv.fig_equity_curve(), width="stretch", theme=None)
 
     with tab2:
-        st.plotly_chart(pv.fig_drawdown(), use_container_width=True, theme=None)
+        st.plotly_chart(pv.fig_drawdown(), width="stretch", theme=None)
 
     with tab3:
-        st.plotly_chart(pv.fig_monthly_returns(), use_container_width=True, theme=None)
+        st.plotly_chart(pv.fig_monthly_returns(), width="stretch", theme=None)
 
     with tab4:
         fig = pv.fig_return_distribution()
         if fig:
-            st.plotly_chart(fig, use_container_width=True, theme=None)
+            st.plotly_chart(fig, width="stretch", theme=None)
         else:
             st.info("거래 데이터가 없습니다.")
 
     with tab5:
         fig = pv.fig_pattern_performance()
         if fig:
-            st.plotly_chart(fig, use_container_width=True, theme=None)
+            st.plotly_chart(fig, width="stretch", theme=None)
         else:
             st.info("거래 데이터가 없습니다.")
 
@@ -573,10 +574,43 @@ with st.container(border=True):
         if 'score' in trade_df.columns and 'signal_count' in trade_df.columns:
             trade_df['pattern_score'] = trade_df['score'] - trade_df['signal_count'] * 5
             trade_df = trade_df.rename(columns={'score': 'final_score'})
+
+        # 보유기간 중 intraperiod 통계 (max/min 수익률, MDD)
+        if not trade_df.empty:
+            import numpy as _np
+            _conn = get_db_connection()
+            _codes = trade_df['stock_code'].unique().tolist()
+            _min_d = trade_df['entry_date'].min()
+            _max_d = trade_df['exit_date'].max()
+            _ph = ','.join(['?' for _ in _codes])
+            _price_df = pd.read_sql_query(
+                f"SELECT stock_code, trade_date, close_price FROM investor_flows "
+                f"WHERE stock_code IN ({_ph}) AND trade_date BETWEEN ? AND ? "
+                f"ORDER BY stock_code, trade_date",
+                _conn, params=_codes + [_min_d, _max_d],
+            )
+            _stats = []
+            for _, _tr in trade_df.iterrows():
+                _p = _price_df[
+                    (_price_df['stock_code'] == _tr['stock_code']) &
+                    (_price_df['trade_date'] >= _tr['entry_date']) &
+                    (_price_df['trade_date'] <= _tr['exit_date'])
+                ]['close_price'].dropna().values
+                if len(_p) < 2 or _tr['entry_price'] <= 0:
+                    _stats.append({'max_return_pct': float('nan'), 'min_return_pct': float('nan'), 'mdd_pct': float('nan')})
+                    continue
+                _rets = (_p / _tr['entry_price'] - 1) * 100
+                _peak = _np.maximum.accumulate(_p)
+                _mdd = float(((_p - _peak) / _peak * 100).min())
+                _stats.append({'max_return_pct': float(_rets.max()), 'min_return_pct': float(_rets.min()), 'mdd_pct': _mdd})
+            _stats_df = pd.DataFrame(_stats)
+            trade_df = pd.concat([trade_df.reset_index(drop=True), _stats_df], axis=1)
+
         display_cols = [
             'stock_name', 'stock_code', 'pattern', 'direction',
             'entry_date', 'entry_price', 'exit_date', 'exit_price',
-            'return_pct', 'hold_days', 'exit_reason',
+            'return_pct', 'max_return_pct', 'min_return_pct', 'mdd_pct',
+            'hold_days', 'exit_reason',
             'pattern_score', 'signal_count', 'final_score',
         ]
         display_cols = [c for c in display_cols if c in trade_df.columns]
@@ -585,18 +619,22 @@ with st.container(border=True):
             use_container_width=True,
             height=min(600, len(trade_df) * 40 + 40),
             column_config={
-                "return_pct": st.column_config.NumberColumn("수익률 (%)", format="%.2f"),
-                "entry_price": st.column_config.NumberColumn("진입가", format="%,.0f"),
-                "exit_price": st.column_config.NumberColumn("청산가", format="%,.0f"),
-                "pattern_score": st.column_config.NumberColumn("패턴 점수", format="%.0f"),
-                "signal_count": st.column_config.NumberColumn("시그널 수", format="%d"),
-                "final_score": st.column_config.NumberColumn("최종 점수", format="%.0f"),
+                "return_pct":     st.column_config.NumberColumn("수익률 (%)",     format="%.2f"),
+                "max_return_pct": st.column_config.NumberColumn("max_ret (%)", format="%.2f"),
+                "min_return_pct": st.column_config.NumberColumn("min_ret (%)", format="%.2f"),
+                "mdd_pct":        st.column_config.NumberColumn("MDD (%)",        format="%.2f"),
+                "entry_price":    st.column_config.NumberColumn("진입가",          format="%,.0f"),
+                "exit_price":     st.column_config.NumberColumn("청산가",          format="%,.0f"),
+                "pattern_score":  st.column_config.NumberColumn("패턴 점수",       format="%.0f"),
+                "signal_count":   st.column_config.NumberColumn("시그널 수",       format="%d"),
+                "final_score":    st.column_config.NumberColumn("최종 점수",       format="%.0f"),
             },
         )
 
         # 다운로드 버튼 (컬럼명 한글 변환)
         csv_df = trade_df[display_cols].rename(columns={
             'pattern_score': '패턴점수', 'signal_count': '시그널수', 'final_score': '최종점수',
+            'max_return_pct': '최대수익률', 'min_return_pct': '최소수익률', 'mdd_pct': 'MDD',
         })
         csv = csv_df.to_csv(index=False, encoding='utf-8-sig')
         st.download_button(
