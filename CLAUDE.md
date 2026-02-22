@@ -941,9 +941,16 @@ app/pages/4_🔄_워크포워드.py         (known_params에서 institution_weig
 
 - ✅ **Optuna 최적화 대상 파라미터 3개 추가** (`optimizer.py`)
   - `max_positions`: int, 1~50
-  - `max_hold_days`: int, 1~9999
-  - `reverse_signal_threshold`: float, 0~100
+  - `max_hold_days`: int, 1~500 (2년 거래일)
+  - `reverse_signal_threshold`: float, 0~115 (최대 점수까지)
   - 총 4개 → 7개로 확장 (institution_weight는 Precomputer 공유 불가로 제외 유지)
+
+- ✅ **[버그수정] 최적화 후 검증 백테스트에 최적 파라미터 미반영** (`3_📈_백테스트.py`)
+  - **원인**: max_hold_days, max_positions, reverse_threshold를 최적화 대상에 추가했으나,
+    "최적 파라미터 찾기" 후 자동 실행되는 검증 백테스트에서 사이드바 위젯 값을 그대로 사용
+  - **수정**: `params['max_hold_days']`, `params['max_positions']`,
+    `params['reverse_signal_threshold']`에서 Optuna 최적값을 사용하도록 변경
+  - 영향: 이전에는 최적화 결과를 표시만 하고 실제 검증 백테스트에는 미적용
 
 - ✅ **Trial 기본값 상향** (파라미터 7개 기준)
   - `data_loader.py`: 50 → 100
