@@ -95,10 +95,26 @@ _defaults = {
     'w_stop_loss': -7.5,
     'w_reverse_threshold': 60.0,
     'w_max_positions': 5,
+    'w_max_hold_days': 9999,
+    'w_initial_capital': 10_000_000,
 }
 for _k, _v in _defaults.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
+
+# 초기 자본금 텍스트 입력 초기화 (쉼표 포맷)
+if 'w_initial_capital_text' not in st.session_state:
+    st.session_state['w_initial_capital_text'] = f"{st.session_state['w_initial_capital']:,}"
+
+def _on_capital_change():
+    raw = st.session_state['w_initial_capital_text']
+    try:
+        val = int(raw.replace(',', '').replace(' ', ''))
+        val = max(1_000_000, min(1_000_000_000, val))
+    except ValueError:
+        val = st.session_state['w_initial_capital']
+    st.session_state['w_initial_capital'] = val
+    st.session_state['w_initial_capital_text'] = f"{val:,}"
 
 
 # ---------------------------------------------------------------------------
@@ -110,8 +126,12 @@ if 'pending_opt_params' in st.session_state:
     st.session_state['w_min_signals'] = int(max(0, min(3, p.get('min_signals', 1))))
     st.session_state['w_target_return'] = _snap(p.get('target_return', 0.15) * 100, 1.0, 1.0, 200.0)
     st.session_state['w_stop_loss'] = _snap(p.get('stop_loss', -0.075) * 100, 0.5, -100.0, -1.0)
+    st.session_state['w_max_positions'] = int(max(1, min(50, p.get('max_positions', 5))))
+    st.session_state['w_max_hold_days'] = int(max(1, min(9999, p.get('max_hold_days', 30))))
+    st.session_state['w_reverse_threshold'] = _snap(p.get('reverse_signal_threshold', 60.0), 5.0, 0.0, 100.0)
     # number_input(_ni) 키도 슬라이더와 동기화
-    for _k in ['w_min_score', 'w_min_signals', 'w_target_return', 'w_stop_loss']:
+    for _k in ['w_min_score', 'w_min_signals', 'w_target_return', 'w_stop_loss',
+               'w_max_positions', 'w_reverse_threshold']:
         st.session_state[f'{_k}_ni'] = st.session_state[_k]
     del st.session_state['pending_opt_params']
 
@@ -193,7 +213,7 @@ strategy = st.sidebar.selectbox(
 )
 
 with st.sidebar.expander("⚡ 파라미터 최적화 (Optuna)"):
-    opt_n_trials = st.slider("이번 추가 Trial 수", 10, 200, 50, step=10, key="w_opt_n_trials")
+    opt_n_trials = st.slider("이번 추가 Trial 수", 10, 200, 100, step=10, key="w_opt_n_trials")
     opt_metric = st.selectbox(
         "평가 지표",
         options=['total_return', 'sharpe_ratio', 'win_rate', 'profit_factor'],
@@ -233,26 +253,25 @@ st.sidebar.divider()
 # ---------------------------------------------------------------------------
 st.sidebar.header("백테스트 설정")
 
-# 진입 조건
-st.sidebar.subheader("진입 조건")
+# 🧪 최적화 대상 파라미터
+st.sidebar.subheader("🧪 최적화 대상 파라미터")
+st.sidebar.caption("'최적 파라미터 찾기' 실행 시 Optuna가 자동 결정합니다. 수동으로 설정 후 '백테스트 실행'도 가능합니다.")
 min_score = _synced_slider("최소 점수", 0.0, 100.0, 5.0, "w_min_score")
 min_signals = _synced_slider("최소 시그널 수", 0, 3, 1, "w_min_signals", is_int=True)
-
-# 청산 조건
-st.sidebar.subheader("청산 조건")
 target_return = _synced_slider("목표 수익률 (%)", 1.0, 200.0, 1.0, "w_target_return") / 100
 stop_loss = _synced_slider("손절 비율 (%)", -100.0, -1.0, 0.5, "w_stop_loss") / 100
-max_hold_days = st.sidebar.number_input("최대 보유 기간 (일)", 1, 999, 999)
+max_positions = _synced_slider("최대 동시 포지션", 1, 50, 1, "w_max_positions", is_int=True)
+max_hold_days = st.sidebar.number_input("최대 보유 기간 (일)", 1, 9999, key="w_max_hold_days")
 reverse_threshold = _synced_slider("반대 수급 청산 점수", 0.0, 100.0, 5.0, "w_reverse_threshold")
 
-# 포트폴리오
-st.sidebar.subheader("포트폴리오")
-initial_capital = st.sidebar.number_input("초기 자본금 (원)", 1_000_000, 1_000_000_000, 10_000_000, step=1_000_000)
-max_positions = _synced_slider("최대 동시 포지션", 1, 20, 1, "w_max_positions", is_int=True)
+st.sidebar.divider()
 
-# 고급 설정
-with st.sidebar.expander("고급 설정"):
-    institution_weight = st.slider("기관 가중치", 0.0, 1.0, 0.3, step=0.05, key="w_institution_weight")
+# 🔒 고정 조건
+st.sidebar.subheader("🔒 고정 조건")
+st.sidebar.caption("최적화·백테스트 모두 이 값으로 고정됩니다.")
+st.sidebar.text_input("초기 자본금 (원)", key='w_initial_capital_text', on_change=_on_capital_change)
+initial_capital = float(st.session_state['w_initial_capital'])
+institution_weight = st.sidebar.slider("기관 가중치", 0.0, 1.0, 0.3, step=0.05, key="w_institution_weight")
 
 # ---------------------------------------------------------------------------
 # 실행 버튼
@@ -426,6 +445,10 @@ if 'opt_result' in st.session_state:
             p2.metric("최소 시그널", f"{params['min_signals']}")
             p3.metric("목표 수익률", f"{params['target_return']*100:.1f}%")
             p4.metric("손절", f"{params['stop_loss']*100:.1f}%")
+            p5, p6, p7, _ = st.columns(4)
+            p5.metric("최대 포지션", f"{params['max_positions']}개")
+            p6.metric("최대 보유일", f"{params['max_hold_days']}일")
+            p7.metric("반대수급 청산", f"{params['reverse_signal_threshold']:.0f}점")
 
         # ③ 누적 study 정보 (접힌 상태, 작게)
         existing_before = opt_r.get('existing_before', 0)

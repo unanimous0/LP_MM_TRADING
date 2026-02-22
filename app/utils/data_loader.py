@@ -367,7 +367,7 @@ def run_optuna_optimization(
     start_date: str,
     end_date: str,
     strategy: str = 'long',
-    n_trials: int = 50,
+    n_trials: int = 100,
     metric: str = 'sharpe_ratio',
     initial_capital: float = 10_000_000,
     max_positions: int = 5,

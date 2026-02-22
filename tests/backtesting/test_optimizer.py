@@ -86,9 +86,12 @@ class TestOptunaOptimizer:
 
     def test_default_param_space_keys(self):
         """DEFAULT_PARAM_SPACE 필수 키 확인 (institution_weight 제외됨)"""
-        required_keys = {'min_score', 'min_signals', 'target_return', 'stop_loss'}
+        required_keys = {
+            'min_score', 'min_signals', 'target_return', 'stop_loss',
+            'max_positions', 'max_hold_days', 'reverse_signal_threshold',
+        }
         assert required_keys == set(OptunaOptimizer.DEFAULT_PARAM_SPACE.keys())
-        # institution_weight는 분석 철학 파라미터 → 최적화 대상 아님
+        # institution_weight는 분석 철학 파라미터 + Precomputer 공유 불가 → 최적화 대상 아님
         assert 'institution_weight' not in OptunaOptimizer.DEFAULT_PARAM_SPACE
 
         # 각 파라미터에 type, low, high 존재 확인

@@ -201,10 +201,10 @@ class TestFigMonthlyReturns:
         fig = visualizer.fig_monthly_returns()
         assert isinstance(fig, go.Figure)
 
-    def test_heatmap_trace_type(self, visualizer):
-        """Heatmap 트레이스 타입 확인"""
+    def test_bar_trace_type(self, visualizer):
+        """월별 수익률 바차트 트레이스 타입 확인 (히트맵→바차트 재설계)"""
         fig = visualizer.fig_monthly_returns()
-        assert any(isinstance(t, go.Heatmap) for t in fig.data)
+        assert any(isinstance(t, go.Bar) for t in fig.data)
 
 
 class TestFigReturnDistribution:
