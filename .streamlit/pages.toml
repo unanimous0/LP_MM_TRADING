@@ -1,0 +1,25 @@
+[[pages]]
+path = "streamlit_app.py"
+name = "Whale Supply"
+icon = ":material/waves:"
+is_section = false
+
+[[pages]]
+path = "pages/1_📊_히트맵.py"
+name = "히트맵"
+icon = ":material/grid_on:"
+
+[[pages]]
+path = "pages/2_🔍_패턴분석.py"
+name = "패턴분석"
+icon = ":material/search:"
+
+[[pages]]
+path = "pages/3_📈_백테스트.py"
+name = "백테스트"
+icon = ":material/trending_up:"
+
+[[pages]]
+path = "pages/4_🔄_워크포워드.py"
+name = "워크포워드"
+icon = ":material/sync:"

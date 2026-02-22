@@ -109,11 +109,12 @@ def get_abnormal_supply_data(
     top_n: int = 10,
     direction: str = 'both',
     institution_weight: float = 0.3,
+    z_score_window: int = 60,
 ) -> pd.DataFrame:
     """이상 수급 종목 조회 (캐싱) — 순매수금액 포함"""
     conn = get_db_connection()
     normalizer = SupplyNormalizer(conn, config={
-        'z_score_window': 60,
+        'z_score_window': z_score_window,
         'min_data_points': 30,
         'institution_weight': institution_weight,
     })

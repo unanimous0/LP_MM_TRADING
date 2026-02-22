@@ -14,6 +14,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 
 from utils.data_loader import (
     run_analysis_pipeline_with_progress,
@@ -32,8 +33,8 @@ from utils.charts import (
 # 페이지 설정
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="수급 분석 대시보드",
-    page_icon="📊",
+    page_title="Whale Supply",
+    page_icon="🐋",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -52,7 +53,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(
 </style>
 """, unsafe_allow_html=True)
 
-st.title("수급 분석 대시보드")
+st.title("Whale Supply")
 st.caption("외국인/기관 투자자 수급 기반 종목 분석 시스템")
 
 # ---------------------------------------------------------------------------
@@ -60,10 +61,24 @@ st.caption("외국인/기관 투자자 수급 기반 종목 분석 시스템")
 # ---------------------------------------------------------------------------
 min_date, max_date = get_date_range()
 st.sidebar.markdown(f"**DB 기간**: {min_date} ~ {max_date}")
+_max_dt = datetime.strptime(max_date, "%Y-%m-%d")
+end_date = st.sidebar.date_input(
+    "이상 수급 기준일",
+    value=_max_dt,
+    min_value=datetime.strptime(min_date, "%Y-%m-%d"),
+    max_value=_max_dt.replace(month=12, day=31),
+    help="이상 수급 탐지 기준 날짜. 과거 날짜를 선택하면 해당 시점의 이상 수급을 볼 수 있습니다.",
+)
+end_date_str = end_date.strftime("%Y-%m-%d")
 institution_weight = st.sidebar.slider(
     "기관 가중치", 0.0, 1.0, 0.3, step=0.05,
     key="w_institution_weight",
     help="기관 수급 반영 비율 (0=외국인만, 0.3=기본, 1.0=동등)",
+)
+z_score_window = st.sidebar.slider(
+    "Z-Score 기준 기간 (거래일)",
+    min_value=20, max_value=240, value=60, step=10,
+    help="이상 수급 판단 시 평균/표준편차 계산에 사용하는 과거 거래일 수 (기본 60일 = 약 3개월)",
 )
 
 _prog = st.progress(0, text="분석 준비 중... 0%")
@@ -79,8 +94,8 @@ if report_df.empty:
 
 # 이상 수급 데이터 로드
 _prog.progress(0.90, text="이상 수급 탐지 중... 90%")
-abnormal_buy = get_abnormal_supply_data(threshold=2.0, top_n=30, direction='buy', institution_weight=institution_weight)
-abnormal_sell = get_abnormal_supply_data(threshold=2.0, top_n=30, direction='sell', institution_weight=institution_weight)
+abnormal_buy = get_abnormal_supply_data(end_date=end_date_str, threshold=2.0, top_n=30, direction='buy', institution_weight=institution_weight, z_score_window=z_score_window)
+abnormal_sell = get_abnormal_supply_data(end_date=end_date_str, threshold=2.0, top_n=30, direction='sell', institution_weight=institution_weight, z_score_window=z_score_window)
 
 # 당일 수급 순위 데이터 로드
 _prog.progress(0.95, text="당일 수급 순위 조회 중... 95%")
@@ -91,7 +106,7 @@ _prog.empty()
 # ---------------------------------------------------------------------------
 # 헤더 + 기준일
 # ---------------------------------------------------------------------------
-st.markdown(f"**기준일**: {max_date}")
+st.markdown(f"**기준일**: {end_date_str}")
 
 # ---------------------------------------------------------------------------
 # KPI 카드 (5개)
@@ -122,24 +137,31 @@ tab_abnormal, tab_ranking = st.tabs([
 
 # ─── 탭 1: 이상 수급 ─────────────────────────────────────────────────────────
 with tab_abnormal:
-    st.caption("최근 60거래일(약 3개월) 평균 수급 대비 2표준편차 이상 벗어난 종목")
+    st.caption(f"최근 {z_score_window}거래일 평균 수급 대비 2표준편차 이상 벗어난 종목")
     with st.expander("산출 방식 보기"):
+        _w = z_score_window
+        _iw = institution_weight
+        _iw_pct = int(_iw * 100)
         st.markdown(
             "**1단계: 수급 강도 (Sff)** — 순매수금액을 유통시가총액으로 나눠 종목 간 비교 가능하게 정규화\n\n"
             "$$\\text{Sff} = \\frac{\\text{순매수금액}}{\\text{유통주식수} \\times \\text{종가}}$$\n\n"
-            "**2단계: 외국인 중심 합산** — 외국인 수급을 주(主)로, 기관은 동반 매수 시에만 30% 반영\n\n"
+            f"**2단계: 외국인 중심 합산** — 외국인 수급을 주(主)로, 기관은 동반 매수 시에만 {_iw_pct}% 반영\n\n"
             "$$\\text{Combined} = \\begin{cases}"
-            "\\text{Foreign} + \\text{Institution} \\times 0.3 & "
+            f"\\text{{Foreign}} + \\text{{Institution}} \\times {_iw} & "
             "\\text{(같은 방향)} \\\\"
             "\\text{Foreign} & \\text{(반대 방향)}"
             "\\end{cases}$$\n\n"
-            "**3단계: Z-Score** — 최근 60거래일 이동평균(μ)·표준편차(σ) 기준 오늘의 이탈도\n\n"
-            "$$Z = \\frac{\\text{오늘 Sff} - \\mu_{60}}{\\sigma_{60}}$$\n\n"
-            "Z > 2 이면 과거 60일 대비 상위 ~2.3% 수준의 이례적 매수, Z < -2 이면 이례적 매도\n\n"
+            f"**3단계: Z-Score** — 최근 {_w}거래일 이동평균(μ)·표준편차(σ) 기준 오늘의 이탈도\n\n"
+            f"$$Z = \\frac{{\\text{{오늘 Sff}} - \\mu_{{{_w}}}}}{{\\sigma_{{{_w}}}}}$$\n\n"
+            f"Z > 2 이면 과거 {_w}일 대비 상위 ~2.3% 수준의 이례적 매수, Z < -2 이면 이례적 매도\n\n"
             "---\n"
-            "**외국인 Z ≠ 종합 Z인 이유**: 외국인·기관·종합 Z-Score는 각각 **자기 Sff 시리즈의 60일 μ/σ**로 독립 계산됩니다. "
+            f"**사이드바에서 조정 가능한 파라미터**: "
+            f"기관 가중치(현재 {_iw}) — 0이면 외국인만, 1이면 외국인·기관 동등 반영 / "
+            f"Z-Score 기준 기간(현재 {_w}일) — 짧으면 최근 추세에 민감, 길면 장기 평균 기준\n\n"
+            "---\n"
+            f"**외국인 Z ≠ 종합 Z인 이유**: 외국인·기관·종합 Z-Score는 각각 **자기 Sff 시리즈의 {_w}일 μ/σ**로 독립 계산됩니다. "
             "오늘 기관이 반대 방향이라 종합 Sff = 외국인 Sff여도, "
-            "과거 60일 중 동반 매수였던 날에는 종합 Sff에 기관×0.3이 포함되어 있어 μ·σ가 다릅니다. "
+            f"과거 {_w}일 중 동반 매수였던 날에는 종합 Sff에 기관×{_iw}이 포함되어 있어 μ·σ가 다릅니다. "
             "같은 오늘 값을 다른 기준으로 나누므로 Z-Score가 달라집니다."
         )
 

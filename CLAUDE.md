@@ -130,6 +130,10 @@ git push
 - **이상 수급 섹션**: Z>2σ 매수/매도 바차트 + 테이블 (호버에 순매수금액 억/조 포맷)
 - **당일 수급 순위 탭**: 외국인/기관 순매수·순매도 Top 50 (차트 10 + 테이블 50, 쉼표 포맷)
 - **산출 방식 설명**: Sff→합산→Z-Score 3단계 수식 + 외국인Z≠종합Z 이유 expander
+- **메인 페이지 브랜딩**: 타이틀 "Whale Supply", `pages.toml`로 사이드바 메뉴명 커스터마이즈
+- **이상 수급 날짜 선택**: 사이드바 date_input으로 과거 시점 이상 수급 조회 (이상 수급만 영향)
+- **Z-Score 기준 기간 조정**: 사이드바 슬라이더(20~240일, 기본 60) — 이상 수급 전용, 다른 페이지 무관
+- **산출 방식 설명 동적화**: 기관 가중치·기준 기간 현재값 반영 + "사이드바에서 조정 가능" 안내 추가
 - 258개 테스트 (100% 통과)
 
 **핵심 인사이트**:
@@ -717,6 +721,41 @@ LP_MM_TRADING/
 ---
 
 ## [Progress History]
+
+### 2026-02-23 (메인 페이지 브랜딩 + 이상 수급 날짜/Z-Score 기간 조정)
+
+**목표**: 메인 페이지 타이틀 변경, 이상 수급 탭에서 과거 날짜 조회 + Z-Score 이동평균 기간 사용자 조정
+
+**구현 내용**:
+
+- ✅ **메인 페이지 브랜딩** (`streamlit_app.py`)
+  - 타이틀/탭 제목: "수급 분석 대시보드" → "Whale Supply"
+  - `.streamlit/pages.toml` 신규: 사이드바 메뉴명 커스터마이즈 (Material icons 적용)
+
+- ✅ **이상 수급 날짜 선택기** (`streamlit_app.py`)
+  - 사이드바에 "이상 수급 기준일" date_input 추가
+  - `get_abnormal_supply_data(end_date=end_date_str)` 전달
+  - 이상 수급 탭에만 영향, 다른 페이지/섹션 무관
+
+- ✅ **Z-Score 기준 기간 조정** (`streamlit_app.py`, `data_loader.py`)
+  - 사이드바에 슬라이더 추가 (20~240거래일, 기본 60, step 10)
+  - `get_abnormal_supply_data(z_score_window=z_score_window)` 전달
+  - `data_loader.py`: `get_abnormal_supply_data()`에 `z_score_window=60` 파라미터 추가
+
+- ✅ **산출 방식 설명 동적화** (`streamlit_app.py`)
+  - 하드코딩된 "60거래일", "30%", "0.3" → 사이드바 현재값으로 동적 표시
+  - "사이드바에서 조정 가능한 파라미터" 안내 추가 (기관 가중치, Z-Score 기준 기간)
+
+- ✅ **사이드바 위젯 순서 변경**: 이상 수급 기준일 → 기관 가중치 → Z-Score 기준 기간
+
+**파일** (3개):
+```
+app/streamlit_app.py        (브랜딩 + 날짜 선택 + Z-Score 기간 슬라이더 + 산출 방식 동적화)
+app/utils/data_loader.py    (get_abnormal_supply_data에 z_score_window 파라미터 추가)
+.streamlit/pages.toml       (신규 — 사이드바 메뉴명/아이콘 커스터마이즈)
+```
+
+---
 
 ### 2026-02-23 (institution_weight 글로벌 사이드바 + 거래 비용 파라미터화)
 
