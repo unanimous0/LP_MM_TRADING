@@ -95,7 +95,7 @@ _defaults = {
     'w_stop_loss': -7.5,
     'w_reverse_threshold': 60.0,
     'w_max_positions': 5,
-    'w_max_hold_days': 9999,
+    'w_max_hold_days': 500,
     'w_initial_capital': 10_000_000,
 }
 for _k, _v in _defaults.items():
@@ -127,8 +127,8 @@ if 'pending_opt_params' in st.session_state:
     st.session_state['w_target_return'] = _snap(p.get('target_return', 0.15) * 100, 1.0, 1.0, 200.0)
     st.session_state['w_stop_loss'] = _snap(p.get('stop_loss', -0.075) * 100, 0.5, -100.0, -1.0)
     st.session_state['w_max_positions'] = int(max(1, min(50, p.get('max_positions', 5))))
-    st.session_state['w_max_hold_days'] = int(max(1, min(9999, p.get('max_hold_days', 30))))
-    st.session_state['w_reverse_threshold'] = _snap(p.get('reverse_signal_threshold', 60.0), 5.0, 0.0, 100.0)
+    st.session_state['w_max_hold_days'] = int(max(1, min(500, p.get('max_hold_days', 30))))
+    st.session_state['w_reverse_threshold'] = _snap(p.get('reverse_signal_threshold', 60.0), 5.0, 0.0, 115.0)
     # number_input(_ni) 키도 슬라이더와 동기화
     for _k in ['w_min_score', 'w_min_signals', 'w_target_return', 'w_stop_loss',
                'w_max_positions', 'w_reverse_threshold']:
@@ -261,8 +261,8 @@ min_signals = _synced_slider("최소 시그널 수", 0, 3, 1, "w_min_signals", i
 target_return = _synced_slider("목표 수익률 (%)", 1.0, 200.0, 1.0, "w_target_return") / 100
 stop_loss = _synced_slider("손절 비율 (%)", -100.0, -1.0, 0.5, "w_stop_loss") / 100
 max_positions = _synced_slider("최대 동시 포지션", 1, 50, 1, "w_max_positions", is_int=True)
-max_hold_days = st.sidebar.number_input("최대 보유 기간 (일)", 1, 9999, key="w_max_hold_days")
-reverse_threshold = _synced_slider("반대 수급 청산 점수", 0.0, 100.0, 5.0, "w_reverse_threshold")
+max_hold_days = st.sidebar.number_input("최대 보유 기간 (일)", 1, 500, key="w_max_hold_days")
+reverse_threshold = _synced_slider("반대 수급 청산 점수", 0.0, 115.0, 5.0, "w_reverse_threshold")
 
 st.sidebar.divider()
 

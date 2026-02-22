@@ -972,8 +972,8 @@ app/pages/4_🔄_워크포워드.py         (known_params에서 institution_weig
 | target_return | 5~25% | 목표 수익률 |
 | stop_loss | -15~-3% | 손절 비율 |
 | max_positions | 1~50 | 최대 동시 포지션 |
-| max_hold_days | 1~9999 | 최대 보유 기간 |
-| reverse_signal_threshold | 0~100 | 반대 수급 청산 점수 |
+| max_hold_days | 1~500 | 최대 보유 기간 (2년 거래일) |
+| reverse_signal_threshold | 0~115 | 반대 수급 청산 점수 (최대 점수=115) |
 | institution_weight | 고정 (0.3) | Precomputer 공유 불가로 제외 |
 
 **파일**:

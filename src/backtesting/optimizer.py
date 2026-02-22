@@ -43,8 +43,8 @@ class OptunaOptimizer:
         'target_return':            {'type': 'float', 'low': 0.05,  'high': 0.25},
         'stop_loss':                {'type': 'float', 'low': -0.15, 'high': -0.03},
         'max_positions':            {'type': 'int',   'low': 1,     'high': 50},
-        'max_hold_days':            {'type': 'int',   'low': 1,     'high': 9999},
-        'reverse_signal_threshold': {'type': 'float', 'low': 0.0,   'high': 100.0},
+        'max_hold_days':            {'type': 'int',   'low': 1,     'high': 500},
+        'reverse_signal_threshold': {'type': 'float', 'low': 0.0,   'high': 115.0},
         # institution_weight는 분석 철학 파라미터 (전략 최적화 대상 아님)
         # Precomputer 공유 불가 (trial마다 Z-Score 재계산 필요) → 성능 문제
         # BacktestConfig의 고정 파라미터로 관리 (기본값: 0.3)
