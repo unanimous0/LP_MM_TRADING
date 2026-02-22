@@ -90,6 +90,10 @@ class OptunaOptimizer:
             'strategy': c.strategy,
             'institution_weight': c.institution_weight,
             'force_exit_on_end': c.force_exit_on_end,
+            'tax_rate': c.tax_rate,
+            'commission_rate': c.commission_rate,
+            'slippage_rate': c.slippage_rate,
+            'borrowing_rate': c.borrowing_rate,
         }
 
     def _build_objective(self, param_space: dict, metric: str,

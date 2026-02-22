@@ -242,6 +242,10 @@ class WalkForwardAnalyzer:
             'strategy': self.base_config.strategy,
             'institution_weight': self.base_config.institution_weight,
             'force_exit_on_end': self.base_config.force_exit_on_end,
+            'tax_rate': self.base_config.tax_rate,
+            'commission_rate': self.base_config.commission_rate,
+            'slippage_rate': self.base_config.slippage_rate,
+            'borrowing_rate': self.base_config.borrowing_rate,
         }
 
         for col in row.index:
@@ -265,6 +269,10 @@ class WalkForwardAnalyzer:
             'strategy': c.strategy,
             'institution_weight': c.institution_weight,
             'force_exit_on_end': c.force_exit_on_end,
+            'tax_rate': c.tax_rate,
+            'commission_rate': c.commission_rate,
+            'slippage_rate': c.slippage_rate,
+            'borrowing_rate': c.borrowing_rate,
         }
 
     def run(self, verbose: bool = True) -> Dict:

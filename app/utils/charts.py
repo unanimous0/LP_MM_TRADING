@@ -320,9 +320,11 @@ def create_abnormal_supply_chart(
         marker_line=dict(color=_BG_PAPER, width=0.5),
         customdata=np.column_stack(customdata_cols),
         hovertemplate=''.join(hover_lines) + '<extra></extra>',
-        text=[f'{v:.1f}' for v in plot_df['combined_zscore'].abs()],
-        textposition='outside',
-        textfont=dict(color=_TEXT, size=11),
+        text=[f'{v:.1f}σ' for v in plot_df['combined_zscore'].abs()],
+        textposition='inside',
+        insidetextanchor='end',
+        textfont=dict(color='#0f172a', size=12, family='sans-serif'),
+        cliponaxis=False,
     ))
 
     fig.update_layout(
@@ -385,8 +387,10 @@ def create_supply_ranking_chart(
             '<extra></extra>'
         ),
         text=text_labels,
-        textposition='outside',
-        textfont=dict(color=_TEXT, size=11),
+        textposition='inside',
+        insidetextanchor='end',
+        textfont=dict(color='#0f172a', size=12, family='sans-serif'),
+        cliponaxis=False,
     ))
 
     fig.update_layout(

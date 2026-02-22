@@ -36,7 +36,11 @@ class BacktestConfig:
                  allowed_patterns: Optional[List[str]] = None,  # 허용 패턴 (None이면 전체)
                  strategy: str = 'long',  # 'long', 'short', 'both'
                  institution_weight: float = 0.3,  # 기관 가중치 (0.0=외국인만, 0.3=기본, 0.5=기관 강조)
-                 force_exit_on_end: bool = False):  # 백테스트 종료 시 강제 청산 여부
+                 force_exit_on_end: bool = False,  # 백테스트 종료 시 강제 청산 여부
+                 tax_rate: float = 0.0020,  # 증권거래세 (매도 시, 0.20%)
+                 commission_rate: float = 0.00015,  # 수수료 (매수/매도, 0.015%)
+                 slippage_rate: float = 0.001,  # 슬리피지 (매수/매도, 0.1%)
+                 borrowing_rate: float = 0.03):  # 공매도 차입비용 (연환산, 3.0%)
         """
         백테스트 설정 초기화
 
@@ -53,6 +57,10 @@ class BacktestConfig:
             strategy: 전략 방향 ('long': 순매수, 'short': 순매도, 'both': 롱+숏)
             institution_weight: 기관 가중치 (0.0=외국인만, 0.3=기본, 0.5=기관 강조)
             force_exit_on_end: 백테스트 종료일에 강제 청산 여부 (기본: False)
+            tax_rate: 증권거래세 (매도 시, 기본 0.20%)
+            commission_rate: 수수료 (매수/매도, 기본 0.015%)
+            slippage_rate: 슬리피지 (매수/매도, 기본 0.1%)
+            borrowing_rate: 공매도 차입비용 (연환산, 기본 3.0%)
         """
         self.initial_capital = initial_capital
         self.max_positions = max_positions
@@ -66,6 +74,10 @@ class BacktestConfig:
         self.strategy = strategy
         self.institution_weight = institution_weight
         self.force_exit_on_end = force_exit_on_end
+        self.tax_rate = tax_rate
+        self.commission_rate = commission_rate
+        self.slippage_rate = slippage_rate
+        self.borrowing_rate = borrowing_rate
 
         if strategy not in ['long', 'short', 'both']:
             raise ValueError(f"strategy must be 'long', 'short', or 'both', got: {strategy}")
@@ -110,7 +122,11 @@ class BacktestEngine:
         # 포트폴리오
         self.portfolio = Portfolio(
             initial_capital=self.config.initial_capital,
-            max_positions=self.config.max_positions
+            max_positions=self.config.max_positions,
+            tax_rate=self.config.tax_rate,
+            commission_rate=self.config.commission_rate,
+            slippage_rate=self.config.slippage_rate,
+            borrowing_rate=self.config.borrowing_rate,
         )
 
         # 사전 계산 결과 (preload_data=True일 때 활성화)

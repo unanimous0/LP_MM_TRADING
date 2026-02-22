@@ -29,6 +29,11 @@ st.title("패턴 분류 & 시그널 분석")
 # 사이드바 필터
 # ---------------------------------------------------------------------------
 min_date, max_date = get_date_range()
+institution_weight = st.sidebar.slider(
+    "기관 가중치", 0.0, 1.0, 0.3, step=0.05,
+    key="w_institution_weight",
+    help="기관 수급 반영 비율 (0=외국인만, 0.3=기본, 1.0=동등)",
+)
 _max_dt = datetime.strptime(max_date, "%Y-%m-%d")
 end_date = st.sidebar.date_input(
     "기준 날짜",
@@ -56,6 +61,7 @@ min_signals = st.sidebar.slider("최소 시그널 수", 0, 3, 0)
 _prog = st.progress(0, text="분석 준비 중... 0%")
 zscore_matrix, classified_df, signals_df, report_df = run_analysis_pipeline_with_progress(
     end_date=end_date_str, progress_bar=_prog,
+    institution_weight=institution_weight,
 )
 _prog.empty()
 

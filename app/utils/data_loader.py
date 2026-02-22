@@ -108,10 +108,15 @@ def get_abnormal_supply_data(
     threshold: float = 2.0,
     top_n: int = 10,
     direction: str = 'both',
+    institution_weight: float = 0.3,
 ) -> pd.DataFrame:
     """이상 수급 종목 조회 (캐싱) — 순매수금액 포함"""
     conn = get_db_connection()
-    normalizer = SupplyNormalizer(conn)
+    normalizer = SupplyNormalizer(conn, config={
+        'z_score_window': 60,
+        'min_data_points': 30,
+        'institution_weight': institution_weight,
+    })
     df = normalizer.get_abnormal_supply(
         threshold=threshold,
         end_date=end_date,
@@ -140,10 +145,14 @@ def get_abnormal_supply_data(
 # ---------------------------------------------------------------------------
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _stage_zscore(end_date: Optional[str] = None) -> pd.DataFrame:
+def _stage_zscore(end_date: Optional[str] = None, institution_weight: float = 0.3) -> pd.DataFrame:
     """Stage 1+2: 수급 정규화 + 멀티 기간 Z-Score"""
     conn = get_db_connection()
-    normalizer = SupplyNormalizer(conn)
+    normalizer = SupplyNormalizer(conn, config={
+        'z_score_window': 60,
+        'min_data_points': 30,
+        'institution_weight': institution_weight,
+    })
     calculator = OptimizedMultiPeriodCalculator(normalizer, enable_caching=True)
     zscore_matrix = calculator.calculate_multi_period_zscores(
         DEFAULT_CONFIG['periods'], end_date=end_date
@@ -152,9 +161,9 @@ def _stage_zscore(end_date: Optional[str] = None) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _stage_classify(end_date: Optional[str] = None) -> pd.DataFrame:
+def _stage_classify(end_date: Optional[str] = None, institution_weight: float = 0.3) -> pd.DataFrame:
     """Stage 3a: 패턴 분류"""
-    zscore_matrix = _stage_zscore(end_date=end_date)
+    zscore_matrix = _stage_zscore(end_date=end_date, institution_weight=institution_weight)
     if zscore_matrix.empty:
         return pd.DataFrame()
     classifier = PatternClassifier()
@@ -162,18 +171,18 @@ def _stage_classify(end_date: Optional[str] = None) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _stage_signals(end_date: Optional[str] = None) -> pd.DataFrame:
+def _stage_signals(end_date: Optional[str] = None, institution_weight: float = 0.3) -> pd.DataFrame:
     """Stage 3b: 시그널 탐지"""
     conn = get_db_connection()
-    detector = SignalDetector(conn)
+    detector = SignalDetector(conn, institution_weight=institution_weight)
     return detector.detect_all_signals(end_date=end_date)
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _stage_report(end_date: Optional[str] = None) -> pd.DataFrame:
+def _stage_report(end_date: Optional[str] = None, institution_weight: float = 0.3) -> pd.DataFrame:
     """Stage 3c: 통합 리포트"""
-    classified_df = _stage_classify(end_date=end_date)
-    signals_df = _stage_signals(end_date=end_date)
+    classified_df = _stage_classify(end_date=end_date, institution_weight=institution_weight)
+    signals_df = _stage_signals(end_date=end_date, institution_weight=institution_weight)
     if classified_df.empty:
         return pd.DataFrame()
     conn = get_db_connection()
@@ -183,14 +192,19 @@ def _stage_report(end_date: Optional[str] = None) -> pd.DataFrame:
 
 def run_analysis_pipeline(
     end_date: Optional[str] = None,
+    institution_weight: float = 0.3,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Stage 1-3 전체 파이프라인 (progress bar 없는 버전)"""
-    return run_analysis_pipeline_with_progress(end_date=end_date, progress_bar=None)
+    return run_analysis_pipeline_with_progress(
+        end_date=end_date, progress_bar=None,
+        institution_weight=institution_weight,
+    )
 
 
 def run_analysis_pipeline_with_progress(
     end_date: Optional[str] = None,
     progress_bar=None,
+    institution_weight: float = 0.3,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Stage 1-3 전체 파이프라인 (단계별 진행률 표시 지원)
@@ -198,6 +212,7 @@ def run_analysis_pipeline_with_progress(
     Args:
         end_date: 분석 기준 날짜
         progress_bar: st.progress 위젯 (None이면 진행률 표시 안 함)
+        institution_weight: 기관 가중치 (0.0=외국인만, 0.3=기본, 1.0=동등)
 
     Returns:
         (zscore_matrix, classified_df, signals_df, report_df)
@@ -207,7 +222,7 @@ def run_analysis_pipeline_with_progress(
             progress_bar.progress(pct, text=msg)
 
     _upd(0.05, "📐 수급 데이터 정규화 중... 5%")
-    zscore_matrix = _stage_zscore(end_date=end_date)
+    zscore_matrix = _stage_zscore(end_date=end_date, institution_weight=institution_weight)
 
     if zscore_matrix.empty:
         _upd(1.0, "✅ 완료 100%")
@@ -215,15 +230,15 @@ def run_analysis_pipeline_with_progress(
         return zscore_matrix, empty, empty, empty
 
     _upd(0.40, "📊 Z-Score 계산 완료 → 패턴 분류 중... 40%")
-    classified_df = _stage_classify(end_date=end_date)
+    classified_df = _stage_classify(end_date=end_date, institution_weight=institution_weight)
 
     _upd(0.65, "🔍 패턴 분류 완료 → 시그널 탐지 중... 65%")
-    signals_df = _stage_signals(end_date=end_date)
+    signals_df = _stage_signals(end_date=end_date, institution_weight=institution_weight)
 
-    _upd(0.85, "📡 시그널 탐지 완료 → 리포트 생성 중... 85%")
-    report_df = _stage_report(end_date=end_date)
+    _upd(0.75, "📡 시그널 탐지 완료 → 리포트 생성 중... 75%")
+    report_df = _stage_report(end_date=end_date, institution_weight=institution_weight)
 
-    _upd(1.0, "✅ 분석 완료 100%")
+    _upd(0.85, "📋 리포트 생성 완료 85%")
     return zscore_matrix, classified_df, signals_df, report_df
 
 
@@ -266,6 +281,10 @@ def run_backtest(
     institution_weight: float = 0.3,
     reverse_threshold: float = 60,
     allowed_patterns: Optional[List[str]] = None,
+    tax_rate: float = 0.0020,
+    commission_rate: float = 0.00015,
+    slippage_rate: float = 0.001,
+    borrowing_rate: float = 0.03,
 ) -> Dict:
     """
     백테스트 실행 (캐싱)
@@ -293,6 +312,10 @@ def run_backtest(
         strategy=strategy,
         institution_weight=institution_weight,
         force_exit_on_end=True,
+        tax_rate=tax_rate,
+        commission_rate=commission_rate,
+        slippage_rate=slippage_rate,
+        borrowing_rate=borrowing_rate,
     )
 
     engine = BacktestEngine(conn, config)
@@ -351,6 +374,10 @@ def run_backtest_with_progress(
     reverse_threshold: float = 60,
     allowed_patterns=None,
     progress_callback=None,
+    tax_rate: float = 0.0020,
+    commission_rate: float = 0.00015,
+    slippage_rate: float = 0.001,
+    borrowing_rate: float = 0.03,
 ) -> Dict:
     """백테스트 실행 (캐시 없음, progress_callback 지원)"""
     conn = get_db_connection()
@@ -367,6 +394,10 @@ def run_backtest_with_progress(
         strategy=strategy,
         institution_weight=institution_weight,
         force_exit_on_end=True,
+        tax_rate=tax_rate,
+        commission_rate=commission_rate,
+        slippage_rate=slippage_rate,
+        borrowing_rate=borrowing_rate,
     )
     engine = BacktestEngine(conn, config)
     result = engine.run(
@@ -432,6 +463,10 @@ def run_optuna_optimization(
     institution_weight: float = 0.3,
     progress_callback=None,
     reset_study: bool = False,
+    tax_rate: float = 0.0020,
+    commission_rate: float = 0.00015,
+    slippage_rate: float = 0.001,
+    borrowing_rate: float = 0.03,
 ) -> Optional[Dict]:
     """
     Optuna Persistent Bayesian Optimization 실행
@@ -460,6 +495,10 @@ def run_optuna_optimization(
         reverse_signal_threshold=reverse_threshold,
         institution_weight=institution_weight,
         force_exit_on_end=True,
+        tax_rate=tax_rate,
+        commission_rate=commission_rate,
+        slippage_rate=slippage_rate,
+        borrowing_rate=borrowing_rate,
     )
 
     optimizer = OptunaOptimizer(

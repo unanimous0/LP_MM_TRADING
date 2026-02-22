@@ -271,7 +271,16 @@ st.sidebar.subheader("🔒 고정 조건")
 st.sidebar.caption("최적화·백테스트 모두 이 값으로 고정됩니다.")
 st.sidebar.text_input("초기 자본금 (원)", key='w_initial_capital_text', on_change=_on_capital_change)
 initial_capital = float(st.session_state['w_initial_capital'])
-institution_weight = st.sidebar.slider("기관 가중치", 0.0, 1.0, 0.3, step=0.05, key="w_institution_weight")
+institution_weight = st.sidebar.slider(
+    "기관 가중치", 0.0, 1.0, 0.3, step=0.05,
+    key="w_institution_weight",
+    help="기관 수급 반영 비율 (0=외국인만, 0.3=기본, 1.0=동등)",
+)
+with st.sidebar.expander("거래 비용", expanded=False):
+    tax_rate = st.number_input("증권거래세 (%)", 0.00, 1.00, 0.20, step=0.01, format="%.2f", key="w_tax_rate") / 100
+    commission_rate = st.number_input("수수료 (%)", 0.000, 1.000, 0.015, step=0.001, format="%.3f", key="w_commission_rate") / 100
+    slippage_rate = st.number_input("슬리피지 (%)", 0.00, 1.00, 0.10, step=0.01, format="%.2f", key="w_slippage_rate") / 100
+    borrowing_rate = st.number_input("공매도 차입비용 (%/연)", 0.0, 20.0, 3.0, step=0.5, format="%.1f", key="w_borrowing_rate") / 100
 
 # ---------------------------------------------------------------------------
 # 실행 버튼
@@ -292,6 +301,10 @@ if run_clicked:
         max_positions=max_positions,
         institution_weight=institution_weight,
         reverse_threshold=reverse_threshold,
+        tax_rate=tax_rate,
+        commission_rate=commission_rate,
+        slippage_rate=slippage_rate,
+        borrowing_rate=borrowing_rate,
     )
     st.session_state['bt_use_split'] = use_split
     st.session_state['bt_opt_period'] = (opt_start_date.strftime("%Y-%m-%d"), opt_end_date.strftime("%Y-%m-%d"))
@@ -332,6 +345,10 @@ if opt_clicked:
         institution_weight=institution_weight,
         progress_callback=_opt_progress_callback,
         reset_study=opt_reset,
+        tax_rate=tax_rate,
+        commission_rate=commission_rate,
+        slippage_rate=slippage_rate,
+        borrowing_rate=borrowing_rate,
     )
     _opt_progress_bar.empty()
     _opt_status.empty()
@@ -362,6 +379,10 @@ if opt_clicked:
             institution_weight=institution_weight,
             reverse_threshold=params['reverse_signal_threshold'],
             progress_callback=_bt_progress_callback,
+            tax_rate=tax_rate,
+            commission_rate=commission_rate,
+            slippage_rate=slippage_rate,
+            borrowing_rate=borrowing_rate,
         )
         _bt_progress_bar.empty()
         st.session_state['bt_use_split'] = use_split

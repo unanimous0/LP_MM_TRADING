@@ -60,23 +60,33 @@ st.caption("외국인/기관 투자자 수급 기반 종목 분석 시스템")
 # ---------------------------------------------------------------------------
 min_date, max_date = get_date_range()
 st.sidebar.markdown(f"**DB 기간**: {min_date} ~ {max_date}")
+institution_weight = st.sidebar.slider(
+    "기관 가중치", 0.0, 1.0, 0.3, step=0.05,
+    key="w_institution_weight",
+    help="기관 수급 반영 비율 (0=외국인만, 0.3=기본, 1.0=동등)",
+)
 
 _prog = st.progress(0, text="분석 준비 중... 0%")
 zscore_matrix, classified_df, signals_df, report_df = run_analysis_pipeline_with_progress(
     progress_bar=_prog,
+    institution_weight=institution_weight,
 )
-_prog.empty()
 
 if report_df.empty:
+    _prog.empty()
     st.warning("분석 데이터가 없습니다. DB를 확인하세요.")
     st.stop()
 
 # 이상 수급 데이터 로드
-abnormal_buy = get_abnormal_supply_data(threshold=2.0, top_n=30, direction='buy')
-abnormal_sell = get_abnormal_supply_data(threshold=2.0, top_n=30, direction='sell')
+_prog.progress(0.90, text="이상 수급 탐지 중... 90%")
+abnormal_buy = get_abnormal_supply_data(threshold=2.0, top_n=30, direction='buy', institution_weight=institution_weight)
+abnormal_sell = get_abnormal_supply_data(threshold=2.0, top_n=30, direction='sell', institution_weight=institution_weight)
 
 # 당일 수급 순위 데이터 로드
+_prog.progress(0.95, text="당일 수급 순위 조회 중... 95%")
 supply_ranking = get_today_supply_ranking()
+_prog.progress(1.0, text="완료 100%")
+_prog.empty()
 
 # ---------------------------------------------------------------------------
 # 헤더 + 기준일

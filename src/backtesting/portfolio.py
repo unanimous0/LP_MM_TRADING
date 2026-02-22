@@ -149,22 +149,26 @@ class Position:
 class Portfolio:
     """포트폴리오 관리 클래스"""
 
-    # 거래 비용 설정
-    TAX_RATE = 0.0020  # 0.20% (매도 시, 2024년 기준)
-    COMMISSION_RATE = 0.00015  # 0.015% (매수/매도)
-    SLIPPAGE_RATE = 0.001  # 0.1% (매수/매도)
-    BORROWING_RATE = 0.03  # 3.0% (연환산, 공매도 차입 비용)
-
-    def __init__(self, initial_capital: float, max_positions: int = 10):
+    def __init__(self, initial_capital: float, max_positions: int = 10,
+                 tax_rate: float = 0.0020, commission_rate: float = 0.00015,
+                 slippage_rate: float = 0.001, borrowing_rate: float = 0.03):
         """
         초기화
 
         Args:
             initial_capital: 초기 자본금
             max_positions: 최대 동시 보유 종목 수
+            tax_rate: 증권거래세 (매도 시, 기본 0.20%)
+            commission_rate: 수수료 (매수/매도, 기본 0.015%)
+            slippage_rate: 슬리피지 (매수/매도, 기본 0.1%)
+            borrowing_rate: 공매도 차입비용 (연환산, 기본 3.0%)
         """
         self.initial_capital = initial_capital
         self.max_positions = max_positions
+        self.tax_rate = tax_rate
+        self.commission_rate = commission_rate
+        self.slippage_rate = slippage_rate
+        self.borrowing_rate = borrowing_rate
 
         self.cash = initial_capital
         self.positions: Dict[str, Position] = {}  # stock_code -> Position
@@ -200,7 +204,7 @@ class Portfolio:
             fee = entry_value × borrowing_rate × (hold_days / 365)
         """
         entry_value = entry_price * shares
-        return entry_value * self.BORROWING_RATE * (hold_days / 365)
+        return entry_value * self.borrowing_rate * (hold_days / 365)
 
     def calculate_entry_costs(self, price: float, shares: int, direction: str = 'long') -> float:
         """
@@ -218,15 +222,15 @@ class Portfolio:
         - Short 매도: 세금 + 수수료 + 슬리피지 (공매도도 증권거래세 부과)
         """
         value = price * shares
-        commission = value * self.COMMISSION_RATE
-        slippage = value * self.SLIPPAGE_RATE
+        commission = value * self.commission_rate
+        slippage = value * self.slippage_rate
 
         if direction == 'long':
             # Long 매수: 세금 없음
             return commission + slippage
         else:
             # Short 매도: 세금 포함
-            tax = value * self.TAX_RATE
+            tax = value * self.tax_rate
             return tax + commission + slippage
 
     def calculate_exit_costs(self, price: float, shares: int, direction: str = 'long',
@@ -248,12 +252,12 @@ class Portfolio:
         - Short 매수: 수수료 + 슬리피지 + 차입비용 (세금 없음)
         """
         value = price * shares
-        commission = value * self.COMMISSION_RATE
-        slippage = value * self.SLIPPAGE_RATE
+        commission = value * self.commission_rate
+        slippage = value * self.slippage_rate
 
         if direction == 'long':
             # Long 매도: 세금 포함
-            tax = value * self.TAX_RATE
+            tax = value * self.tax_rate
             return tax + commission + slippage
         else:
             # Short 매수(환매): 차입비용 포함 (세금 없음)

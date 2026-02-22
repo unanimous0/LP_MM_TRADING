@@ -2,7 +2,7 @@
 
 ## [Status]
 - **현재 작업**: Stage 5-1 Streamlit 웹 대시보드 진행 중
-- **마지막 업데이트**: 2026-02-22
+- **마지막 업데이트**: 2026-02-23
 - **백테스트 권장 시작일**: 2025-01-01 이후 (DB가 2024-01-02 시작이므로 1Y 데이터 확보)
 - **다음 시작점**: Stage 5-1 추가 페이지 (종목 상세, 히트맵 등)
 - **시각화**: matplotlib 5종 (PNG/PDF) + Plotly 5종 (Streamlit 인터랙티브)
@@ -122,6 +122,10 @@ git push
 - **Optuna 최적화 대상 확장**: 4개 → 7개 (max_positions/max_hold_days/reverse_threshold 추가)
 - **초기 자본금 쉼표 포맷**: text_input + on_change 콜백으로 입력창 자체에 쉼표 표시
 - **[버그수정] institution_weight 최적화 불일치**: 최적화 시 항상 0.3 사용 → 사이드바 값 전달로 수정
+- **institution_weight 글로벌 사이드바**: 전 페이지 공유 슬라이더 (`key="w_institution_weight"`) + 분석 파이프라인 파라미터화
+- **거래 비용 파라미터화**: Portfolio 클래스 속성 → `__init__` 파라미터 전환, BacktestConfig → Engine → Portfolio 전달 체인
+- **백테스트 거래비용 UI**: 🔒 고정 조건에 expander 추가 (세금/수수료/슬리피지/차입비용 조정 가능)
+- **[버그수정] 최적화/워크포워드 거래비용 누락**: optimizer/walk_forward의 params dict에 비용 필드 추가
 - **메인 페이지 재설계**: KPI 5개 + 이상수급/수급순위 탭 + 패턴 요약 + 관심종목 테이블
 - **이상 수급 섹션**: Z>2σ 매수/매도 바차트 + 테이블 (호버에 순매수금액 억/조 포맷)
 - **당일 수급 순위 탭**: 외국인/기관 순매수·순매도 Top 50 (차트 10 + 테이블 50, 쉼표 포맷)
@@ -713,6 +717,67 @@ LP_MM_TRADING/
 ---
 
 ## [Progress History]
+
+### 2026-02-23 (institution_weight 글로벌 사이드바 + 거래 비용 파라미터화)
+
+**목표**: institution_weight를 전 페이지 글로벌 사이드바로 이동 + 백테스트 거래 비용(세금/수수료/슬리피지/차입비용) 사용자 조정 가능하도록 파라미터화
+
+**구현 내용**:
+
+- ✅ **`portfolio.py` 거래비용 파라미터화**
+  - 클래스 속성 4개(`TAX_RATE`, `COMMISSION_RATE`, `SLIPPAGE_RATE`, `BORROWING_RATE`) → `__init__` 파라미터로 전환
+  - 기본값 동일 유지 → 기존 테스트 하위 호환
+  - 6곳 참조 업데이트: `self.TAX_RATE` → `self.tax_rate` 등
+
+- ✅ **`engine.py` BacktestConfig → Portfolio 전달 체인**
+  - `BacktestConfig`에 `tax_rate`, `commission_rate`, `slippage_rate`, `borrowing_rate` 4개 필드 추가
+  - `BacktestEngine.__init__`에서 Portfolio 생성 시 4개 비용 파라미터 전달
+
+- ✅ **`data_loader.py` 분석 파이프라인 institution_weight 파라미터 추가**
+  - 7개 함수에 `institution_weight=0.3` 파라미터 추가:
+    `_stage_zscore`, `_stage_classify`, `_stage_signals`, `_stage_report`,
+    `run_analysis_pipeline`, `run_analysis_pipeline_with_progress`, `get_abnormal_supply_data`
+  - `SupplyNormalizer` 생성 시 완전한 config dict 전달 (`z_score_window`, `min_data_points`, `institution_weight`)
+  - 백테스트 3개 함수에 거래비용 4개 파라미터 추가:
+    `run_backtest`, `run_backtest_with_progress`, `run_optuna_optimization`
+
+- ✅ **전 페이지 글로벌 사이드바 위젯**
+  - 4개 페이지에 동일한 슬라이더 추가 (`key="w_institution_weight"` → session_state 공유)
+  - 파이프라인 호출에 `institution_weight=institution_weight` 전달
+  - 적용: `streamlit_app.py`, `1_📊_히트맵.py`, `2_🔍_패턴분석.py`, `3_📈_백테스트.py`
+
+- ✅ **백테스트 거래비용 UI** (`3_📈_백테스트.py`)
+  - 🔒 고정 조건 섹션에 "거래 비용" expander 추가
+  - 4개 `number_input`: 증권거래세(%), 수수료(%), 슬리피지(%), 차입비용(%/연)
+  - 3개 호출부에 비용 파라미터 전달: `run_backtest`, `run_optuna_optimization`, `run_backtest_with_progress`
+
+- ✅ **[버그수정] optimizer/walk_forward 거래비용 누락**
+  - `optimizer.py` `_build_base_params()`: 거래비용 4개 필드 누락 → 추가
+  - `walk_forward.py` `_extract_params_from_row()`: 동일 누락 → 추가
+  - `walk_forward.py` `_build_base_config_dict()`: 동일 누락 → 추가
+  - **영향**: 수정 전에는 UI에서 비용 변경해도 최적화/워크포워드 시 항상 기본값 사용
+
+**버그 수정 이력**:
+- `KeyError: 'z_score_window'`: `SupplyNormalizer`에 부분 config dict 전달 → 완전한 config dict로 수정
+- optimizer/walk_forward params dict에 거래비용 필드 누락 → 3곳 추가
+
+**파일** (10개):
+```
+src/backtesting/portfolio.py       (클래스 속성 → __init__ 파라미터)
+src/backtesting/engine.py          (BacktestConfig 비용 필드 + Portfolio 전달)
+src/backtesting/optimizer.py       (_build_base_params 비용 필드 추가)
+src/backtesting/walk_forward.py    (_extract_params_from_row, _build_base_config_dict 비용 필드 추가)
+app/utils/data_loader.py           (institution_weight 전 파이프라인 + 백테스트 비용 파라미터)
+app/streamlit_app.py               (글로벌 사이드바 위젯 + 파이프라인 전달)
+app/pages/1_📊_히트맵.py           (글로벌 사이드바 위젯 + 파이프라인 전달)
+app/pages/2_🔍_패턴분석.py         (글로벌 사이드바 위젯 + 파이프라인 전달)
+app/pages/3_📈_백테스트.py         (거래비용 UI expander + 3개 호출부 전달)
+app/utils/charts.py                (미사용 import 정리)
+```
+
+**테스트**: 258개 (100% 통과, 변경 없음 — 모든 새 파라미터 기본값이 기존과 동일)
+
+---
 
 ### 2026-02-22 (메인 페이지 재설계 + 이상 수급 + 당일 수급 순위)
 
