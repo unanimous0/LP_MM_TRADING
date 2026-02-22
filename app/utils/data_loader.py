@@ -80,6 +80,62 @@ def get_date_range() -> Tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
+# 이상 수급 탐지 (캐싱)
+# ---------------------------------------------------------------------------
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_today_supply_ranking(top_n: int = 50) -> pd.DataFrame:
+    """당일 전 종목 외국인/기관 순매수금액 조회 (캐싱)"""
+    conn = get_db_connection()
+    max_date = conn.execute(
+        "SELECT MAX(trade_date) FROM investor_flows"
+    ).fetchone()[0]
+    df = pd.read_sql_query(
+        "SELECT f.stock_code, s.stock_name, s.sector, "
+        "f.foreign_net_amount, f.institution_net_amount "
+        "FROM investor_flows f "
+        "JOIN stocks s ON f.stock_code = s.stock_code "
+        "WHERE f.trade_date = ?",
+        conn,
+        params=[max_date],
+    )
+    return df
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_abnormal_supply_data(
+    end_date: Optional[str] = None,
+    threshold: float = 2.0,
+    top_n: int = 10,
+    direction: str = 'both',
+) -> pd.DataFrame:
+    """이상 수급 종목 조회 (캐싱) — 순매수금액 포함"""
+    conn = get_db_connection()
+    normalizer = SupplyNormalizer(conn)
+    df = normalizer.get_abnormal_supply(
+        threshold=threshold,
+        end_date=end_date,
+        top_n=top_n,
+        direction=direction,
+    )
+    if df.empty:
+        return df
+
+    # 순매수금액 조인
+    trade_date = df['trade_date'].iloc[0]
+    codes = df['stock_code'].tolist()
+    placeholders = ','.join('?' for _ in codes)
+    amounts = pd.read_sql_query(
+        f"SELECT stock_code, foreign_net_amount, institution_net_amount "
+        f"FROM investor_flows WHERE trade_date = ? AND stock_code IN ({placeholders})",
+        conn,
+        params=[trade_date] + codes,
+    )
+    df = df.merge(amounts, on='stock_code', how='left')
+    return df
+
+
+# ---------------------------------------------------------------------------
 # Stage 1-3 분석 파이프라인 (단계별 캐시 분리)
 # ---------------------------------------------------------------------------
 

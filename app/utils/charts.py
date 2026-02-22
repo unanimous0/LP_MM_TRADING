@@ -21,6 +21,19 @@ _TEXT     = '#e2e8f0'   # slate-200
 _MUTED    = '#94a3b8'   # slate-400
 
 
+def _fmt_amount(val):
+    """원 단위 → 억/조 포맷 (부호, 쉼표 포함)"""
+    eok = val / 1e8
+    sign = '+' if eok >= 0 else '-'
+    abs_eok = abs(eok)
+    if abs_eok >= 10000:
+        jo = abs_eok / 10000
+        if jo == int(jo):
+            return f'{sign}{int(jo):,}조'
+        return f'{sign}{jo:,.1f}조'
+    return f'{sign}{int(abs_eok):,}억'
+
+
 def _apply_dark(fig: go.Figure) -> go.Figure:
     """모든 차트에 다크 테마 공통 스타일 적용"""
     fig.update_layout(
@@ -233,6 +246,155 @@ def create_signal_distribution_chart(report_df: pd.DataFrame) -> go.Figure:
         xaxis_title='시그널 수',
         yaxis_title='종목 수',
         height=350,
+    )
+    return _apply_dark(fig)
+
+
+# ---------------------------------------------------------------------------
+# 이상 수급 바차트
+# ---------------------------------------------------------------------------
+
+def create_abnormal_supply_chart(
+    df: pd.DataFrame,
+    direction: str = 'buy',
+) -> go.Figure:
+    """이상 수급 종목 수평 바차트 (Z-Score 기준)
+
+    Args:
+        df: get_abnormal_supply() 결과 DataFrame
+        direction: 'buy' 또는 'sell'
+    """
+    if df.empty:
+        fig = go.Figure()
+        label = '매수' if direction == 'buy' else '매도'
+        fig.update_layout(title=f'이상 {label} 수급 (데이터 없음)', height=300)
+        return _apply_dark(fig)
+
+    plot_df = df.copy()
+    # 매도는 절대값으로 변환 (바 길이 비교를 위해)
+    if direction == 'sell':
+        plot_df['abs_zscore'] = plot_df['combined_zscore'].abs()
+        sort_col = 'abs_zscore'
+    else:
+        sort_col = 'combined_zscore'
+
+    plot_df = plot_df.sort_values(sort_col, ascending=True)  # 수평 바는 아래→위
+
+    y_labels = [
+        f"{row['stock_name']}" for _, row in plot_df.iterrows()
+    ]
+
+    bar_color = '#4ade80' if direction == 'buy' else '#f87171'  # green-400 / red-400
+    title = '강한 매수 수급 (Z > 2σ)' if direction == 'buy' else '강한 매도 수급 (Z < -2σ)'
+
+    has_amounts = 'foreign_net_amount' in plot_df.columns
+
+    customdata_cols = [
+        plot_df['foreign_zscore'].values,
+        plot_df['institution_zscore'].values,
+        plot_df['combined_zscore'].values,
+        plot_df['sector'].fillna('-').values,
+    ]
+    hover_lines = [
+        '<b>%{y}</b><br>',
+        '섹터: %{customdata[3]}<br>',
+        '외국인 Z: %{customdata[0]:.2f}<br>',
+        '기관 Z: %{customdata[1]:.2f}<br>',
+        '종합 Z: %{customdata[2]:.2f}',
+    ]
+    if has_amounts:
+        foreign_labels = [_fmt_amount(v) for v in plot_df['foreign_net_amount'].fillna(0)]
+        institution_labels = [_fmt_amount(v) for v in plot_df['institution_net_amount'].fillna(0)]
+        customdata_cols.append(np.array(foreign_labels, dtype=object))
+        customdata_cols.append(np.array(institution_labels, dtype=object))
+        hover_lines.insert(-1, '──────────<br>')
+        hover_lines.append('<br>──────────<br>')
+        hover_lines.append('외국인 순매수: %{customdata[4]}<br>')
+        hover_lines.append('기관 순매수: %{customdata[5]}')
+
+    fig = go.Figure(data=go.Bar(
+        y=y_labels,
+        x=plot_df['combined_zscore'].abs(),
+        orientation='h',
+        marker_color=bar_color,
+        marker_line=dict(color=_BG_PAPER, width=0.5),
+        customdata=np.column_stack(customdata_cols),
+        hovertemplate=''.join(hover_lines) + '<extra></extra>',
+        text=[f'{v:.1f}' for v in plot_df['combined_zscore'].abs()],
+        textposition='outside',
+        textfont=dict(color=_TEXT, size=11),
+    ))
+
+    fig.update_layout(
+        title=title,
+        xaxis_title='|Z-Score|',
+        yaxis_title='',
+        height=max(250, len(plot_df) * 32 + 80),
+        margin=dict(l=10, r=40, t=40, b=30),
+    )
+    return _apply_dark(fig)
+
+
+# ---------------------------------------------------------------------------
+# 수급 순위 바차트
+# ---------------------------------------------------------------------------
+
+def create_supply_ranking_chart(
+    df: pd.DataFrame,
+    amount_col: str,
+    title: str,
+    top_n: int = 10,
+) -> go.Figure:
+    """순매수/순매도 금액 순위 수평 바차트
+
+    Args:
+        df: stock_name, sector, amount_col 컬럼 포함 DataFrame (이미 정렬됨)
+        amount_col: 금액 컬럼명 (foreign_net_amount / institution_net_amount)
+        title: 차트 제목
+        top_n: 표시할 종목 수
+    """
+    if df.empty:
+        fig = go.Figure()
+        fig.update_layout(title=f'{title} (데이터 없음)', height=300)
+        return _apply_dark(fig)
+
+    plot_df = df.head(top_n).copy()
+    # 수평 바: 아래→위 순서
+    plot_df = plot_df.iloc[::-1]
+
+    amounts_eok = plot_df[amount_col].fillna(0) / 1e8
+    y_labels = plot_df['stock_name'].tolist()
+    colors = ['#4ade80' if v >= 0 else '#f87171' for v in amounts_eok]
+
+    text_labels = [_fmt_amount(v) for v in plot_df[amount_col].fillna(0)]
+
+    fig = go.Figure(data=go.Bar(
+        y=y_labels,
+        x=amounts_eok.abs(),
+        orientation='h',
+        marker_color=colors,
+        marker_line=dict(color=_BG_PAPER, width=0.5),
+        customdata=np.column_stack([
+            plot_df['sector'].fillna('-').values,
+            np.array(text_labels, dtype=object),
+        ]),
+        hovertemplate=(
+            '<b>%{y}</b><br>'
+            '섹터: %{customdata[0]}<br>'
+            '순매수: %{customdata[1]}'
+            '<extra></extra>'
+        ),
+        text=text_labels,
+        textposition='outside',
+        textfont=dict(color=_TEXT, size=11),
+    ))
+
+    fig.update_layout(
+        title=title,
+        xaxis_title='|금액| (억원)',
+        yaxis_title='',
+        height=max(250, len(plot_df) * 32 + 80),
+        margin=dict(l=10, r=60, t=40, b=30),
     )
     return _apply_dark(fig)
 

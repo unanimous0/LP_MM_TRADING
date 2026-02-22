@@ -122,6 +122,10 @@ git push
 - **Optuna 최적화 대상 확장**: 4개 → 7개 (max_positions/max_hold_days/reverse_threshold 추가)
 - **초기 자본금 쉼표 포맷**: text_input + on_change 콜백으로 입력창 자체에 쉼표 표시
 - **[버그수정] institution_weight 최적화 불일치**: 최적화 시 항상 0.3 사용 → 사이드바 값 전달로 수정
+- **메인 페이지 재설계**: KPI 5개 + 이상수급/수급순위 탭 + 패턴 요약 + 관심종목 테이블
+- **이상 수급 섹션**: Z>2σ 매수/매도 바차트 + 테이블 (호버에 순매수금액 억/조 포맷)
+- **당일 수급 순위 탭**: 외국인/기관 순매수·순매도 Top 50 (차트 10 + 테이블 50, 쉼표 포맷)
+- **산출 방식 설명**: Sff→합산→Z-Score 3단계 수식 + 외국인Z≠종합Z 이유 expander
 - 258개 테스트 (100% 통과)
 
 **핵심 인사이트**:
@@ -709,6 +713,47 @@ LP_MM_TRADING/
 ---
 
 ## [Progress History]
+
+### 2026-02-22 (메인 페이지 재설계 + 이상 수급 + 당일 수급 순위)
+
+**목표**: 메인 페이지 정보량 확대, 이상 수급(Z>2σ) 표시, 당일 순매수/순매도 금액 순위 추가
+
+**구현 내용**:
+
+- ✅ **메인 페이지 전면 재설계** (`app/streamlit_app.py`)
+  - KPI 카드 4개→5개: 분석 종목 / 관심 종목 / 강한 매수 / 강한 매도 / 시그널 2+
+  - 탭 구조 도입: "이상 수급 (Z-Score > 2σ)" | "당일 수급 순위"
+  - 패턴 분석 요약 (파이차트 + 히스토그램) 유지
+  - 관심 종목 테이블 `column_config` 포맷 개선 (ProgressColumn, NumberColumn 등)
+  - CSS `:has()` 선택자로 매수(green)/매도(red) 컨테이너 테두리 구분
+
+- ✅ **탭 1: 이상 수급 (Z-Score > 2σ)**
+  - 매수/매도 2열 레이아웃: 바차트 top 10 + 테이블 30개
+  - 바차트 호버에 외국인/기관/종합 Z-Score + 순매수금액(억/조 포맷) 표시
+  - "산출 방식 보기" expander: Sff→합산→Z-Score 3단계 수식 + 외국인Z≠종합Z 설명
+
+- ✅ **탭 2: 당일 수급 순위** (NEW)
+  - 외국인/기관 순매수 상위 + 순매도 상위 (4섹션)
+  - 각 섹션: 바차트 top 10 (억/조 포맷) + 테이블 top 50 (쉼표 포맷 원시금액)
+  - 캡션: "원시 금액 기준, 정규화 미적용"
+
+- ✅ **`data_loader.py` 함수 2개 추가**
+  - `get_abnormal_supply_data()`: 이상 수급 캐시 래퍼 (순매수금액 조인 포함)
+  - `get_today_supply_ranking()`: 당일 전 종목 외국인/기관 순매수금액 조회
+
+- ✅ **`charts.py` 함수 2개 + 헬퍼 추가**
+  - `_fmt_amount()`: 원→억/조 변환 (부호+쉼표, 1조 이상 시 조 표기)
+  - `create_abnormal_supply_chart()`: 이상 수급 수평 바차트 (Z-Score 기준)
+  - `create_supply_ranking_chart()`: 수급 순위 수평 바차트 (금액 기준)
+
+**파일**:
+```
+app/streamlit_app.py     (메인 페이지 전면 재설계)
+app/utils/data_loader.py (get_abnormal_supply_data, get_today_supply_ranking 추가)
+app/utils/charts.py      (_fmt_amount, create_abnormal_supply_chart, create_supply_ranking_chart 추가)
+```
+
+---
 
 ### 2026-02-20 (Streamlit 다크 테마 + UI 개선 + 차트 개선 + 거래내역 성과 컬럼)
 
