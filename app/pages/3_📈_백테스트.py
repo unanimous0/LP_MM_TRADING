@@ -355,11 +355,11 @@ if opt_clicked:
             min_signals=params['min_signals'],
             target_return=params['target_return'],
             stop_loss=params['stop_loss'],
-            max_hold_days=max_hold_days,
+            max_hold_days=params['max_hold_days'],
             initial_capital=float(initial_capital),
-            max_positions=max_positions,
+            max_positions=params['max_positions'],
             institution_weight=institution_weight,
-            reverse_threshold=reverse_threshold,
+            reverse_threshold=params['reverse_signal_threshold'],
             progress_callback=_bt_progress_callback,
         )
         _bt_progress_bar.empty()
