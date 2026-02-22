@@ -121,6 +121,7 @@ git push
 - **백테스트 사이드바 구조 개선**: 🧪 최적화 대상 / 🔒 고정 조건 섹션 분리
 - **Optuna 최적화 대상 확장**: 4개 → 7개 (max_positions/max_hold_days/reverse_threshold 추가)
 - **초기 자본금 쉼표 포맷**: text_input + on_change 콜백으로 입력창 자체에 쉼표 표시
+- **[버그수정] institution_weight 최적화 불일치**: 최적화 시 항상 0.3 사용 → 사이드바 값 전달로 수정
 - 258개 테스트 (100% 통과)
 
 **핵심 인사이트**:
@@ -920,6 +921,36 @@ src/backtesting/optimizer.py         (institution_weight 제거, Precomputer 1�
 tests/backtesting/test_optimizer.py  (테스트 2개 추가, mock 업데이트)
 app/pages/3_📈_백테스트.py           (institution_weight 참조 오류 4곳 수정)
 app/pages/4_🔄_워크포워드.py         (known_params에서 institution_weight 제거)
+```
+
+---
+
+### 2026-02-22 (최적화 파이프라인 전체 검증 + institution_weight 불일치 수정)
+
+**목표**: Optuna 최적화 파이프라인 전체 재검증 및 발견된 버그 수정
+
+**검증 결과** (9개 항목 통과):
+1. ✅ 파라미터 샘플링 흐름: `_build_base_params()` → `trial.suggest_*()` 덮어쓰기 → `BacktestConfig(**params)`
+2. ✅ 7개 파라미터 engine.py 사용 위치 확인 (진입 필터/익절/손절/시간/포지션한도/반대수급)
+3. ✅ Precomputer 1회 생성 → 전 Trial 공유 (상태 누수 없음)
+4. ✅ MedianPruner 절반 기간 평가 순서 정상
+5. ✅ 최적화 후 검증 백테스트: 7개 파라미터 모두 `params[]`에서 사용
+6. ✅ "백테스트 실행" 버튼: 사이드바 위젯 값 직접 사용
+7. ✅ pending_opt_params 위젯 동기화 정상
+8. ✅ 엣지 케이스: max_positions=1, max_hold_days=1, reverse_threshold=0/115 모두 유효
+9. ✅ Persistent Study 누적 및 최고 Trial 선택 정상
+
+**발견된 버그: institution_weight 최적화-검증 불일치**:
+- **원인**: `run_optuna_optimization()`에 `institution_weight` 파라미터 없음
+  → 최적화 시 항상 BacktestConfig 기본값 0.3 사용
+  → 검증 백테스트는 사이드바 값(0.3 아닐 수 있음) 사용
+- **영향**: 사용자가 기관 가중치를 0.3이 아닌 값으로 변경 시, 최적화와 검증의 Z-Score/시그널이 불일치
+- **수정**: `data_loader.py`에 `institution_weight` 파라미터 추가 + `3_📈_백테스트.py`에서 사이드바 값 전달
+
+**파일**:
+```
+app/utils/data_loader.py    (run_optuna_optimization에 institution_weight 파라미터 추가 + BacktestConfig 전달)
+app/pages/3_📈_백테스트.py  (최적화 호출 시 institution_weight=institution_weight 전달)
 ```
 
 ---

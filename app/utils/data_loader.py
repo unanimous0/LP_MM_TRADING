@@ -373,6 +373,7 @@ def run_optuna_optimization(
     max_positions: int = 5,
     max_hold_days: int = 999,
     reverse_threshold: float = 60,
+    institution_weight: float = 0.3,
     progress_callback=None,
     reset_study: bool = False,
 ) -> Optional[Dict]:
@@ -401,6 +402,7 @@ def run_optuna_optimization(
         max_positions=max_positions,
         max_hold_days=max_hold_days,
         reverse_signal_threshold=reverse_threshold,
+        institution_weight=institution_weight,
         force_exit_on_end=True,
     )
 

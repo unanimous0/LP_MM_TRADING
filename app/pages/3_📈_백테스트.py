@@ -329,6 +329,7 @@ if opt_clicked:
         max_positions=max_positions,
         max_hold_days=max_hold_days,
         reverse_threshold=reverse_threshold,
+        institution_weight=institution_weight,
         progress_callback=_opt_progress_callback,
         reset_study=opt_reset,
     )
