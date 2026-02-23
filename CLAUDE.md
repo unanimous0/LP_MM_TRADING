@@ -723,6 +723,59 @@ LP_MM_TRADING/
 
 ## [Progress History]
 
+### 2026-02-23 (전 페이지 기관가중치 설명 + MA 멀티셀렉트 + 패턴분석 포맷)
+
+**목표**: 기관가중치 도움말 전면 개선, MA 차트 멀티셀렉트 + 크로스 정확도 개선, 패턴분석 점수 소수점 포맷
+
+**구현 내용**:
+
+- ✅ **기관 가중치 help 텍스트 전 페이지 업데이트** (5개 페이지)
+  - 기존: 한 줄 요약 (`"기관 수급 반영 비율 (0=외국인만, 0.3=기본, 1.0=동등)"`)
+  - 변경: `[로직]` / `[반대방향 무시 이유]` / `[값별 의미]` 3섹션 상세 설명
+  - 반대방향 무시 이유: 외국인 강매수 신호가 기관 역매매로 희석/반전되는 사례 명시
+  - 적용: `streamlit_app.py`, `1_📊_히트맵.py`, `2_🔍_패턴분석.py`, `3_📈_백테스트.py`, `5_📋_종목상세.py`
+
+- ✅ **MA 차트 멀티셀렉트 + 동조율 제거** (`시그널 & MA 탭`, `charts.py`)
+  - `create_signal_ma_chart(df, start_date, ma_periods)`: `ma_periods` 파라미터 추가
+  - `_MA_COLORS` 팔레트: `{5:sky, 10:cyan, 20:slate, 60:violet, 120:amber, 240:orange}`
+  - 사용자가 MA 기간 자유롭게 선택/해제 (`st.multiselect`, 기본 [5, 20])
+  - 2개 선택 시에만 골든/데드크로스 표시, 그 외엔 안내 캡션
+  - 동조율(`sync_rate`) 차트 및 메트릭에서 완전 제거 (4열 → 3열: 골든/데드/가속도)
+  - `make_subplots` 제거 → `go.Figure()` 단순화 (secondary y축 불필요)
+
+- ✅ **골든/데드크로스 위치 선형 보간 적용** (`charts.py`)
+  - 기존: 크로스 발생일 MA 값 → 마커 y축이 교차점과 어긋남
+  - 변경: 전일/당일 두 점 사이 선형 보간 → 정확한 교차점 좌표 계산
+    ```python
+    t = diff_p / (diff_p - diff_c)
+    x_cross = p_date + Timedelta(t * (c_date - p_date))
+    y_cross = (p_short + t * (c_short - p_short)) / 1e8
+    ```
+  - 마커 크기: 13 → 9 (시각적 정돈)
+
+- ✅ **수급 금액 차트 범례/제목 간격 조정** (`charts.py`)
+  - `margin(t=90→120)`, `legend y=1.05→1.07` — 범례와 차트 제목 겹침 해소
+
+- ✅ **패턴분석 종목 리스트 점수 소수점 표시** (`2_🔍_패턴분석.py`)
+  - 패턴 점수 / 최종 점수: `"%.0f"` → `"%.1f"` (소수점 첫째자리 표시)
+
+- ✅ **Stage 3 HTML 리포트 생성** (`output/regime_report_full.html`)
+  - `scripts/analysis/generate_html_report.py` 활용
+  - 345개 전체 종목 기준 인터랙티브 HTML (58KB)
+  - 패턴 도넛 차트 + 섹터 바차트 + TOP 20 테이블 + D3.js Treemap
+
+**파일** (6개):
+```
+app/streamlit_app.py               (기관가중치 help 업데이트)
+app/pages/1_📊_히트맵.py           (기관가중치 help 업데이트)
+app/pages/2_🔍_패턴분석.py         (기관가중치 help 업데이트 + 점수 %.1f)
+app/pages/3_📈_백테스트.py         (기관가중치 help 업데이트)
+app/pages/5_📋_종목상세.py         (기관가중치 help + MA 멀티셀렉트 + 동조율 제거 + Z-Score 기간 캡션)
+app/utils/charts.py                (MA 멀티셀렉트 + 선형보간 크로스 + 마커9 + 범례간격)
+```
+
+---
+
 ### 2026-02-23 (종목 상세 페이지 UI 개선)
 
 **목표**: 수급 금액 탭 테이블/차트 심층 개선, MA 크로스 개선, 사이드바 재정렬

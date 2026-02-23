@@ -534,19 +534,34 @@ def create_supply_amount_chart(
 
     fig.update_layout(
         height=820,
-        margin=dict(t=90),
+        margin=dict(t=120),
         showlegend=True,
-        legend=dict(orientation='h', yanchor='bottom', y=1.05, xanchor='left', x=0),
+        legend=dict(orientation='h', yanchor='bottom', y=1.07, xanchor='left', x=0),
         barmode='relative',
     )
     return _apply_dark(fig)
 
 
+_MA_COLORS = {
+    5:   '#38bdf8',  # sky-400
+    10:  '#22d3ee',  # cyan-400
+    20:  '#94a3b8',  # slate-400
+    60:  '#a78bfa',  # violet-400
+    120: '#fbbf24',  # amber-400
+    240: '#fb923c',  # orange-400
+}
+
+
 def create_signal_ma_chart(
     df: pd.DataFrame,
     start_date: str = None,
+    ma_periods: list = None,
 ) -> go.Figure:
-    """외국인 MA5/MA20 라인 + 동조율 보조 y축 + 골든크로스 마커"""
+    """외국인 MA 라인 + 골든/데드크로스 마커 (ma_periods로 표시할 MA 선택)"""
+    if ma_periods is None:
+        ma_periods = [5, 20]
+    ma_periods = sorted(ma_periods)
+
     if df.empty:
         fig = go.Figure()
         fig.update_layout(title='시그널 & MA (데이터 없음)', height=420)
@@ -558,74 +573,76 @@ def create_signal_ma_chart(
     if plot_df.empty:
         plot_df = df.copy()
 
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    fig = go.Figure()
 
-    ma5_eok  = plot_df['ma5'].fillna(float('nan')) / 1e8
-    ma20_eok = plot_df['ma20'].fillna(float('nan')) / 1e8
-
-    fig.add_trace(go.Scatter(
-        x=plot_df['trade_date'], y=ma5_eok,
-        name='외국인 MA5', mode='lines',
-        line=dict(color='#38bdf8', width=2),
-        hovertemplate='%{x}<br>MA5: %{y:.1f}억<extra></extra>',
-    ), secondary_y=False)
-
-    fig.add_trace(go.Scatter(
-        x=plot_df['trade_date'], y=ma20_eok,
-        name='외국인 MA20', mode='lines',
-        line=dict(color='#94a3b8', width=1.5, dash='dash'),
-        hovertemplate='%{x}<br>MA20: %{y:.1f}억<extra></extra>',
-    ), secondary_y=False)
-
-    # 동조율 (secondary y)
-    sync_valid = plot_df.dropna(subset=['sync_rate'])
-    if not sync_valid.empty:
+    # 선택된 각 MA 계산 및 trace 추가
+    ma_series = {}
+    for p in ma_periods:
+        col = f'ma{p}'
+        if col in plot_df.columns:
+            series = plot_df[col].fillna(float('nan'))
+        else:
+            series = plot_df['foreign_net_amount'].rolling(p).mean()
+        ma_series[p] = series
+        color = _MA_COLORS.get(p, '#e2e8f0')
         fig.add_trace(go.Scatter(
-            x=sync_valid['trade_date'], y=sync_valid['sync_rate'],
-            name='동조율(%)', mode='lines',
-            line=dict(color='#fb923c', width=1.5),
-            hovertemplate='%{x}<br>동조율: %{y:.1f}%<extra></extra>',
-        ), secondary_y=True)
+            x=plot_df['trade_date'], y=series / 1e8,
+            name=f'MA{p}', mode='lines',
+            line=dict(color=color, width=2 if p == min(ma_periods) else 1.5),
+            hovertemplate=f'%{{x}}<br>MA{p}: %{{y:.1f}}억<extra></extra>',
+        ))
 
-    # 골든크로스(▲) / 데드크로스(▽) 마커
-    valid_ma = plot_df.dropna(subset=['ma5', 'ma20']).copy()
-    if len(valid_ma) >= 2:
-        valid_ma = valid_ma.reset_index(drop=True)
-        prev_ma5  = valid_ma['ma5'].shift(1)
-        prev_ma20 = valid_ma['ma20'].shift(1)
+    # 골든/데드크로스: MA가 정확히 2개일 때만
+    if len(ma_periods) == 2:
+        short_p, long_p = ma_periods[0], ma_periods[1]
+        tmp = pd.DataFrame({
+            'trade_date': plot_df['trade_date'].values,
+            'short': ma_series[short_p].values,
+            'long':  ma_series[long_p].values,
+        }).dropna().reset_index(drop=True)
 
-        golden = valid_ma[(prev_ma5 < prev_ma20) & (valid_ma['ma5'] >= valid_ma['ma20'])]
-        dead   = valid_ma[(prev_ma5 > prev_ma20) & (valid_ma['ma5'] <= valid_ma['ma20'])]
+        golden_x, golden_y, dead_x, dead_y = [], [], [], []
+        for i in range(1, len(tmp)):
+            p_row = tmp.iloc[i - 1]
+            c_row = tmp.iloc[i]
+            diff_p = p_row['short'] - p_row['long']
+            diff_c = c_row['short'] - c_row['long']
+            if diff_p == diff_c or diff_p * diff_c > 0:
+                continue
+            t = diff_p / (diff_p - diff_c)
+            p_date = pd.Timestamp(p_row['trade_date'])
+            c_date = pd.Timestamp(c_row['trade_date'])
+            x_cross = p_date + pd.Timedelta(seconds=t * (c_date - p_date).total_seconds())
+            y_cross = (p_row['short'] + t * (c_row['short'] - p_row['short'])) / 1e8
+            if diff_p < 0:
+                golden_x.append(x_cross); golden_y.append(y_cross)
+            else:
+                dead_x.append(x_cross);   dead_y.append(y_cross)
 
-        if not golden.empty:
+        cross_label = f'MA{short_p}↑MA{long_p}'
+        if golden_x:
             fig.add_trace(go.Scatter(
-                x=golden['trade_date'], y=golden['ma5'] / 1e8,
-                name='골든크로스', mode='markers',
-                marker=dict(symbol='triangle-up', color='#4ade80', size=13,
+                x=golden_x, y=golden_y, name='골든크로스', mode='markers',
+                marker=dict(symbol='triangle-up', color='#4ade80', size=9,
                             line=dict(width=1, color='#0f172a')),
-                hovertemplate='골든크로스 (MA5↑MA20)<br>%{x}<extra></extra>',
-            ), secondary_y=False)
-
-        if not dead.empty:
+                hovertemplate=f'골든크로스 ({cross_label})<br>%{{x}}<extra></extra>',
+            ))
+        if dead_x:
             fig.add_trace(go.Scatter(
-                x=dead['trade_date'], y=dead['ma5'] / 1e8,
-                name='데드크로스', mode='markers',
-                marker=dict(symbol='triangle-down', color='#f87171', size=13,
+                x=dead_x, y=dead_y, name='데드크로스', mode='markers',
+                marker=dict(symbol='triangle-down', color='#f87171', size=9,
                             line=dict(width=1, color='#0f172a')),
-                hovertemplate='데드크로스 (MA5↓MA20)<br>%{x}<extra></extra>',
-            ), secondary_y=False)
+                hovertemplate=f'데드크로스 (MA{short_p}↓MA{long_p})<br>%{{x}}<extra></extra>',
+            ))
 
-    fig.add_hline(y=0, line_color='#64748b', line_width=0.8, secondary_y=False)
+    fig.add_hline(y=0, line_color='#64748b', line_width=0.8)
 
-    fig.update_yaxes(title_text='순매수 (억원)', secondary_y=False,
+    fig.update_yaxes(title_text='순매수 (억원)',
                      tickfont=dict(color=_MUTED), title_font=dict(color=_MUTED),
                      showgrid=True, gridcolor=_GRID)
-    fig.update_yaxes(title_text='동조율 (%)', secondary_y=True, range=[0, 100],
-                     tickfont=dict(color='#fb923c'), title_font=dict(color='#fb923c'),
-                     showgrid=False)
 
     fig.update_layout(
-        title='외국인 MA 시그널 & 동조율',
+        title='외국인 MA 시그널',
         xaxis_title='날짜',
         height=420,
         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),

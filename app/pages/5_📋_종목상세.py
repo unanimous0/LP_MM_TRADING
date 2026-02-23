@@ -87,7 +87,21 @@ z_score_window = st.sidebar.slider(
 institution_weight = st.sidebar.slider(
     "기관 가중치", 0.0, 1.0, 0.3, step=0.05,
     key="w_institution_weight",
-    help="기관 수급 반영 비율 (0=외국인만, 0.3=기본, 1.0=동등)",
+    help="""기관 수급이 외국인과 같은 방향일 때만 가중치가 반영됩니다.
+
+[로직]
+· 같은 방향(동반 매수/매도): combined = 외국인 + 기관 × weight
+· 반대 방향: combined = 외국인만 (기관 무시)
+
+[반대 방향 무시 이유]
+기관이 외국인과 반대로 움직일 때 단순 합산하면 외국인의 강한 매수 신호가 희석되거나 뒤집힐 수 있습니다. 예) 외국인 +1,000억, 기관 -1,050억 → 합산 -50억(매도 신호)으로 분류되어 실제 외국인 강매수를 놓치게 됩니다. 기관의 역매매는 헤지·유동성 공급 등 외국인과 다른 목적일 수 있으므로 외국인 신호를 중심으로 해석합니다.
+
+[값별 의미]
+· 0.0 = 외국인 신호만 사용
+· 0.3 = 기관 동조 시 30% 추가 반영 (기본값)
+· 1.0 = 기관 동조 시 외국인과 동등하게 반영
+
+※ 순수 외국인 관점으로 보려면 0으로 설정하세요.""",
 )
 
 # 선택 종목 파싱
@@ -247,6 +261,7 @@ with tab1:
         st.caption(
             f"표시 기간: {period_sel} ({len(display_df)}거래일) · "
             f"전체 이력: {len(zscore_df)}거래일 · "
+            f"Z-Score 기준 기간: {_effective_window}거래일 · "
             f"기관 가중치: {institution_weight:.2f}"
         )
 
@@ -417,12 +432,30 @@ with tab3:
     if raw_df.empty:
         st.info("수급 데이터가 없습니다.")
     else:
-        fig3 = create_signal_ma_chart(raw_df, start_date=start_date_str)
-        st.plotly_chart(fig3, width="stretch", theme=None)
+        _MA_OPTIONS = [5, 10, 20, 60, 120, 240]
+        selected_mas = st.multiselect(
+            "MA 기간 선택",
+            options=_MA_OPTIONS,
+            default=[5, 20],
+            format_func=lambda x: f"MA{x}",
+            key="tab3_ma_periods",
+            help="표시할 이동평균 기간을 선택하세요. 정확히 2개 선택 시 골든/데드크로스가 표시됩니다.",
+        )
 
-        # 현재 시그널 상태 4개 메트릭
+        if not selected_mas:
+            st.info("MA 기간을 하나 이상 선택해주세요.")
+        else:
+            if len(selected_mas) != 2:
+                st.caption(
+                    f"💡 골든/데드크로스는 MA 2개 선택 시에만 표시됩니다. "
+                    f"(현재 {len(selected_mas)}개 선택)"
+                )
+            fig3 = create_signal_ma_chart(raw_df, start_date=start_date_str, ma_periods=selected_mas)
+            st.plotly_chart(fig3, width="stretch", theme=None)
+
+        # 현재 시그널 상태 3개 메트릭
         st.markdown("##### 현재 시그널 상태")
-        mc1, mc2, mc3, mc4 = st.columns(4)
+        mc1, mc2, mc3 = st.columns(3)
 
         # MA 상태: raw_df 마지막 유효 행의 ma5 vs ma20 비교 (상태 기반)
         _ma_valid = raw_df.dropna(subset=['ma5', 'ma20'])
@@ -446,21 +479,14 @@ with tab3:
         )
 
         if stock_signals is not None:
-            accel     = stock_signals.get('acceleration', float('nan'))
-            sync_rate = stock_signals.get('sync_rate', float('nan'))
+            accel = stock_signals.get('acceleration', float('nan'))
             mc3.metric(
                 "수급 가속도",
                 f"{accel:.2f}x" if pd.notna(accel) else "-",
                 help="최근 5일 평균 / 직전 5일 평균 (>1.5 = 가속)",
             )
-            mc4.metric(
-                "외인·기관 동조율",
-                f"{sync_rate:.1f}%" if pd.notna(sync_rate) else "-",
-                help="최근 20일 중 외국인+기관 동시 매수일 비율",
-            )
         else:
             mc3.metric("수급 가속도", "-")
-            mc4.metric("외인·기관 동조율", "-")
             st.caption("시그널 데이터가 없습니다. (데이터 부족 또는 필터 미통과)")
 
 # ── Tab 4: 패턴 현황

@@ -32,7 +32,21 @@ min_date, max_date = get_date_range()
 institution_weight = st.sidebar.slider(
     "기관 가중치", 0.0, 1.0, 0.3, step=0.05,
     key="w_institution_weight",
-    help="기관 수급 반영 비율 (0=외국인만, 0.3=기본, 1.0=동등)",
+    help="""기관 수급이 외국인과 같은 방향일 때만 가중치가 반영됩니다.
+
+[로직]
+· 같은 방향(동반 매수/매도): combined = 외국인 + 기관 × weight
+· 반대 방향: combined = 외국인만 (기관 무시)
+
+[반대 방향 무시 이유]
+기관이 외국인과 반대로 움직일 때 단순 합산하면 외국인의 강한 매수 신호가 희석되거나 뒤집힐 수 있습니다. 예) 외국인 +1,000억, 기관 -1,050억 → 합산 -50억(매도 신호)으로 분류되어 실제 외국인 강매수를 놓치게 됩니다. 기관의 역매매는 헤지·유동성 공급 등 외국인과 다른 목적일 수 있으므로 외국인 신호를 중심으로 해석합니다.
+
+[값별 의미]
+· 0.0 = 외국인 신호만 사용
+· 0.3 = 기관 동조 시 30% 추가 반영 (기본값)
+· 1.0 = 기관 동조 시 외국인과 동등하게 반영
+
+※ 순수 외국인 관점으로 보려면 0으로 설정하세요.""",
 )
 _max_dt = datetime.strptime(max_date, "%Y-%m-%d")
 end_date = st.sidebar.date_input(
@@ -106,10 +120,10 @@ with tab1:
             use_container_width=True,
             height=min(600, len(display_df) * 40 + 40),
             column_config={
-                "score": st.column_config.NumberColumn("패턴 점수", format="%.0f"),
+                "score": st.column_config.NumberColumn("패턴 점수", format="%.1f"),
                 "signal_count": st.column_config.NumberColumn("시그널 수", format="%d"),
                 "final_score": st.column_config.ProgressColumn(
-                    "최종 점수", min_value=0, max_value=115, format="%.0f",
+                    "최종 점수", min_value=0, max_value=115, format="%.1f",
                 ),
             },
         )
