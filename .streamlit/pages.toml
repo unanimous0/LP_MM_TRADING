@@ -23,3 +23,8 @@ icon = ":material/trending_up:"
 path = "pages/4_🔄_워크포워드.py"
 name = "워크포워드"
 icon = ":material/sync:"
+
+[[pages]]
+path = "pages/5_📋_종목상세.py"
+name = "종목 상세"
+icon = ":material/bar_chart:"

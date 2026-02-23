@@ -4,7 +4,7 @@
 - **현재 작업**: Stage 5-1 Streamlit 웹 대시보드 진행 중
 - **마지막 업데이트**: 2026-02-23
 - **백테스트 권장 시작일**: 2025-01-01 이후 (DB가 2024-01-02 시작이므로 1Y 데이터 확보)
-- **다음 시작점**: Stage 5-1 추가 페이지 (종목 상세, 히트맵 등)
+- **다음 시작점**: Stage 5-1 추가 페이지 (히트맵 인터랙티브, 분석 페이지 고도화 등)
 - **시각화**: matplotlib 5종 (PNG/PDF) + Plotly 5종 (Streamlit 인터랙티브)
 - **Streamlit**: `venv/bin/streamlit run app/streamlit_app.py` → http://localhost:8501
 - **현재 브랜치**: main
@@ -361,9 +361,10 @@ python backtest_runner.py --plot --save-pdf output/report.pdf
 - ✅ PlotlyVisualizer (`src/backtesting/plotly_visualizer.py`)
 
 **남은 작업**:
-- [ ] 종목 상세 페이지 (개별 종목 Z-Score 추이, 시그널 히스토리)
+- ✅ 종목 상세 페이지 (`app/pages/5_📋_종목상세.py`) — 4탭 (Z-Score추이/수급금액/시그널MA/패턴현황)
+- ✅ 종목 상세 UI 개선 — 수급금액 테이블/차트/사이드바 대폭 개선
 - [ ] 히트맵 페이지 (인터랙티브 히트맵)
-- [ ] 분석 페이지 고도화 (섹터 필터링, 정렬 옵션)
+- [ ] 분析 페이지 고도화 (섹터 필터링, 정렬 옵션)
 
 **실행 방법**:
 ```bash
@@ -721,6 +722,91 @@ LP_MM_TRADING/
 ---
 
 ## [Progress History]
+
+### 2026-02-23 (종목 상세 페이지 UI 개선)
+
+**목표**: 수급 금액 탭 테이블/차트 심층 개선, MA 크로스 개선, 사이드바 재정렬
+
+**구현 내용**:
+
+- ✅ **로딩 progress bar** — 다른 페이지와 동일하게 단계별 % 표시 추가
+
+- ✅ **MA 크로스 개선** (`시그널 & MA 탭`)
+  - 이벤트 기반(발생일만 활성) → **상태 기반** (MA5 > MA20 유지 중 = 골든 활성)
+  - 데드크로스 추가: 차트에 ▽ 빨간 마커 + 하단 메트릭 "골든크로스 활성/비활성" & "데드크로스 활성/비활성" 분리 표시
+
+- ✅ **수급 금액 차트 개선** (`create_supply_amount_chart`)
+  - 누적순매수 라인 추가 (보조 y축, 표시 기간 시작일 기준)
+  - 개인 순매수 3번째 서브플롯 추가 (개인 = -(외국인+기관) 근사)
+  - 외국인/기관 x축 날짜 표시 추가 (기존: 기관만)
+  - 범례-차트 제목 겹침 수정: `margin(t=90)`, `legend y=1.05`
+
+- ✅ **수급 금액 테이블 신규** (차트 하단 메트릭 카드 → HTML 테이블)
+  - 컬럼: 날짜 / 외국인 순매수·Z·누적 / 기관 순매수·Z·누적 / 개인 순매수·누적
+  - 종합 Z 제외 (외국인 Z, 기관 Z만)
+  - 금액: 억원 단위, 1의 자리, 쉼표 포맷 (양수 🟢, 음수 🔴)
+  - Z-Score 색상: **황금(#fbbf24) ≥+2σ** / **하늘(#7dd3fc) ≤-2σ** / 회색 중립 (순매수 초록/빨강과 구분)
+  - 그룹 2행 헤더: 외국인(sky) / 기관(pink) / 개인(orange) — 불투명 배경 + 컬러 하단선 + 좌측 구분선
+  - Sticky 헤더 수정: 반투명 rgba → 불투명 단색, `z-index:10`
+
+- ✅ **Z-Score 기준 기간 슬라이더 추가** (사이드바)
+  - 범위: 20~1,300 거래일 (최대 5년)
+  - 실제 데이터 수 초과 시 자동 캡 + 사이드바 캡션 표시
+
+- ✅ **사이드바 순서 재정렬**
+  - 변경 전: 기관가중치 → 기준날짜 → 표시기간 → Z-Score기간 → 종목선택
+  - 변경 후: **종목선택** → 기준날짜 → 표시기간 → (구분선) → Z-Score기간 → **기관가중치**
+
+**파일** (3개):
+```
+app/pages/5_📋_종목상세.py   (progress bar, MA 개선, 테이블 신규, 슬라이더, 사이드바 재정렬)
+app/utils/charts.py          (create_supply_amount_chart: 개인 추가, 누적라인, 범례 간격)
+app/utils/data_loader.py     (get_stock_zscore_history에 z_score_window 파라미터 추가)
+```
+
+---
+
+### 2026-02-23 (종목 상세 페이지 구현)
+
+**목표**: Stage 5-1 종목 상세 페이지 신규 구현 — 단일 종목 수급 심층 분석
+
+**구현 내용**:
+
+- ✅ **`app/pages/5_📋_종목상세.py` 신규 생성**
+  - 사이드바: 기관 가중치(글로벌), 기준 날짜, 표시 기간(3M/6M/1Y/전체), 종목 선택
+  - 종목 선택: 전체 종목 리스트 (1,609개) — 입력 검색 지원
+  - KPI 5개: Z-Score 종합 / Z-Score 외국인 / Z-Score 기관 / 현재가 / 활성 시그널
+  - 패턴 배너: 현재 패턴/점수/시그널 컬러 표시
+  - **4탭 구조**:
+    - 📈 Z-Score 추이: foreign/institution/combined 3선 + ±2σ 기준선
+    - 💰 수급 금액: 외국인/기관 순매수금액 바차트 (2행 서브플롯, 억 단위) + 누적 요약
+    - 🔔 시그널 & MA: 외국인 MA5/MA20 + 동조율(보조축) + 골든크로스 마커 + 현재 시그널 메트릭 3개
+    - 📊 패턴 현황: 6기간 Z-Score 바차트 + 진입/손절 + 시그널 목록 + Z-Score 수치 테이블
+
+- ✅ **`app/utils/data_loader.py` 함수 2개 추가**
+  - `get_stock_zscore_history(stock_code, end_date, institution_weight)`: 단일 종목 Z-Score 시계열
+  - `get_stock_raw_history(stock_code, end_date)`: 원시 수급+가격 이력 + ma5/ma20/sync_rate 파생 지표
+
+- ✅ **`app/utils/charts.py` 함수 4개 추가** (`from plotly.subplots import make_subplots` 추가)
+  - `create_zscore_history_chart(df, start_date)`: 3선 라인 차트 + ±2σ
+  - `create_supply_amount_chart(df, start_date)`: 2행 서브플롯 바차트
+  - `create_signal_ma_chart(df, start_date)`: MA + 보조축 동조율 + 골든크로스 마커
+  - `create_multiperiod_zscore_bar(zscore_row)`: 6기간 Z-Score 바차트
+
+- ✅ **`.streamlit/pages.toml` 메뉴 추가**
+  - "종목 상세" `:material/bar_chart:`
+
+**파일** (4개):
+```
+app/pages/5_📋_종목상세.py        (신규 — 종목 상세 페이지)
+app/utils/data_loader.py          (get_stock_zscore_history, get_stock_raw_history 추가)
+app/utils/charts.py               (차트 4종 + make_subplots import 추가)
+.streamlit/pages.toml             (종목 상세 메뉴 추가)
+```
+
+**테스트**: 258개 (100% 통과, 변경 없음 — 새 함수 기본값이 기존과 동일)
+
+---
 
 ### 2026-02-23 (메인 페이지 브랜딩 + 이상 수급 날짜/Z-Score 기간 조정)
 

@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+from plotly.subplots import make_subplots
 
 
 # ---------------------------------------------------------------------------
@@ -399,6 +400,281 @@ def create_supply_ranking_chart(
         yaxis_title='',
         height=max(250, len(plot_df) * 32 + 80),
         margin=dict(l=10, r=60, t=40, b=30),
+    )
+    return _apply_dark(fig)
+
+
+# ---------------------------------------------------------------------------
+# 종목 상세 차트
+# ---------------------------------------------------------------------------
+
+def create_zscore_history_chart(
+    df: pd.DataFrame,
+    start_date: str = None,
+) -> go.Figure:
+    """Z-Score 시계열 라인 차트 (외국인/기관/종합 3선 + ±2σ 기준선)"""
+    if df.empty:
+        fig = go.Figure()
+        fig.update_layout(title='Z-Score 추이 (데이터 없음)', height=400)
+        return _apply_dark(fig)
+
+    plot_df = df.copy()
+    if start_date:
+        plot_df = plot_df[plot_df['trade_date'] >= start_date]
+    if plot_df.empty:
+        plot_df = df.copy()
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=plot_df['trade_date'], y=plot_df['combined_zscore'],
+        name='종합 Z-Score', mode='lines',
+        line=dict(color='#fb923c', width=2),
+        hovertemplate='%{x}<br>종합 Z: %{y:.2f}<extra></extra>',
+    ))
+    fig.add_trace(go.Scatter(
+        x=plot_df['trade_date'], y=plot_df['foreign_zscore'],
+        name='외국인 Z-Score', mode='lines',
+        line=dict(color='#38bdf8', width=1.5),
+        hovertemplate='%{x}<br>외국인 Z: %{y:.2f}<extra></extra>',
+    ))
+    fig.add_trace(go.Scatter(
+        x=plot_df['trade_date'], y=plot_df['institution_zscore'],
+        name='기관 Z-Score', mode='lines',
+        line=dict(color='#f472b6', width=1.5, dash='dot'),
+        hovertemplate='%{x}<br>기관 Z: %{y:.2f}<extra></extra>',
+    ))
+
+    fig.add_hline(y=2.0, line_dash='dash', line_color='#4ade80', line_width=1,
+                  annotation_text='+2σ', annotation_font=dict(color='#4ade80', size=11),
+                  annotation_position='right')
+    fig.add_hline(y=-2.0, line_dash='dash', line_color='#f87171', line_width=1,
+                  annotation_text='-2σ', annotation_font=dict(color='#f87171', size=11),
+                  annotation_position='right')
+    fig.add_hline(y=0, line_color='#64748b', line_width=0.8)
+
+    fig.update_layout(
+        title='Z-Score 시계열',
+        xaxis_title='날짜',
+        yaxis_title='Z-Score (σ)',
+        height=420,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
+    )
+    return _apply_dark(fig)
+
+
+def create_supply_amount_chart(
+    df: pd.DataFrame,
+    start_date: str = None,
+) -> go.Figure:
+    """외국인/기관/개인 순매수금액 바차트 + 누적순매수 라인 (3행 서브플롯, 억 단위)
+
+    - 바차트 (좌측 y축): 일별 순매수금액
+    - 라인차트 (우측 y축): 표시 기간 시작일 기준 누적순매수
+    """
+    if df.empty:
+        fig = go.Figure()
+        fig.update_layout(title='수급 금액 (데이터 없음)', height=600)
+        return _apply_dark(fig)
+
+    plot_df = df.copy()
+    if start_date:
+        plot_df = plot_df[plot_df['trade_date'] >= start_date]
+    if plot_df.empty:
+        plot_df = df.copy()
+
+    plot_df = plot_df.reset_index(drop=True)
+
+    foreign_eok = plot_df['foreign_net_amount'].fillna(0) / 1e8
+    inst_eok    = plot_df['institution_net_amount'].fillna(0) / 1e8
+    indiv_col   = plot_df.get('individual_net_amount',
+                              -(plot_df['foreign_net_amount'] + plot_df['institution_net_amount']))
+    indiv_eok   = indiv_col.fillna(0) / 1e8
+
+    foreign_cumsum = foreign_eok.cumsum()
+    inst_cumsum    = inst_eok.cumsum()
+    indiv_cumsum   = indiv_eok.cumsum()
+
+    fig = make_subplots(
+        rows=3, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.10,
+        subplot_titles=['외국인 순매수 (억원)', '기관 순매수 (억원)', '개인 순매수 (억원)'],
+        specs=[[{"secondary_y": True}], [{"secondary_y": True}], [{"secondary_y": True}]],
+    )
+
+    def _add_investor(row, daily, cumsum, bar_pos, bar_neg, line_color, name):
+        fig.add_trace(go.Bar(
+            x=plot_df['trade_date'], y=daily,
+            name=f'{name} 일별',
+            marker_color=[bar_pos if v >= 0 else bar_neg for v in daily],
+            marker_line_width=0, opacity=0.75,
+            hovertemplate=f'%{{x}}<br>{name} 순매수: %{{y:.1f}}억<extra></extra>',
+        ), row=row, col=1, secondary_y=False)
+        fig.add_trace(go.Scatter(
+            x=plot_df['trade_date'], y=cumsum,
+            name=f'{name} 누적',
+            mode='lines', line=dict(color=line_color, width=2),
+            hovertemplate=f'%{{x}}<br>{name} 누적: %{{y:.1f}}억<extra></extra>',
+        ), row=row, col=1, secondary_y=True)
+        fig.update_yaxes(title_text='일별 (억원)', secondary_y=False, row=row,
+                         tickfont=dict(color=_MUTED), title_font=dict(color=_MUTED),
+                         showgrid=True, gridcolor=_GRID)
+        fig.update_yaxes(title_text='누적 (억원)', secondary_y=True, row=row,
+                         tickfont=dict(color=line_color), title_font=dict(color=line_color),
+                         showgrid=False)
+
+    _add_investor(1, foreign_eok, foreign_cumsum, '#4ade80', '#f87171', '#38bdf8', '외국인')
+    _add_investor(2, inst_eok,    inst_cumsum,    '#a78bfa', '#f472b6', '#c084fc', '기관')
+    _add_investor(3, indiv_eok,   indiv_cumsum,   '#fbbf24', '#f87171', '#fb923c', '개인')
+
+    # 모든 행 x축 날짜 표시
+    for r in [1, 2, 3]:
+        fig.update_xaxes(showticklabels=True, row=r, col=1)
+
+    fig.update_layout(
+        height=820,
+        margin=dict(t=90),
+        showlegend=True,
+        legend=dict(orientation='h', yanchor='bottom', y=1.05, xanchor='left', x=0),
+        barmode='relative',
+    )
+    return _apply_dark(fig)
+
+
+def create_signal_ma_chart(
+    df: pd.DataFrame,
+    start_date: str = None,
+) -> go.Figure:
+    """외국인 MA5/MA20 라인 + 동조율 보조 y축 + 골든크로스 마커"""
+    if df.empty:
+        fig = go.Figure()
+        fig.update_layout(title='시그널 & MA (데이터 없음)', height=420)
+        return _apply_dark(fig)
+
+    plot_df = df.copy()
+    if start_date:
+        plot_df = plot_df[plot_df['trade_date'] >= start_date]
+    if plot_df.empty:
+        plot_df = df.copy()
+
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+    ma5_eok  = plot_df['ma5'].fillna(float('nan')) / 1e8
+    ma20_eok = plot_df['ma20'].fillna(float('nan')) / 1e8
+
+    fig.add_trace(go.Scatter(
+        x=plot_df['trade_date'], y=ma5_eok,
+        name='외국인 MA5', mode='lines',
+        line=dict(color='#38bdf8', width=2),
+        hovertemplate='%{x}<br>MA5: %{y:.1f}억<extra></extra>',
+    ), secondary_y=False)
+
+    fig.add_trace(go.Scatter(
+        x=plot_df['trade_date'], y=ma20_eok,
+        name='외국인 MA20', mode='lines',
+        line=dict(color='#94a3b8', width=1.5, dash='dash'),
+        hovertemplate='%{x}<br>MA20: %{y:.1f}억<extra></extra>',
+    ), secondary_y=False)
+
+    # 동조율 (secondary y)
+    sync_valid = plot_df.dropna(subset=['sync_rate'])
+    if not sync_valid.empty:
+        fig.add_trace(go.Scatter(
+            x=sync_valid['trade_date'], y=sync_valid['sync_rate'],
+            name='동조율(%)', mode='lines',
+            line=dict(color='#fb923c', width=1.5),
+            hovertemplate='%{x}<br>동조율: %{y:.1f}%<extra></extra>',
+        ), secondary_y=True)
+
+    # 골든크로스(▲) / 데드크로스(▽) 마커
+    valid_ma = plot_df.dropna(subset=['ma5', 'ma20']).copy()
+    if len(valid_ma) >= 2:
+        valid_ma = valid_ma.reset_index(drop=True)
+        prev_ma5  = valid_ma['ma5'].shift(1)
+        prev_ma20 = valid_ma['ma20'].shift(1)
+
+        golden = valid_ma[(prev_ma5 < prev_ma20) & (valid_ma['ma5'] >= valid_ma['ma20'])]
+        dead   = valid_ma[(prev_ma5 > prev_ma20) & (valid_ma['ma5'] <= valid_ma['ma20'])]
+
+        if not golden.empty:
+            fig.add_trace(go.Scatter(
+                x=golden['trade_date'], y=golden['ma5'] / 1e8,
+                name='골든크로스', mode='markers',
+                marker=dict(symbol='triangle-up', color='#4ade80', size=13,
+                            line=dict(width=1, color='#0f172a')),
+                hovertemplate='골든크로스 (MA5↑MA20)<br>%{x}<extra></extra>',
+            ), secondary_y=False)
+
+        if not dead.empty:
+            fig.add_trace(go.Scatter(
+                x=dead['trade_date'], y=dead['ma5'] / 1e8,
+                name='데드크로스', mode='markers',
+                marker=dict(symbol='triangle-down', color='#f87171', size=13,
+                            line=dict(width=1, color='#0f172a')),
+                hovertemplate='데드크로스 (MA5↓MA20)<br>%{x}<extra></extra>',
+            ), secondary_y=False)
+
+    fig.add_hline(y=0, line_color='#64748b', line_width=0.8, secondary_y=False)
+
+    fig.update_yaxes(title_text='순매수 (억원)', secondary_y=False,
+                     tickfont=dict(color=_MUTED), title_font=dict(color=_MUTED),
+                     showgrid=True, gridcolor=_GRID)
+    fig.update_yaxes(title_text='동조율 (%)', secondary_y=True, range=[0, 100],
+                     tickfont=dict(color='#fb923c'), title_font=dict(color='#fb923c'),
+                     showgrid=False)
+
+    fig.update_layout(
+        title='외국인 MA 시그널 & 동조율',
+        xaxis_title='날짜',
+        height=420,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
+    )
+    return _apply_dark(fig)
+
+
+def create_multiperiod_zscore_bar(zscore_row: "pd.Series") -> go.Figure:
+    """6기간(1W/1M/3M/6M/1Y/2Y) Z-Score 바차트 + ±2σ 기준선"""
+    periods = ['1W', '1M', '3M', '6M', '1Y', '2Y']
+    available = [p for p in periods if p in zscore_row.index and pd.notna(zscore_row[p])]
+
+    if not available:
+        fig = go.Figure()
+        fig.update_layout(title='기간별 Z-Score (데이터 없음)', height=350)
+        return _apply_dark(fig)
+
+    values = [float(zscore_row[p]) for p in available]
+    colors = ['#4ade80' if v >= 0 else '#f87171' for v in values]
+    text_labels = [f'{v:.2f}σ' for v in values]
+
+    fig = go.Figure(data=go.Bar(
+        x=available,
+        y=values,
+        marker_color=colors,
+        marker_line=dict(color=_BG_PAPER, width=0.5),
+        text=text_labels,
+        textposition='outside',
+        textfont=dict(color=_TEXT, size=12),
+        hovertemplate='기간: %{x}<br>Z-Score: %{y:.2f}σ<extra></extra>',
+        cliponaxis=False,
+    ))
+
+    fig.add_hline(y=2.0, line_dash='dash', line_color='#4ade80', line_width=1.2,
+                  annotation_text='+2σ 이상 수급', annotation_font=dict(color='#4ade80', size=11),
+                  annotation_position='right')
+    fig.add_hline(y=-2.0, line_dash='dash', line_color='#f87171', line_width=1.2,
+                  annotation_text='-2σ 이상 매도', annotation_font=dict(color='#f87171', size=11),
+                  annotation_position='right')
+    fig.add_hline(y=0, line_color='#64748b', line_width=0.8)
+
+    # y축 범위: 값 범위 + 여백 (텍스트 클리핑 방지)
+    pad = max(abs(max(values)), abs(min(values)), 2.5) * 0.3
+    fig.update_layout(
+        title='기간별 Z-Score (멀티 기간 패턴)',
+        xaxis_title='기간',
+        yaxis_title='Z-Score (σ)',
+        yaxis_range=[min(values) - pad, max(values) + pad],
+        height=380,
     )
     return _apply_dark(fig)
 

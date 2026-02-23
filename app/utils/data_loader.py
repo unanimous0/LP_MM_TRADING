@@ -8,7 +8,7 @@ DB 연결, Stage 1-3 분석 파이프라인, 백테스트 실행을 캐싱하여
 import sqlite3
 import sys
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Any
 
 import pandas as pd
 import streamlit as st
@@ -241,6 +241,76 @@ def run_analysis_pipeline_with_progress(
 
     _upd(0.85, "📋 리포트 생성 완료 85%")
     return zscore_matrix, classified_df, signals_df, report_df
+
+
+# ---------------------------------------------------------------------------
+# 종목 상세 데이터
+# ---------------------------------------------------------------------------
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_stock_zscore_history(
+    stock_code: str,
+    end_date: Optional[str] = None,
+    institution_weight: float = 0.3,
+    z_score_window: int = 60,
+) -> pd.DataFrame:
+    """단일 종목의 Z-Score 전체 시계열 이력 반환
+
+    Returns:
+        컬럼: trade_date, stock_code, foreign_zscore, institution_zscore, combined_zscore
+    """
+    conn = get_db_connection()
+    normalizer = SupplyNormalizer(conn, config={
+        'z_score_window': z_score_window,
+        'min_data_points': min(30, z_score_window // 2),
+        'institution_weight': institution_weight,
+    })
+    return normalizer.calculate_zscore(stock_codes=[stock_code], end_date=end_date)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def get_stock_raw_history(
+    stock_code: str,
+    end_date: Optional[str] = None,
+) -> pd.DataFrame:
+    """단일 종목의 원시 수급+가격 이력 + 파생 지표
+
+    Returns:
+        컬럼: trade_date, close_price, foreign_net_amount, institution_net_amount,
+               trading_volume, ma5, ma20, sync_rate
+    """
+    conn = get_db_connection()
+    if end_date:
+        query = (
+            "SELECT trade_date, close_price, foreign_net_amount, institution_net_amount, "
+            "trading_volume FROM investor_flows "
+            "WHERE stock_code = ? AND trade_date <= ? ORDER BY trade_date"
+        )
+        df = pd.read_sql_query(query, conn, params=[stock_code, end_date])
+    else:
+        query = (
+            "SELECT trade_date, close_price, foreign_net_amount, institution_net_amount, "
+            "trading_volume FROM investor_flows "
+            "WHERE stock_code = ? ORDER BY trade_date"
+        )
+        df = pd.read_sql_query(query, conn, params=[stock_code])
+
+    if df.empty:
+        return df
+
+    # 개인 순매수 (외국인+기관+개인 합계 ≈ 0 원리)
+    df['individual_net_amount'] = -(df['foreign_net_amount'] + df['institution_net_amount'])
+
+    # 파생 지표 (외국인 순매수 기준 이동평균)
+    df['ma5']  = df['foreign_net_amount'].rolling(5).mean()
+    df['ma20'] = df['foreign_net_amount'].rolling(20).mean()
+
+    both_buy = (
+        (df['foreign_net_amount'] > 0) & (df['institution_net_amount'] > 0)
+    ).astype(int)
+    df['sync_rate'] = both_buy.rolling(20).mean() * 100
+
+    return df
 
 
 # ---------------------------------------------------------------------------
