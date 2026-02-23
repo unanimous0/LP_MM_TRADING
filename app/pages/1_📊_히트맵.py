@@ -1,8 +1,11 @@
 """
 히트맵 페이지 - Z-Score 인터랙티브 히트맵
 
-사이드바: 정렬 기준, 표시 종목 수, 섹터 필터
-메인: Plotly 인터랙티브 히트맵 (줌/호버)
+고도화 기능:
+  A. 히트맵 클릭 → 하단 미니 상세 (KPI + Z-Score 바차트 + 상세 페이지 이동 버튼)
+  B. 호버에 패턴/점수/시그널 정보 표시
+  C. 패턴/점수/시그널 필터 사이드바 추가
+  D. 섹터 평균 히트맵 탭 추가
 """
 
 import sys
@@ -17,7 +20,11 @@ import pandas as pd
 from datetime import datetime
 
 from utils.data_loader import run_analysis_pipeline_with_progress, get_stock_list, get_sectors, get_date_range
-from utils.charts import create_zscore_heatmap
+from utils.charts import (
+    create_zscore_heatmap,
+    create_sector_zscore_heatmap,
+    create_multiperiod_zscore_bar,
+)
 
 st.set_page_config(page_title="히트맵", page_icon="📊", layout="wide")
 st.title("Z-Score 수급 히트맵")
@@ -57,11 +64,19 @@ end_date_str = end_date.strftime("%Y-%m-%d")
 
 st.sidebar.divider()
 
+direction = st.sidebar.radio(
+    "수급 방향",
+    options=['buy', 'sell', 'both'],
+    format_func=lambda x: {'buy': '매수 상위', 'sell': '매도 상위', 'both': '양쪽'}[x],
+    horizontal=True,
+    help="매수 상위: Z-Score 높은 순 / 매도 상위: Z-Score 낮은 순 / 양쪽: 각 절반씩",
+)
+
 sort_options = {
-    'recent': '최근 수급 (1W 기준)',
+    'recent':   '최근 수급 (1W 기준)',
     'momentum': '모멘텀 (단기-장기 차이)',
     'weighted': '가중 평균 (최근 높은 비중)',
-    'average': '단순 평균',
+    'average':  '단순 평균',
 }
 sort_by = st.sidebar.selectbox(
     "정렬 기준",
@@ -71,8 +86,26 @@ sort_by = st.sidebar.selectbox(
 
 top_n = st.sidebar.slider("표시 종목 수", min_value=10, max_value=200, value=50, step=10)
 
+st.sidebar.divider()
+
+# C: 섹터 / 패턴 / 점수 / 시그널 필터
 sectors = get_sectors()
 selected_sector = st.sidebar.selectbox("섹터 필터", options=["전체"] + sectors)
+
+pattern_options = ['전체', '모멘텀형', '지속형', '전환형', '기타']
+selected_pattern = st.sidebar.selectbox(
+    "패턴 필터", pattern_options,
+    help="특정 패턴 종목만 표시합니다.",
+)
+
+min_score = st.sidebar.slider(
+    "최소 점수", 0.0, 100.0, 0.0, step=5.0,
+    help="패턴 점수가 이 값 이상인 종목만 표시합니다.",
+)
+min_signals = st.sidebar.slider(
+    "최소 시그널 수", 0, 3, 0,
+    help="활성 시그널이 이 개수 이상인 종목만 표시합니다.",
+)
 
 # ---------------------------------------------------------------------------
 # 데이터 로드
@@ -88,14 +121,33 @@ if zscore_matrix.empty:
     st.warning("Z-Score 데이터가 없습니다.")
     st.stop()
 
+stock_list = get_stock_list()
+
 # 섹터 필터링
 if selected_sector != "전체":
-    stock_list = get_stock_list()
     sector_stocks = stock_list[stock_list['sector'] == selected_sector]['stock_code'].tolist()
     zscore_matrix = zscore_matrix[zscore_matrix['stock_code'].isin(sector_stocks)]
-
+    if not report_df.empty:
+        report_df = report_df[report_df['stock_code'].isin(sector_stocks)]
     if zscore_matrix.empty:
         st.info(f"'{selected_sector}' 섹터에 해당하는 종목이 없습니다.")
+        st.stop()
+
+# C: 패턴 / 점수 / 시그널 필터
+_any_filter = selected_pattern != '전체' or min_score > 0 or min_signals > 0
+if _any_filter and not report_df.empty:
+    _fr = report_df.copy()
+    if selected_pattern != '전체':
+        _fr = _fr[_fr['pattern'] == selected_pattern]
+    if min_score > 0:
+        _fr = _fr[_fr['score'] >= min_score]
+    if min_signals > 0 and 'signal_count' in _fr.columns:
+        _fr = _fr[_fr['signal_count'] >= min_signals]
+    _valid_codes = set(_fr['stock_code'].tolist())
+    zscore_matrix = zscore_matrix[zscore_matrix['stock_code'].isin(_valid_codes)]
+    report_df = _fr
+    if zscore_matrix.empty:
+        st.info("필터 조건에 맞는 종목이 없습니다. 조건을 완화해 보세요.")
         st.stop()
 
 # ---------------------------------------------------------------------------
@@ -103,15 +155,107 @@ if selected_sector != "전체":
 # ---------------------------------------------------------------------------
 period_cols = [c for c in zscore_matrix.columns if c != 'stock_code']
 if '1W' in period_cols:
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("표시 종목 수", f"{min(top_n, len(zscore_matrix))}개")
     col2.metric("평균 1W Z-Score", f"{zscore_matrix['1W'].mean():.2f}")
     strong_buy = (zscore_matrix['1W'] > 2).sum()
+    strong_sell = (zscore_matrix['1W'] < -2).sum()
     col3.metric("강한 매수 (Z>2)", f"{strong_buy}개")
+    col4.metric("강한 매도 (Z<-2)", f"{strong_sell}개")
 
 # ---------------------------------------------------------------------------
-# 히트맵
+# D: 탭 구조 (종목별 히트맵 | 섹터 평균 히트맵)
 # ---------------------------------------------------------------------------
-stock_names = get_stock_list()
-fig = create_zscore_heatmap(zscore_matrix, sort_by=sort_by, top_n=top_n, stock_names=stock_names)
-st.plotly_chart(fig, width="stretch", theme=None)
+tab1, tab2 = st.tabs(["📈 종목별 히트맵", "🏭 섹터 평균 히트맵"])
+
+with tab1:
+    # B: report_df 전달 → 호버에 패턴/점수/시그널 표시
+    fig = create_zscore_heatmap(
+        zscore_matrix, sort_by=sort_by, top_n=top_n,
+        stock_names=stock_list, direction=direction,
+        report_df=report_df,
+    )
+
+    # A: on_select="rerun" — 클릭 시 하단 미니 상세 표시
+    event = st.plotly_chart(
+        fig, width="stretch", theme=None,
+        on_select="rerun", selection_mode="points",
+        key="heatmap_main",
+    )
+
+    # A: 클릭된 종목 코드 추출
+    selected_code = None
+    selected_label = None
+    try:
+        pts = event.selection.points
+        if pts:
+            y_label = str(pts[0].get('y', '') or '')
+            # y_label 형식: "종목명(종목코드)" 또는 그냥 "종목코드"
+            if '(' in y_label and y_label.endswith(')'):
+                selected_code = y_label.split('(')[-1][:-1]
+                selected_label = y_label
+            elif y_label:
+                selected_code = y_label
+                selected_label = y_label
+    except Exception:
+        pass
+
+    # A: 미니 상세 패널
+    if selected_code:
+        st.divider()
+
+        # 종목명 조회
+        _name_mask = stock_list['stock_code'] == selected_code
+        _stock_name = (
+            stock_list.loc[_name_mask, 'stock_name'].values[0]
+            if _name_mask.any() else selected_code
+        )
+
+        _hdr_col, _btn_col = st.columns([4, 1])
+        with _hdr_col:
+            st.subheader(f"📌 {_stock_name} ({selected_code})")
+        with _btn_col:
+            if st.button("종목 상세 보기 →", type="primary", key="goto_detail"):
+                st.session_state['heatmap_selected_code'] = selected_code
+                st.switch_page("pages/5_📋_종목상세.py")
+
+        # KPI 4개
+        _m1, _m2, _m3, _m4 = st.columns(4)
+
+        _zrow_mask = zscore_matrix['stock_code'] == selected_code
+        if _zrow_mask.any():
+            _zrow = zscore_matrix[_zrow_mask].iloc[0]
+            _1w = float(_zrow['1W']) if '1W' in _zrow.index else float('nan')
+            _m1.metric("1W Z-Score", f"{_1w:.2f}σ" if pd.notna(_1w) else "-")
+        else:
+            _m1.metric("1W Z-Score", "-")
+
+        _rrow = None
+        if not report_df.empty and selected_code in report_df['stock_code'].values:
+            _rrow = report_df[report_df['stock_code'] == selected_code].iloc[0]
+            _m2.metric("패턴", str(_rrow.get('pattern', '-')))
+            _m3.metric("점수", f"{float(_rrow.get('score', 0)):.0f}")
+            _m4.metric("시그널", f"{int(_rrow.get('signal_count', 0))}개")
+        else:
+            _m2.metric("패턴", "-")
+            _m3.metric("점수", "-")
+            _m4.metric("시그널", "-")
+
+        # 멀티기간 Z-Score 바차트
+        if _zrow_mask.any():
+            _fig_bar = create_multiperiod_zscore_bar(_zrow)
+            st.plotly_chart(_fig_bar, width="stretch", theme=None, key="mini_zscore_bar")
+
+        # 활성 시그널 표시
+        if _rrow is not None:
+            _sig = _rrow.get('signal_list', '')
+            if _sig and str(_sig) not in ('', 'nan', 'None'):
+                st.success(f"**활성 시그널**: {_sig}")
+
+with tab2:
+    # D: 섹터 평균 히트맵
+    st.caption("섹터별 종목들의 평균 Z-Score. 현재 적용된 필터(패턴/점수/시그널)가 반영됩니다.")
+    fig_sector = create_sector_zscore_heatmap(
+        zscore_matrix, stock_list=stock_list, sort_by=sort_by,
+    )
+    st.plotly_chart(fig_sector, width="stretch", theme=None)

@@ -2,9 +2,9 @@
 
 ## [Status]
 - **현재 작업**: Stage 5-1 Streamlit 웹 대시보드 진행 중
-- **마지막 업데이트**: 2026-02-23
+- **마지막 업데이트**: 2026-02-24
 - **백테스트 권장 시작일**: 2025-01-01 이후 (DB가 2024-01-02 시작이므로 1Y 데이터 확보)
-- **다음 시작점**: Stage 5-1 추가 페이지 (히트맵 인터랙티브, 분석 페이지 고도화 등)
+- **다음 시작점**: 분석 페이지 고도화 + 스코어링 시스템 개선 검토 (모멘텀 방향성/시간 순서 반영)
 - **시각화**: matplotlib 5종 (PNG/PDF) + Plotly 5종 (Streamlit 인터랙티브)
 - **Streamlit**: `venv/bin/streamlit run app/streamlit_app.py` → http://localhost:8501
 - **현재 브랜치**: main
@@ -134,6 +134,7 @@ git push
 - **이상 수급 날짜 선택**: 사이드바 date_input으로 과거 시점 이상 수급 조회 (이상 수급만 영향)
 - **Z-Score 기준 기간 조정**: 사이드바 슬라이더(20~240일, 기본 60) — 이상 수급 전용, 다른 페이지 무관
 - **산출 방식 설명 동적화**: 기관 가중치·기준 기간 현재값 반영 + "사이드바에서 조정 가능" 안내 추가
+- **히트맵 인터랙티브 고도화**: A(클릭→미니상세) + B(호버 패턴/점수) + C(필터 사이드바) + D(섹터 평균 탭)
 - 258개 테스트 (100% 통과)
 
 **핵심 인사이트**:
@@ -363,8 +364,8 @@ python backtest_runner.py --plot --save-pdf output/report.pdf
 **남은 작업**:
 - ✅ 종목 상세 페이지 (`app/pages/5_📋_종목상세.py`) — 4탭 (Z-Score추이/수급금액/시그널MA/패턴현황)
 - ✅ 종목 상세 UI 개선 — 수급금액 테이블/차트/사이드바 대폭 개선
-- [ ] 히트맵 페이지 (인터랙티브 히트맵)
-- [ ] 분析 페이지 고도화 (섹터 필터링, 정렬 옵션)
+- ✅ 히트맵 페이지 — 인터랙티브 히트맵 (클릭→미니상세, 호버 패턴/점수, 필터, 섹터 평균)
+- [ ] 분석 페이지 고도화 (섹터 필터링, 정렬 옵션)
 
 **실행 방법**:
 ```bash
@@ -722,6 +723,48 @@ LP_MM_TRADING/
 ---
 
 ## [Progress History]
+
+### 2026-02-24 (히트맵 인터랙티브 고도화 A/B/C/D)
+
+**목표**: 히트맵 페이지 4가지 고도화 기능 구현
+
+**구현 내용**:
+
+- ✅ **A. 히트맵 클릭 → 하단 미니 상세 패널** (`1_📊_히트맵.py`)
+  - `st.plotly_chart(on_select="rerun", selection_mode="points")` 활용
+  - 클릭 시 y_label에서 종목코드 추출 → KPI 4개 (1W Z-Score, 패턴, 점수, 시그널)
+  - 멀티기간 Z-Score 바차트 (`create_multiperiod_zscore_bar`)
+  - "종목 상세 보기 →" 버튼 (`st.switch_page` + `session_state['heatmap_selected_code']`)
+
+- ✅ **B. 호버에 패턴/점수/시그널 정보 표시** (`charts.py`)
+  - `create_zscore_heatmap()`에 `report_df` 파라미터 추가
+  - 3D numpy customdata 배열: `np.empty((n_stocks, n_periods, 3), dtype=object)`
+  - 각 셀별 패턴/점수/시그널 수 표시 (hovertemplate 확장)
+
+- ✅ **C. 필터 사이드바** (`1_📊_히트맵.py`)
+  - 패턴 필터 (전체/모멘텀형/지속형/전환형/기타)
+  - 최소 점수 슬라이더 (0~100)
+  - 최소 시그널 수 슬라이더 (0~3)
+  - 필터 적용: zscore_matrix + report_df 동시 필터링
+
+- ✅ **D. 섹터 평균 히트맵 탭** (`charts.py`)
+  - `create_sector_zscore_heatmap(zscore_matrix, stock_list, sort_by)` 신규 함수
+  - 섹터별 종목들의 평균 Z-Score 히트맵 (현재 필터 반영)
+  - 탭 구조: "📈 종목별 히트맵" | "🏭 섹터 평균 히트맵"
+
+- ✅ **종목 상세 페이지 히트맵 연동** (`5_📋_종목상세.py`)
+  - `session_state['heatmap_selected_code']` → 종목 선택 드롭다운 자동 매칭
+
+**파일** (3개):
+```
+app/pages/1_📊_히트맵.py     (A/C: 클릭 미니상세 + 필터 사이드바 + 탭 구조)
+app/utils/charts.py          (B/D: 호버 customdata + 섹터 평균 히트맵)
+app/pages/5_📋_종목상세.py   (히트맵→상세 네비게이션 연동)
+```
+
+**테스트**: 258개 (100% 통과, 변경 없음)
+
+---
 
 ### 2026-02-23 (전 페이지 기관가중치 설명 + MA 멀티셀렉트 + 패턴분석 포맷)
 

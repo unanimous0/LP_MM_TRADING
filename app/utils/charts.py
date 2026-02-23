@@ -74,8 +74,15 @@ def create_zscore_heatmap(
     sort_by: str = 'recent',
     top_n: int = 50,
     stock_names: pd.DataFrame = None,
+    direction: str = 'buy',
+    report_df: pd.DataFrame = None,
 ) -> go.Figure:
-    """멀티 기간 Z-Score 인터랙티브 히트맵"""
+    """멀티 기간 Z-Score 인터랙티브 히트맵 + 정렬 기준 바차트
+
+    Args:
+        direction: 'buy' (매수 상위) | 'sell' (매도 상위) | 'both' (양쪽 각 top_n//2)
+        report_df: 패턴/점수/시그널 정보 (있으면 호버에 표시)
+    """
     if zscore_matrix.empty:
         fig = go.Figure()
         fig.update_layout(title='Z-Score 히트맵 (데이터 없음)')
@@ -97,7 +104,61 @@ def create_zscore_heatmap(
         sort_key = df[period_cols].mean(axis=1)
 
     df['_sort'] = sort_key
-    df = df.sort_values('_sort', ascending=False).head(top_n).drop(columns=['_sort'])
+
+    # 1W 기준 방향 필터를 정렬보다 먼저 적용 (모멘텀 정렬 시 반대 방향 종목 혼입 방지)
+    primary = '1W' if '1W' in df.columns else period_cols[0]
+
+    if direction == 'buy':
+        filtered = df[df[primary] > 0]
+        if len(filtered) < min(5, top_n):
+            filtered = df
+        df = filtered.sort_values('_sort', ascending=False).head(top_n)
+    elif direction == 'sell':
+        filtered = df[df[primary] < 0]
+        if len(filtered) < min(5, top_n):
+            filtered = df
+        df = filtered.sort_values('_sort', ascending=True).head(top_n)
+    else:  # both: 매수 절반(위) + 매도 절반(아래)
+        half = max(1, top_n // 2)
+        buy_df  = df[df[primary] > 0].sort_values('_sort', ascending=False).head(half)
+        sell_df = df[df[primary] < 0].sort_values('_sort', ascending=True).head(half)
+        df = pd.concat([buy_df, sell_df]).drop_duplicates(subset='stock_code')
+
+    # 정렬 기준 값 추출 (바차트용) — drop 전에 저장
+    sort_values = df['_sort'].values
+    df = df.drop(columns=['_sort'])
+
+    # B: 패턴/점수/시그널 customdata (report_df 있을 때 hover에 표시)
+    has_report = (
+        report_df is not None and not report_df.empty
+        and 'stock_code' in report_df.columns
+        and 'pattern' in report_df.columns
+    )
+    heatmap_customdata = None
+    if has_report:
+        rmap = report_df.drop_duplicates(subset='stock_code').set_index('stock_code')
+        n_s, n_p = len(df), len(period_cols)
+        cd = np.empty((n_s, n_p, 3), dtype=object)
+        for i, code in enumerate(df['stock_code'].tolist()):
+            if code in rmap.index:
+                pat = str(rmap.at[code, 'pattern'])
+                sc  = float(rmap.at[code, 'score']) if 'score' in rmap.columns else 0.0
+                sig = int(rmap.at[code, 'signal_count']) if 'signal_count' in rmap.columns else 0
+            else:
+                pat, sc, sig = '기타', 0.0, 0
+            for j in range(n_p):
+                cd[i, j, 0] = pat
+                cd[i, j, 1] = f'{sc:.0f}'
+                cd[i, j, 2] = sig
+        heatmap_customdata = cd
+    hover_tmpl = (
+        '%{y}<br>기간: %{x}<br>Z-Score: %{z:.2f}σ<br>'
+        '────────<br>패턴: %{customdata[0]}<br>'
+        '점수: %{customdata[1]} · 시그널: %{customdata[2]}개'
+        '<extra></extra>'
+    ) if has_report else (
+        '%{y}<br>기간: %{x}<br>Z-Score: %{z:.2f}<extra></extra>'
+    )
 
     if stock_names is not None and 'stock_code' in stock_names.columns:
         name_map = dict(zip(stock_names['stock_code'], stock_names['stock_name']))
@@ -108,16 +169,30 @@ def create_zscore_heatmap(
     z_values = df[period_cols].values
     text_values = [[f'{v:.2f}' for v in row] for row in z_values]
 
-    # 다크 배경용 커스텀 컬러스케일
     colorscale = [
-        [0.0,  '#ef4444'],   # 강한 매도 - red-500
-        [0.35, '#fca5a5'],   # 약한 매도 - red-300
-        [0.5,  '#334155'],   # 중립 - slate-700
-        [0.65, '#86efac'],   # 약한 매수 - green-300
-        [1.0,  '#22c55e'],   # 강한 매수 - green-500
+        [0.0,  '#ef4444'],
+        [0.35, '#fca5a5'],
+        [0.5,  '#334155'],
+        [0.65, '#86efac'],
+        [1.0,  '#22c55e'],
     ]
 
-    fig = go.Figure(data=go.Heatmap(
+    sort_label = {
+        'recent':   '1W Z',
+        'momentum': '모멘텀(1W-2Y)',
+        'weighted': '가중평균',
+        'average':  '단순평균',
+    }.get(sort_by, sort_by)
+
+    # 히트맵(좌 80%) + 정렬기준 바차트(우 20%) 서브플롯
+    fig = make_subplots(
+        rows=1, cols=2,
+        column_widths=[0.80, 0.20],
+        shared_yaxes=True,
+        horizontal_spacing=0.01,
+    )
+
+    fig.add_trace(go.Heatmap(
         z=z_values,
         x=period_cols,
         y=y_labels,
@@ -128,7 +203,129 @@ def create_zscore_heatmap(
         text=text_values,
         texttemplate='%{text}',
         textfont=dict(color='#0f172a', size=10),
-        hovertemplate='%{y}<br>기간: %{x}<br>Z-Score: %{z:.2f}<extra></extra>',
+        customdata=heatmap_customdata,
+        hovertemplate=hover_tmpl,
+        colorbar=dict(
+            title=dict(text='Z-Score', font=dict(color=_TEXT)),
+            tickfont=dict(color=_MUTED),
+            bgcolor=_BG_PAPER,
+            bordercolor=_GRID,
+            borderwidth=1,
+            x=1.02,
+        ),
+    ), row=1, col=1)
+
+    bar_colors = ['#4ade80' if v >= 0 else '#f87171' for v in sort_values]
+    fig.add_trace(go.Bar(
+        x=sort_values,
+        y=y_labels,
+        orientation='h',
+        marker_color=bar_colors,
+        marker_line_width=0,
+        opacity=0.85,
+        text=[f'{v:.2f}' for v in sort_values],
+        textposition='auto',
+        textfont=dict(color='#0f172a', size=9),
+        cliponaxis=False,
+        hovertemplate='%{y}<br>' + sort_label + ': %{x:.2f}<extra></extra>',
+        showlegend=False,
+    ), row=1, col=2)
+
+    fig.update_layout(
+        title=f'수급 Z-Score 히트맵 (정렬: {sort_label}, 상위 {len(df)}개)',
+        yaxis=dict(autorange='reversed', title=''),
+        xaxis=dict(side='top', title=''),
+        xaxis2=dict(
+            title=sort_label,
+            side='top',
+            tickfont=dict(color=_MUTED, size=9),
+            title_font=dict(color=_MUTED, size=10),
+            zeroline=True,
+            zerolinecolor=_GRID,
+            zerolinewidth=1,
+        ),
+        height=max(400, len(df) * 22 + 100),
+    )
+    return _apply_dark(fig)
+
+
+def create_sector_zscore_heatmap(
+    zscore_matrix: pd.DataFrame,
+    stock_list: pd.DataFrame,
+    sort_by: str = 'recent',
+) -> go.Figure:
+    """섹터별 평균 Z-Score 히트맵
+
+    Args:
+        zscore_matrix: stock_code + 기간 컬럼 DataFrame
+        stock_list: stock_code / sector 컬럼 포함 종목 마스터
+        sort_by: 정렬 기준 (recent / momentum / weighted / average)
+    """
+    if zscore_matrix.empty or stock_list is None or stock_list.empty:
+        fig = go.Figure()
+        fig.update_layout(title='섹터 Z-Score (데이터 없음)', height=400)
+        return _apply_dark(fig)
+
+    period_cols = [c for c in zscore_matrix.columns if c != 'stock_code']
+
+    sl = stock_list[['stock_code', 'sector']].dropna(subset=['sector'])
+    merged = zscore_matrix.merge(sl, on='stock_code', how='inner')
+    if merged.empty:
+        fig = go.Figure()
+        fig.update_layout(title='섹터 Z-Score (섹터 정보 없음)', height=400)
+        return _apply_dark(fig)
+
+    sector_df = merged.groupby('sector')[period_cols].mean().reset_index()
+    stock_counts = merged.groupby('sector')['stock_code'].count().to_dict()
+
+    # 정렬 키
+    if sort_by == 'recent':
+        sort_key = sector_df['1W'] if '1W' in sector_df.columns else sector_df[period_cols[0]]
+    elif sort_by == 'momentum':
+        first, last = period_cols[0], period_cols[-1]
+        sort_key = sector_df[first] - sector_df[last]
+    elif sort_by == 'weighted':
+        weights = list(range(len(period_cols), 0, -1))
+        total_w = sum(weights)
+        sort_key = sum(sector_df[c] * w for c, w in zip(period_cols, weights)) / total_w
+    else:
+        sort_key = sector_df[period_cols].mean(axis=1)
+
+    sector_df['_sort'] = sort_key
+    sector_df = sector_df.sort_values('_sort', ascending=False)
+
+    sort_label = {
+        'recent':   '1W Z',
+        'momentum': '모멘텀(1W-2Y)',
+        'weighted': '가중평균',
+        'average':  '단순평균',
+    }.get(sort_by, sort_by)
+
+    y_labels = [
+        f"{row['sector']} ({stock_counts.get(row['sector'], 0)}개)"
+        for _, row in sector_df.iterrows()
+    ]
+    z_values = sector_df[period_cols].values
+    text_values = [[f'{v:.2f}' for v in row] for row in z_values]
+
+    colorscale = [
+        [0.0,  '#ef4444'],
+        [0.35, '#fca5a5'],
+        [0.5,  '#334155'],
+        [0.65, '#86efac'],
+        [1.0,  '#22c55e'],
+    ]
+
+    fig = go.Figure(data=go.Heatmap(
+        z=z_values,
+        x=period_cols,
+        y=y_labels,
+        colorscale=colorscale,
+        zmid=0, zmin=-3, zmax=3,
+        text=text_values,
+        texttemplate='%{text}',
+        textfont=dict(color='#0f172a', size=10),
+        hovertemplate='%{y}<br>기간: %{x}<br>평균 Z-Score: %{z:.2f}σ<extra></extra>',
         colorbar=dict(
             title=dict(text='Z-Score', font=dict(color=_TEXT)),
             tickfont=dict(color=_MUTED),
@@ -139,11 +336,10 @@ def create_zscore_heatmap(
     ))
 
     fig.update_layout(
-        title=f'수급 Z-Score 히트맵 (정렬: {sort_by}, 상위 {len(df)}개)',
-        xaxis_title='기간',
-        yaxis_title='종목',
-        yaxis=dict(autorange='reversed'),
-        height=max(400, len(df) * 22 + 100),
+        title=f'섹터별 평균 Z-Score 히트맵 (정렬: {sort_label})',
+        yaxis=dict(autorange='reversed', title=''),
+        xaxis=dict(side='top', title=''),
+        height=max(400, len(sector_df) * 32 + 120),
     )
     return _apply_dark(fig)
 

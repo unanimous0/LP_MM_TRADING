@@ -50,6 +50,14 @@ stock_options = [
 default_idx = next(
     (i for i, s in enumerate(stock_options) if '005930' in s), 0
 )
+
+# 히트맵 클릭으로 넘어온 경우 해당 종목을 우선 선택
+_from_heatmap = st.session_state.pop('heatmap_selected_code', None)
+if _from_heatmap:
+    default_idx = next(
+        (i for i, s in enumerate(stock_options) if _from_heatmap in s), default_idx
+    )
+
 selected = st.sidebar.selectbox(
     "종목 선택", stock_options, index=default_idx,
     help="종목명 또는 종목코드로 검색 가능",
