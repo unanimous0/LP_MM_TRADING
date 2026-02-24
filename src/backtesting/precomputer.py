@@ -171,6 +171,7 @@ class BacktestPrecomputer:
         df = sff_df[['trade_date', 'stock_code', 'combined_sff']].copy()
         df = df.sort_values(['stock_code', 'trade_date'])
 
+        std_cols = []
         for period_name, lookback_days in PERIODS.items():
             min_periods = max(1, lookback_days // 2)
 
@@ -189,10 +190,19 @@ class BacktestPrecomputer:
                 df['combined_sff'] / rolling_std
             )
 
+            # 방향 확신도 메타데이터: 각 기간별 rolling_std 저장
+            std_col = f'_std_{period_name}'
+            df[std_col] = rolling_std
+            std_cols.append(std_col)
+
         period_cols = list(PERIODS.keys())
         df[period_cols] = df[period_cols].replace([np.inf, -np.inf], np.nan)
 
-        result = df[['trade_date', 'stock_code'] + period_cols].copy()
+        # _today_sff + _std_*D 메타데이터도 함께 저장 (방향 확신도용)
+        meta_cols = ['_today_sff'] + std_cols
+        df['_today_sff'] = df['combined_sff']
+
+        result = df[['trade_date', 'stock_code'] + period_cols + meta_cols].copy()
         return result.set_index(['trade_date', 'stock_code'])
 
     def _compute_signals_all_dates(self, raw_df: pd.DataFrame) -> pd.DataFrame:
@@ -290,6 +300,7 @@ class BacktestPrecomputer:
             except KeyError:
                 continue
 
+            # _today_sff, _std_*D 메타컬럼이 포함됨 → classify_all()에서 방향 확신도 적용
             long_stocks = zscore_on_date[zscore_on_date['5D'] > 0].copy()
             if not long_stocks.empty:
                 patterns_long[date] = classifier.classify_all(long_stocks, direction='long')

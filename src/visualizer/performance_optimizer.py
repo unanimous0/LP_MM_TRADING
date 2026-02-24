@@ -213,7 +213,9 @@ class OptimizedMultiPeriodCalculator:
                     print(f"  - Completed {period_name}")
                 except Exception as e:
                     print(f"  - Failed {period_name}: {e}")
-                    results[period_name] = pd.Series(dtype=float)
+                    results[period_name] = pd.DataFrame(
+                        columns=['zscore', 'combined_sff', 'rolling_std']
+                    )
 
         return results
 

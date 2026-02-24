@@ -138,6 +138,7 @@ git push
 - **히트맵 인터랙티브 고도화**: A(클릭→미니상세) + B(호버 패턴/점수) + C(필터 사이드바) + D(섹터 평균 탭)
 - **Z-Score 기간 라벨 통일**: 1W/1M/3M/6M/1Y/2Y → 5D/10D/20D/50D/100D/200D/500D (영업일 기준)
 - **방향 확신도(Direction Confidence)**: `tanh(today_sff/rolling_std)` — Z-Score가 방향과 괴리되는 문제 해결 (매도 중 종목이 모멘텀 상위 랭크 방지)
+- **[버그수정] Precomputer 방향 확신도 누락**: `_today_sff`/`_std_*D` 메타데이터 미전파 → 백테스트에서 방향 확신도 미적용 문제 수정
 - 258개 테스트 (100% 통과)
 
 **핵심 인사이트**:
@@ -792,7 +793,38 @@ tests/test_performance_optimizer.py      (메타데이터 컬럼 테스트 업�
 
 **테스트**: 258개 (100% 통과)
 
-**향후**: 백테스트 precomputer에도 방향 확신도 적용 검토 (현재 미적용)
+---
+
+### 2026-02-24 (코드 리뷰 — Precomputer 방향 확신도 누락 수정)
+
+**목표**: 방향 확신도 구현 후 전체 코드 리뷰 → 4가지 이슈 발견 및 수정
+
+**발견 이슈 및 수정**:
+
+- ✅ **[버그] Precomputer 방향 확신도 미적용** (`precomputer.py`)
+  - **원인**: `_compute_multi_period_zscores_all_dates()`에 `_today_sff`/`_std_*D` 메타데이터 미포함
+  - `classify_all()` → `_apply_direction_confidence()`에서 `'_today_sff' not in df.columns` → 조기 반환 → 방향 확신도 미적용
+  - **수정**: `_today_sff` (= `combined_sff`) + 각 기간별 `_std_{period}` (= `rolling_std`) 컬럼을 결과 DataFrame에 추가
+  - `_compute_patterns_all_dates()`에 메타컬럼 전파 주석 추가
+
+- ✅ **[확인] charts.py tanh 중복 계산** — 수정 불필요
+  - `charts.py`(히트맵 정렬)와 `pattern_classifier.py`(패턴 분류)에서 동일한 tanh 계산
+  - 서로 다른 컨텍스트(정렬 vs 분류)에서 독립 사용 → 공유 함수화 시 커플링 증가로 오히려 불리
+
+- ✅ **[주석] heatmap_generator.py "8개 기간" → "7개 기간"** 수정
+
+- ✅ **[일관성] performance_optimizer.py 병렬 실패 반환 타입 통일**
+  - 기존: 성공 시 `pd.DataFrame`, 실패 시 `pd.Series(dtype=float)` → 타입 불일치
+  - 수정: 실패 시에도 `pd.DataFrame(columns=['zscore', 'combined_sff', 'rolling_std'])` 반환
+
+**파일** (3개):
+```
+src/backtesting/precomputer.py          (메타데이터 컬럼 추가 — 방향 확신도 전파)
+src/visualizer/performance_optimizer.py (병렬 실패 반환 타입 통일)
+scripts/analysis/heatmap_generator.py   (주석 수정 8개→7개)
+```
+
+**테스트**: 258개 (100% 통과)
 
 ---
 
