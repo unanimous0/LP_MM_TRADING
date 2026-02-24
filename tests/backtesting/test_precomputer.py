@@ -263,8 +263,8 @@ class TestInstitutionWeight:
 
         # 같은 날짜의 Z-Score 비교 (다른 weight → 다른 값)
         date = result1.trading_dates[-1]
-        z1 = result1.zscore_all_dates.loc[date, '1W']
-        z2 = result2.zscore_all_dates.loc[date, '1W']
+        z1 = result1.zscore_all_dates.loc[date, '5D']
+        z2 = result2.zscore_all_dates.loc[date, '5D']
 
         # 완전 동일하지 않아야 함
         assert not z1.equals(z2), "다른 가중치인데 동일한 Z-Score"

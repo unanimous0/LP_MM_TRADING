@@ -89,44 +89,68 @@ def create_zscore_heatmap(
         return _apply_dark(fig)
 
     df = zscore_matrix.copy()
-    period_cols = [c for c in df.columns if c not in ('stock_code',)]
+    period_cols = [c for c in df.columns if c not in ('stock_code',) and not c.startswith('_')]
 
-    if sort_by == 'recent':
-        sort_key = df['1W'] if '1W' in df.columns else df[period_cols[0]]
-    elif sort_by == 'momentum':
-        first, last = period_cols[0], period_cols[-1]
-        sort_key = df[first] - df[last]
-    elif sort_by == 'weighted':
-        weights = list(range(len(period_cols), 0, -1))
-        total_w = sum(weights)
-        sort_key = sum(df[c] * w for c, w in zip(period_cols, weights)) / total_w
-    else:
-        sort_key = df[period_cols].mean(axis=1)
+    # 방향 확신도 기반 정렬 키 계산
+    # Z-Score는 편차 측정이므로 매도 중 종목도 양수 Z가 가능 (매도 완화)
+    # confidence = tanh(today_sff / rolling_std)로 실제 수급 방향을 반영하여 정렬
+    has_sff_meta = '_today_sff' in df.columns
+    adj = {}
+    if has_sff_meta:
+        for col in period_cols:
+            std_col = f'_std_{col}'
+            if std_col in df.columns:
+                std_safe = df[std_col].replace(0, np.nan)
+                conf = np.tanh(df['_today_sff'] / std_safe).fillna(0)
+                adj[col] = conf
+            else:
+                adj[col] = pd.Series(1.0, index=df.index)
 
-    df['_sort'] = sort_key
+    def _adj_z(col, dir_mode):
+        """방향별 confidence 적용된 Z-Score 반환"""
+        if not has_sff_meta or col not in adj:
+            return df[col]
+        if dir_mode == 'buy':
+            return df[col] * np.maximum(adj[col], 0)
+        elif dir_mode == 'sell':
+            return df[col] * np.maximum(-adj[col], 0)
+        return df[col] * np.abs(adj[col])  # both: 절대값
 
-    # 1W 기준 방향 필터를 정렬보다 먼저 적용 (모멘텀 정렬 시 반대 방향 종목 혼입 방지)
-    primary = '1W' if '1W' in df.columns else period_cols[0]
+    def _compute_sort_key(dir_mode):
+        if sort_by == 'recent':
+            return _adj_z('5D', dir_mode) if '5D' in df.columns else _adj_z(period_cols[0], dir_mode)
+        elif sort_by == 'momentum':
+            first, last = period_cols[0], period_cols[-1]
+            return _adj_z(first, dir_mode) - _adj_z(last, dir_mode)
+        elif sort_by == 'weighted':
+            weights = list(range(len(period_cols), 0, -1))
+            total_w = sum(weights)
+            return sum(_adj_z(c, dir_mode) * w for c, w in zip(period_cols, weights)) / total_w
+        else:
+            return pd.concat([_adj_z(c, dir_mode) for c in period_cols], axis=1).mean(axis=1)
 
     if direction == 'buy':
-        filtered = df[df[primary] > 0]
-        if len(filtered) < min(5, top_n):
-            filtered = df
-        df = filtered.sort_values('_sort', ascending=False).head(top_n)
+        df['_sort'] = _compute_sort_key('buy')
+        df = df.sort_values('_sort', ascending=False).head(top_n)
     elif direction == 'sell':
-        filtered = df[df[primary] < 0]
-        if len(filtered) < min(5, top_n):
-            filtered = df
-        df = filtered.sort_values('_sort', ascending=True).head(top_n)
+        df['_sort'] = _compute_sort_key('sell')
+        df = df.sort_values('_sort', ascending=True).head(top_n)
     else:  # both: 매수 절반(위) + 매도 절반(아래)
         half = max(1, top_n // 2)
-        buy_df  = df[df[primary] > 0].sort_values('_sort', ascending=False).head(half)
-        sell_df = df[df[primary] < 0].sort_values('_sort', ascending=True).head(half)
+        df['_sort_buy'] = _compute_sort_key('buy')
+        df['_sort_sell'] = _compute_sort_key('sell')
+        buy_df  = df.sort_values('_sort_buy', ascending=False).head(half)
+        sell_df = df.sort_values('_sort_sell', ascending=True).head(half)
+        buy_df['_sort'] = buy_df['_sort_buy']
+        sell_df['_sort'] = sell_df['_sort_sell']
         df = pd.concat([buy_df, sell_df]).drop_duplicates(subset='stock_code')
+        df = df.drop(columns=['_sort_buy', '_sort_sell'], errors='ignore')
 
     # 정렬 기준 값 추출 (바차트용) — drop 전에 저장
     sort_values = df['_sort'].values
-    df = df.drop(columns=['_sort'])
+    # 메타데이터/내부 컬럼 제거 (히트맵 셀에 표시하지 않음)
+    drop_cols = [c for c in df.columns if c.startswith('_')]
+    df = df.drop(columns=drop_cols)
 
     # B: 패턴/점수/시그널 customdata (report_df 있을 때 hover에 표시)
     has_report = (
@@ -178,8 +202,8 @@ def create_zscore_heatmap(
     ]
 
     sort_label = {
-        'recent':   '1W Z',
-        'momentum': '모멘텀(1W-2Y)',
+        'recent':   '5D Z',
+        'momentum': '모멘텀(5D-500D)',
         'weighted': '가중평균',
         'average':  '단순평균',
     }.get(sort_by, sort_by)
@@ -266,7 +290,7 @@ def create_sector_zscore_heatmap(
         fig.update_layout(title='섹터 Z-Score (데이터 없음)', height=400)
         return _apply_dark(fig)
 
-    period_cols = [c for c in zscore_matrix.columns if c != 'stock_code']
+    period_cols = [c for c in zscore_matrix.columns if c != 'stock_code' and not c.startswith('_')]
 
     sl = stock_list[['stock_code', 'sector']].dropna(subset=['sector'])
     merged = zscore_matrix.merge(sl, on='stock_code', how='inner')
@@ -280,7 +304,7 @@ def create_sector_zscore_heatmap(
 
     # 정렬 키
     if sort_by == 'recent':
-        sort_key = sector_df['1W'] if '1W' in sector_df.columns else sector_df[period_cols[0]]
+        sort_key = sector_df['5D'] if '5D' in sector_df.columns else sector_df[period_cols[0]]
     elif sort_by == 'momentum':
         first, last = period_cols[0], period_cols[-1]
         sort_key = sector_df[first] - sector_df[last]
@@ -295,8 +319,8 @@ def create_sector_zscore_heatmap(
     sector_df = sector_df.sort_values('_sort', ascending=False)
 
     sort_label = {
-        'recent':   '1W Z',
-        'momentum': '모멘텀(1W-2Y)',
+        'recent':   '5D Z',
+        'momentum': '모멘텀(5D-500D)',
         'weighted': '가중평균',
         'average':  '단순평균',
     }.get(sort_by, sort_by)
@@ -847,8 +871,8 @@ def create_signal_ma_chart(
 
 
 def create_multiperiod_zscore_bar(zscore_row: "pd.Series") -> go.Figure:
-    """6기간(1W/1M/3M/6M/1Y/2Y) Z-Score 바차트 + ±2σ 기준선"""
-    periods = ['1W', '1M', '3M', '6M', '1Y', '2Y']
+    """7기간(5D/10D/20D/50D/100D/200D/500D) Z-Score 바차트 + ±2σ 기준선"""
+    periods = ['5D', '10D', '20D', '50D', '100D', '200D', '500D']
     available = [p for p in periods if p in zscore_row.index and pd.notna(zscore_row[p])]
 
     if not available:

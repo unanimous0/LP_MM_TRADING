@@ -47,21 +47,21 @@ class OptimizedMultiPeriodCalculator:
         최적화 2: groupby.transform 벡터화 (종목 루프 제거)
 
         Args:
-            periods_dict: {기간명: 영업일수} 예: {'1D': 1, '1W': 5, ...}
+            periods_dict: {기간명: 영업일수} 예: {'5D': 5, '10D': 10, ...}
             stock_codes: 특정 종목만 (None이면 전체)
             end_date: 종료일 (YYYY-MM-DD, None이면 최신까지)
 
         Returns:
             pd.DataFrame:
                 - index: stock_code (종목 코드)
-                - columns: ['1D', '1W', '1M', ...] (각 기간의 Z-Score)
+                - columns: ['5D', '10D', '20D', ...] (각 기간의 Z-Score)
 
         Example:
-            >>> periods = {'1D': 1, '1W': 5, '1M': 21}
+            >>> periods = {'5D': 5, '10D': 10, '20D': 20}
             >>> optimizer = OptimizedMultiPeriodCalculator(normalizer)
             >>> df = optimizer.calculate_multi_period_zscores(periods, end_date='2025-01-03')
             >>> print(df.head())
-                        1D      1W      1M
+                        5D      10D     20D
             stock_code
             005930      2.3     1.8     1.2
             000660      -0.5    -0.3    0.1
@@ -87,15 +87,36 @@ class OptimizedMultiPeriodCalculator:
             results = {}
             for period_name, lookback_days in periods_dict.items():
                 print(f"  - Processing {period_name} ({lookback_days} days)...", end=' ')
-                results[period_name] = self._calculate_zscore_vectorized(lookback_days)
+                results[period_name] = self._calculate_zscore_vectorized(
+                    lookback_days, return_metadata=True,
+                )
                 print("Done")
 
         # Step 3: DataFrame 생성 (종목 × 기간)
-        df_result = pd.DataFrame(results)
+        # results 값이 Series(하위호환) 또는 DataFrame(메타데이터 포함)일 수 있음
+        zscore_cols = {}
+        metadata = {}
+        for period_name, result in results.items():
+            if isinstance(result, pd.DataFrame) and 'zscore' in result.columns:
+                zscore_cols[period_name] = result['zscore']
+                metadata[period_name] = result[['combined_sff', 'rolling_std']]
+            else:
+                zscore_cols[period_name] = result
+
+        df_result = pd.DataFrame(zscore_cols)
+
+        # 방향 확신도 계산용 메타데이터 추가 (_today_sff, _std_*D)
+        # today_sff는 모든 기간에서 동일 (당일 combined_sff), 아무 기간이나 사용
+        if metadata:
+            first_period = list(metadata.keys())[0]
+            df_result['_today_sff'] = metadata[first_period]['combined_sff']
+            for p_name, meta_df in metadata.items():
+                df_result[f'_std_{p_name}'] = meta_df['rolling_std']
 
         return df_result
 
-    def _calculate_zscore_vectorized(self, lookback_days: int) -> pd.Series:
+    def _calculate_zscore_vectorized(self, lookback_days: int,
+                                     return_metadata: bool = False):
         """
         벡터화 Z-Score 계산 (groupby.transform 사용)
 
@@ -112,12 +133,16 @@ class OptimizedMultiPeriodCalculator:
 
         Args:
             lookback_days: 롤링 윈도우 크기 (영업일 기준)
+            return_metadata: True면 today_sff, rolling_std도 함께 반환
 
         Returns:
-            pd.Series: index=stock_code, value=z_score (최신 날짜 기준)
+            return_metadata=False: pd.Series (z_score만, 하위호환)
+            return_metadata=True: pd.DataFrame [zscore, combined_sff, rolling_std]
         """
         if self._sff_cache is None or self._sff_cache.empty:
             print("[WARN] Sff cache is empty")
+            if return_metadata:
+                return pd.DataFrame(columns=['zscore', 'combined_sff', 'rolling_std'])
             return pd.Series(dtype=float)
 
         # 메모리 최적화: 필요한 컬럼만 선택하여 복사 (메모리 사용량 감소)
@@ -153,7 +178,8 @@ class OptimizedMultiPeriodCalculator:
         latest_date = df['trade_date'].max()
         df_latest = df[df['trade_date'] == latest_date]
 
-        # Series 반환 (index=stock_code, value=zscore)
+        if return_metadata:
+            return df_latest.set_index('stock_code')[['zscore', 'combined_sff', 'rolling_std']]
         return df_latest.set_index('stock_code')['zscore']
 
     def _calculate_parallel(self, periods_dict: Dict[str, int]) -> Dict[str, pd.Series]:
@@ -175,7 +201,7 @@ class OptimizedMultiPeriodCalculator:
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             # 모든 기간에 대해 작업 제출
             future_to_period = {
-                executor.submit(self._calculate_zscore_vectorized, days): period_name
+                executor.submit(self._calculate_zscore_vectorized, days, True): period_name
                 for period_name, days in periods_dict.items()
             }
 

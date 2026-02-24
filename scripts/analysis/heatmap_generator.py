@@ -1,17 +1,17 @@
 """
 Stage 2 히트맵 생성기 (CLI)
 
-8개 기간 (1D~2Y) 시공간 히트맵 생성
-- 350종목 × 8기간 매트릭스
+7개 기간 (5D~500D) 시공간 히트맵 생성
+- 350종목 × 7기간 매트릭스
 - Y축 강도순 정렬 (상단 = 강한 매수)
 - 파라미터 조정 가능 (기간, 색상, 필터)
 
 Usage:
-    # 기본 실행 (전체 8개 기간)
+    # 기본 실행 (전체 7개 기간)
     python scripts/analysis/heatmap_generator.py
 
     # 단기 3개 기간만
-    python scripts/analysis/heatmap_generator.py --periods 1D 1W 1M
+    python scripts/analysis/heatmap_generator.py --periods 5D 10D 20D
 
     # 섹터 필터링
     python scripts/analysis/heatmap_generator.py --sector 반도체
@@ -43,11 +43,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 예시:
-  # 기본 실행 (전체 8개 기간)
+  # 기본 실행 (전체 7개 기간)
   python scripts/analysis/heatmap_generator.py
 
   # 단기 3개 기간만
-  python scripts/analysis/heatmap_generator.py --periods 1D 1W 1M
+  python scripts/analysis/heatmap_generator.py --periods 5D 10D 20D
 
   # 섹터 필터링
   python scripts/analysis/heatmap_generator.py --sector 반도체
@@ -68,7 +68,7 @@ def main():
     # ============================================================================
     parser.add_argument(
         '--periods', nargs='+',
-        choices=['1D', '1W', '1M', '3M', '6M', '1Y', '2Y'],
+        choices=['5D', '10D', '20D', '50D', '100D', '200D', '500D'],
         help='분석 기간 (기본: 전체 8개)'
     )
 
@@ -129,8 +129,8 @@ def main():
         choices=['recent', 'momentum', 'weighted', 'average'],
         default='recent',
         help='''Y축 정렬 기준:
-  recent: 최근 기간(1W+1M) 우선 (기본, 추천!)
-  momentum: 수급 모멘텀(1W-2Y) - 전환점 포착
+  recent: 최근 기간(5D+20D) 우선 (기본, 추천!)
+  momentum: 수급 모멘텀(5D-500D) - 전환점 포착
   weighted: 가중 평균 (최근 높은 가중치)
   average: 단순 평균 (deprecated)'''
     )

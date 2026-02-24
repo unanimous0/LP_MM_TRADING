@@ -177,7 +177,7 @@ if not filtered_df.empty:
             stock_zscore = classified_df[classified_df['stock_code'] == stock_code]
             if not stock_zscore.empty:
                 zscore_row = stock_zscore.iloc[0]
-                period_cols = ['1W', '1M', '3M', '6M', '1Y', '2Y']
+                period_cols = ['5D', '10D', '20D', '50D', '100D', '200D', '500D']
                 existing_periods = [c for c in period_cols if c in zscore_row.index]
 
                 if existing_periods:

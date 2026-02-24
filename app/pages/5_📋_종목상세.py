@@ -250,10 +250,10 @@ else:
 # 4탭
 # ---------------------------------------------------------------------------
 tab1, tab2, tab3, tab4 = st.tabs([
-    "📈 Z-Score 추이",
-    "💰 수급 금액",
-    "🔔 시그널 & MA",
-    "📊 패턴 현황",
+    "Z-Score 추이",
+    "수급 금액",
+    "시그널 & MA",
+    "패턴 현황",
 ])
 
 # ── Tab 1: Z-Score 추이
@@ -524,7 +524,7 @@ with tab4:
                     st.success(str(item))
 
         # 기간별 Z-Score 수치 테이블
-        period_cols = [c for c in ['1W', '1M', '3M', '6M', '1Y', '2Y'] if c in stock_classified.index]
+        period_cols = [c for c in ['5D', '10D', '20D', '50D', '100D', '200D', '500D'] if c in stock_classified.index]
         if period_cols:
             st.markdown("**기간별 Z-Score 수치**")
             zscore_table = pd.DataFrame(

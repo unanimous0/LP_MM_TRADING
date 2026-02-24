@@ -73,7 +73,7 @@ direction = st.sidebar.radio(
 )
 
 sort_options = {
-    'recent':   '최근 수급 (1W 기준)',
+    'recent':   '최근 수급 (5D 기준)',
     'momentum': '모멘텀 (단기-장기 차이)',
     'weighted': '가중 평균 (최근 높은 비중)',
     'average':  '단순 평균',
@@ -153,20 +153,20 @@ if _any_filter and not report_df.empty:
 # ---------------------------------------------------------------------------
 # 통계 (히트맵 위)
 # ---------------------------------------------------------------------------
-period_cols = [c for c in zscore_matrix.columns if c != 'stock_code']
-if '1W' in period_cols:
+period_cols = [c for c in zscore_matrix.columns if c != 'stock_code' and not c.startswith('_')]
+if '5D' in period_cols:
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("표시 종목 수", f"{min(top_n, len(zscore_matrix))}개")
-    col2.metric("평균 1W Z-Score", f"{zscore_matrix['1W'].mean():.2f}")
-    strong_buy = (zscore_matrix['1W'] > 2).sum()
-    strong_sell = (zscore_matrix['1W'] < -2).sum()
+    col2.metric("평균 5D Z-Score", f"{zscore_matrix['5D'].mean():.2f}")
+    strong_buy = (zscore_matrix['5D'] > 2).sum()
+    strong_sell = (zscore_matrix['5D'] < -2).sum()
     col3.metric("강한 매수 (Z>2)", f"{strong_buy}개")
     col4.metric("강한 매도 (Z<-2)", f"{strong_sell}개")
 
 # ---------------------------------------------------------------------------
 # D: 탭 구조 (종목별 히트맵 | 섹터 평균 히트맵)
 # ---------------------------------------------------------------------------
-tab1, tab2 = st.tabs(["📈 종목별 히트맵", "🏭 섹터 평균 히트맵"])
+tab1, tab2 = st.tabs(["종목별 히트맵", "섹터 평균 히트맵"])
 
 with tab1:
     # B: report_df 전달 → 호버에 패턴/점수/시그널 표시
@@ -225,10 +225,10 @@ with tab1:
         _zrow_mask = zscore_matrix['stock_code'] == selected_code
         if _zrow_mask.any():
             _zrow = zscore_matrix[_zrow_mask].iloc[0]
-            _1w = float(_zrow['1W']) if '1W' in _zrow.index else float('nan')
-            _m1.metric("1W Z-Score", f"{_1w:.2f}σ" if pd.notna(_1w) else "-")
+            _1w = float(_zrow['5D']) if '5D' in _zrow.index else float('nan')
+            _m1.metric("5D Z-Score", f"{_1w:.2f}σ" if pd.notna(_1w) else "-")
         else:
-            _m1.metric("1W Z-Score", "-")
+            _m1.metric("5D Z-Score", "-")
 
         _rrow = None
         if not report_df.empty and selected_code in report_df['stock_code'].values:

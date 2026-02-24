@@ -68,8 +68,9 @@ git push
 - 섹터 정보 통합 (97.9% 커버리지)
 
 **Stage 2: 시공간 히트맵** ✅
-- 6개 기간(1W~2Y) 히트맵 시각화
+- 7개 기간(5D~500D) 히트맵 시각화 (영업일 기준)
 - 4가지 정렬 모드 (Recent/Momentum/Weighted/Average)
+- **방향 확신도**: `tanh(today_sff/rolling_std)` — 정렬/분류 시 매도 종목 양수 Z-Score 오분류 방지
 - 성능 최적화 (목표 23초 → 실제 1.5초, 93% 초과 달성)
 - 61개 테스트 (100% 통과)
 
@@ -135,6 +136,8 @@ git push
 - **Z-Score 기준 기간 조정**: 사이드바 슬라이더(20~240일, 기본 60) — 이상 수급 전용, 다른 페이지 무관
 - **산출 방식 설명 동적화**: 기관 가중치·기준 기간 현재값 반영 + "사이드바에서 조정 가능" 안내 추가
 - **히트맵 인터랙티브 고도화**: A(클릭→미니상세) + B(호버 패턴/점수) + C(필터 사이드바) + D(섹터 평균 탭)
+- **Z-Score 기간 라벨 통일**: 1W/1M/3M/6M/1Y/2Y → 5D/10D/20D/50D/100D/200D/500D (영업일 기준)
+- **방향 확신도(Direction Confidence)**: `tanh(today_sff/rolling_std)` — Z-Score가 방향과 괴리되는 문제 해결 (매도 중 종목이 모멘텀 상위 랭크 방지)
 - 258개 테스트 (100% 통과)
 
 **핵심 인사이트**:
@@ -704,11 +707,16 @@ LP_MM_TRADING/
 - Z-Score: 변동성 보정 수급 (조건부: 부호 전환 시 `today/std`만 사용)
 
 ### ② Stage 2: 시공간 매트릭스
-- 6개 기간(1W~2Y) 히트맵
+- 7개 기간(5D~500D) 히트맵 (영업일 기준)
 - 4가지 정렬 모드 (투자 스타일별)
 - **조건부 Z-Score**: 부호 전환 시 과잉 반응 방지
   - 같은 방향(today·mean > 0): `Z = (today - mean) / std` (기존, 폭발 감지)
   - 방향 전환(today·mean ≤ 0): `Z = today / std` (크기만 평가, 증폭 방지)
+- **방향 확신도(Direction Confidence)**:
+  - `confidence = tanh(today_sff / rolling_std)` — 자기 정규화 (하드코딩 상수 없음)
+  - 정렬/분류 시: `adjusted_z = z × max(confidence, 0)` (long) or `z × max(-confidence, 0)` (short)
+  - 히트맵 셀 값: 원본 Z-Score 유지 (편차 정보 보존), 정렬/패턴분류만 보정값 사용
+  - 효과: 매도세 완화 종목(양수 Z, 음수 sff)이 매수 순위 상위에 잘못 노출되는 문제 해결
 
 ### ③ Stage 3: 패턴 분류 & 시그널 통합
 - **패턴 분류**: 3개 바구니 (모멘텀형/지속형/전환형)
@@ -723,6 +731,70 @@ LP_MM_TRADING/
 ---
 
 ## [Progress History]
+
+### 2026-02-24 (Z-Score 기간 라벨 통일 + 방향 확신도 구현)
+
+**목표**: Z-Score 기간명을 영업일 기반으로 통일 + 매도 종목 양수 Z-Score 오분류 방지
+
+**배경 — 현대모비스 문제**:
+- 현대모비스(012330): 장기 매도세 지속 중, 최근 매도세 소폭 완화
+- Z-Score는 "편차"를 측정 → 매도 완화 = 양의 편차 → 양수 Z-Score 부여
+- 결과: 모멘텀 정렬 시 매수 상위 #1에 매도 종목 노출 (전체 top 10이 모두 매도 종목)
+- 조건부 Z-Score의 `(today * mean) > 0` 이진 판단도 zero 근처 불연속성 문제
+
+**구현 내용**:
+
+- ✅ **Z-Score 기간 라벨 통일** (전 모듈)
+  - 기존: `1W, 1M, 3M, 6M, 1Y, 2Y` (일반적 기간명)
+  - 변경: `5D, 10D, 20D, 50D, 100D, 200D, 500D` (영업일 기준 명확화)
+  - 7개 기간으로 확장 (1D 제거, 500D 추가)
+
+- ✅ **방향 확신도(Direction Confidence)** — 자기 정규화 솔루션
+  - **공식**: `confidence = tanh(today_sff / rolling_std)`
+  - **특성**: tanh(0)=0(노이즈 감쇠), tanh(1)≈0.76(중간), tanh(2)≈0.96(강한 신호 보존)
+  - **하드코딩 상수 없음** — 각 종목 자신의 변동성(rolling_std)으로 정규화
+  - **smooth transition** — 이진 판단 대신 연속적 가중치 (zero 근처 불연속성 해결)
+
+- ✅ **performance_optimizer.py**: sff 메타데이터 반환
+  - `_calculate_zscore_vectorized(return_metadata=True)`: zscore + combined_sff + rolling_std 반환
+  - `calculate_multi_period_zscores()`: `_today_sff`, `_std_5D`, `_std_10D` 등 메타컬럼 추가
+  - 기존 API 하위 호환 유지 (return_metadata=False 시 Series 반환)
+
+- ✅ **pattern_classifier.py**: 패턴 분류에 방향 확신도 적용
+  - `_apply_direction_confidence(df, direction)` static 메서드 추가
+  - long: `adjusted_z = z × max(confidence, 0)` — 매수 방향 확신도만 반영
+  - short: `adjusted_z = z × max(-confidence, 0)` — 매도 방향 확신도만 반영
+  - 정렬키/특성치/패턴/점수는 보정값으로 계산, 출력 Z-Score는 원본 복원
+
+- ✅ **charts.py**: 히트맵 정렬에 방향 확신도 적용
+  - `_adj_z(col, dir_mode)`: 방향별 보정 Z-Score 계산
+  - `_compute_sort_key(dir_mode)`: 4가지 정렬 모드에 보정값 적용
+  - 'both' 모드: buy/sell 독립 정렬 후 병합
+  - 메타데이터 컬럼(`_` prefix) 히트맵 렌더링 전 제거
+
+- ✅ **히트맵.py**: period_cols 필터에 `_` prefix 제외
+
+**검증 결과** (338개 종목 분석):
+- 현대모비스: momentum +2.03 → 0.00, 패턴 모멘텀형 → 기타, 순위 #1 → #221
+- 매도 종목 76개(22.5%)의 양수 Z-Score 오분류 모두 해결
+- 모멘텀 정렬 상위: 매도 종목 → 진정한 매수 종목 (KB금융, 넥슨게임즈 등)
+- 진정한 전환 종목: 57개 중 44개(77%) 보존 (confidence > 0.3)
+- 노이즈 레벨 종목: |sff/std| < 0.1 → 0.034x 감쇠 (효과적 필터링)
+
+**파일** (5개):
+```
+src/visualizer/performance_optimizer.py  (sff 메타데이터 반환)
+src/analyzer/pattern_classifier.py       (_apply_direction_confidence 추가)
+app/utils/charts.py                      (히트맵 정렬 보정)
+app/pages/1_📊_히트맵.py                 (period_cols 필터)
+tests/test_performance_optimizer.py      (메타데이터 컬럼 테스트 업데이트)
+```
+
+**테스트**: 258개 (100% 통과)
+
+**향후**: 백테스트 precomputer에도 방향 확신도 적용 검토 (현재 미적용)
+
+---
 
 ### 2026-02-24 (히트맵 인터랙티브 고도화 A/B/C/D)
 

@@ -43,26 +43,30 @@ class TestOptimizedMultiPeriodCalculator:
 
     def test_calculate_multi_period_basic(self, optimizer):
         """Calculate Z-Scores for multiple periods"""
-        periods = {'1D': 1, '1W': 5, '1M': 21}
+        periods = {'5D': 5, '10D': 10, '20D': 20}
         result = optimizer.calculate_multi_period_zscores(periods)
-        
+
         assert not result.empty, "Should return data"
-        assert list(result.columns) == ['1D', '1W', '1M'], "Should have all period columns"
+        period_cols = [c for c in result.columns if not c.startswith('_')]
+        assert list(period_cols) == ['5D', '10D', '20D'], "Should have all period columns"
+        # 방향 확신도 메타데이터 컬럼도 포함되어야 함
+        assert '_today_sff' in result.columns, "Should have _today_sff metadata"
         assert len(result) > 0, "Should have stocks"
 
     def test_calculate_multi_period_all_periods(self, optimizer):
         """Calculate Z-Scores for all 7 periods"""
         periods = {
-            '1D': 1, '1W': 5, '1M': 21, '3M': 63,
-            '6M': 126, '1Y': 252, '2Y': 504
+            '5D': 5, '10D': 10, '20D': 20, '50D': 50,
+            '100D': 100, '200D': 200, '500D': 500
         }
         result = optimizer.calculate_multi_period_zscores(periods)
         
-        assert len(result.columns) == 7, "Should have all 7 period columns"
+        period_cols = [c for c in result.columns if not c.startswith('_')]
+        assert len(period_cols) == 7, "Should have all 7 period columns"
 
     def test_caching_enabled(self, optimizer):
         """Test caching behavior"""
-        periods = {'1D': 1, '1W': 5}
+        periods = {'5D': 5, '10D': 10}
         
         # First call (loads cache)
         result1 = optimizer.calculate_multi_period_zscores(periods)
@@ -78,7 +82,7 @@ class TestOptimizedMultiPeriodCalculator:
         normalizer = SupplyNormalizer(conn)
         optimizer = OptimizedMultiPeriodCalculator(normalizer, enable_caching=False)
         
-        periods = {'1D': 1, '1W': 5}
+        periods = {'5D': 5, '10D': 10}
         result = optimizer.calculate_multi_period_zscores(periods)
         
         assert not result.empty, "Should still return data"
@@ -86,7 +90,7 @@ class TestOptimizedMultiPeriodCalculator:
 
     def test_specific_stocks_only(self, optimizer):
         """Calculate Z-Scores for specific stocks only"""
-        periods = {'1D': 1, '1W': 5}
+        periods = {'5D': 5, '10D': 10}
         stock_codes = ['005930', '000660']
         
         result = optimizer.calculate_multi_period_zscores(periods, stock_codes)
@@ -120,10 +124,10 @@ class TestPerformance:
     def test_multi_period_performance(self, optimizer):
         """Test that multi-period calculation is reasonably fast"""
         periods = {
-            '1D': 1, '1W': 5, '1M': 21, '3M': 63,
-            '6M': 126, '1Y': 252, '2Y': 504
+            '5D': 5, '10D': 10, '20D': 20, '50D': 50,
+            '100D': 100, '200D': 200, '500D': 500
         }
-        
+
         start_time = time.time()
         result = optimizer.calculate_multi_period_zscores(periods)
         elapsed = time.time() - start_time
@@ -136,8 +140,8 @@ class TestPerformance:
         conn = get_connection()
         normalizer = SupplyNormalizer(conn)
         
-        periods = {'1D': 1, '1W': 5, '1M': 21}
-        
+        periods = {'5D': 5, '10D': 10, '20D': 20}
+
         # Without caching
         optimizer_no_cache = OptimizedMultiPeriodCalculator(normalizer, enable_caching=False)
         start1 = time.time()
@@ -171,12 +175,12 @@ class TestZScoreCorrectness:
 
     def test_zscore_range(self, optimizer):
         """Z-Scores should be in reasonable range"""
-        periods = {'1D': 1, '1W': 5, '1M': 21}
+        periods = {'5D': 5, '10D': 10, '20D': 20}
         result = optimizer.calculate_multi_period_zscores(periods)
-        
+
         if not result.empty:
             # Most Z-Scores should be between -5 and 5
-            for col in [c for c in result.columns if c != '1D']:  # Skip 1D (NaN is normal)
+            for col in result.columns:
                 valid_zscores = result[col].dropna()
                 if len(valid_zscores) > 0:
                     assert valid_zscores.abs().quantile(0.95) < 5.0, \
@@ -184,11 +188,11 @@ class TestZScoreCorrectness:
 
     def test_zscore_not_all_nan(self, optimizer):
         """Z-Scores should not all be NaN"""
-        periods = {'1D': 1, '1W': 5}
+        periods = {'5D': 5, '10D': 10}
         result = optimizer.calculate_multi_period_zscores(periods)
         
         if not result.empty:
-            for col in [c for c in result.columns if c != '1D']:  # Skip 1D (NaN is normal)
+            for col in result.columns:
                 non_nan = result[col].notna().sum()
                 assert non_nan > 0, f"Column {col} should have non-NaN values"
 

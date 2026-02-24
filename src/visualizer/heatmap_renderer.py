@@ -1,9 +1,9 @@
 """
 Stage 2 히트맵 렌더링 모듈
 
-350×8 매트릭스 히트맵 생성 (종목 × 기간)
+350×7 매트릭스 히트맵 생성 (종목 × 기간)
 - Y축: Z-Score 강도순 정렬 (상단 = 강한 매수)
-- X축: 8개 기간 (1D, 1W, 1M, 3M, 6M, 1Y, 2Y)
+- X축: 7개 기간 (5D, 10D, 20D, 50D, 100D, 200D, 500D)
 - 색상: RdYlGn (빨강=매도, 노랑=중립, 초록=매수)
 """
 
@@ -90,19 +90,19 @@ class HeatmapRenderer:
         stock_names: pd.DataFrame = None
     ) -> None:
         """
-        350×8 히트맵 렌더링
+        350×7 히트맵 렌더링
 
         Args:
             zscore_matrix: pd.DataFrame
                 - index: stock_code (종목 코드)
-                - columns: ['1D', '1W', '1M', ...] (기간)
+                - columns: ['5D', '10D', '20D', ...] (기간)
                 - values: Z-Score
             output_path: 저장 경로 (예: 'output/heatmap.png')
             stock_names: 종목명 매핑 (옵션, stock_code → stock_name)
 
         Layout:
             Y축: 350 종목 (Z-Score 강도순, 상단 = 강한 매수)
-            X축: 8개 기간 (1D, 1W, 1M, 3M, 6M, 1Y, 2Y)
+            X축: 7개 기간 (5D~500D)
             색상: RdYlGn (빨강=매도, 초록=매수)
         """
         # 출력 디렉토리 생성
@@ -115,28 +115,28 @@ class HeatmapRenderer:
         periods = list(zscore_matrix.columns)
 
         if sort_by == 'recent':
-            # 최근 기간 우선 (1W 또는 1W+1M 평균)
-            if '1W' in periods and '1M' in periods:
-                zscore_matrix['_sort_key'] = (zscore_matrix['1W'] + zscore_matrix['1M']) / 2
-                sort_label = "recent (1W+1M avg)"
-            elif '1W' in periods:
-                zscore_matrix['_sort_key'] = zscore_matrix['1W']
-                sort_label = "recent (1W)"
+            # 최근 기간 우선 (5D 또는 5D+20D 평균)
+            if '5D' in periods and '20D' in periods:
+                zscore_matrix['_sort_key'] = (zscore_matrix['5D'] + zscore_matrix['20D']) / 2
+                sort_label = "recent (5D+20D avg)"
+            elif '5D' in periods:
+                zscore_matrix['_sort_key'] = zscore_matrix['5D']
+                sort_label = "recent (5D)"
             else:
                 # 가장 왼쪽(최근) 기간 사용
                 zscore_matrix['_sort_key'] = zscore_matrix[periods[0]]
                 sort_label = f"recent ({periods[0]})"
 
         elif sort_by == 'momentum':
-            # 수급 모멘텀 (1W - 2Y, 양수 = 최근 개선)
+            # 수급 모멘텀 (5D - 500D, 양수 = 최근 개선)
             first_period = periods[0]
             last_period = periods[-1]
             zscore_matrix['_sort_key'] = zscore_matrix[first_period] - zscore_matrix[last_period]
             sort_label = f"momentum ({first_period} - {last_period})"
 
         elif sort_by == 'weighted':
-            # 가중 평균 (최근에 높은 가중치: 3, 2.5, 2, 1.5, 1, 0.5)
-            weights = [3.0, 2.5, 2.0, 1.5, 1.0, 0.5][:len(periods)]
+            # 가중 평균 (최근에 높은 가중치: 3.5, 3.0, 2.5, 2.0, 1.5, 1.0, 0.5)
+            weights = [3.5, 3.0, 2.5, 2.0, 1.5, 1.0, 0.5][:len(periods)]
             weighted_sum = sum(zscore_matrix[p] * w for p, w in zip(periods, weights))
             zscore_matrix['_sort_key'] = weighted_sum / sum(weights)
             sort_label = "weighted avg (recent priority)"

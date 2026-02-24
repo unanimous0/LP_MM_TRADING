@@ -31,12 +31,13 @@ class TestPatternClassifier:
         """Create sample Z-Score matrix for testing"""
         data = {
             'stock_code': ['005930', '000660', '035720', '035420', '051910'],
-            '1W': [1.5, -0.5, 2.0, 0.8, -1.2],
-            '1M': [1.2, -0.3, 0.1, 1.0, -0.8],
-            '3M': [0.8, 0.2, 0.0, 1.2, 0.5],
-            '6M': [0.5, 0.5, -0.1, 1.5, 0.8],
-            '1Y': [0.3, 0.8, 0.1, 1.8, 1.0],
-            '2Y': [0.1, 1.0, 0.0, 2.0, 1.5],
+            '5D': [1.5, -0.5, 2.0, 0.8, -1.2],
+            '10D': [1.3, -0.4, 1.0, 0.9, -1.0],
+            '20D': [1.2, -0.3, 0.1, 1.0, -0.8],
+            '50D': [0.8, 0.2, 0.0, 1.2, 0.5],
+            '100D': [0.5, 0.5, -0.1, 1.5, 0.8],
+            '200D': [0.3, 0.8, 0.1, 1.8, 1.0],
+            '500D': [0.1, 1.0, 0.0, 2.0, 1.5],
         }
         return pd.DataFrame(data)
 
@@ -66,16 +67,16 @@ class TestPatternClassifier:
         assert 'weighted' in result.columns
         assert 'average' in result.columns
 
-        # Check recent = (1W + 1M) / 2
-        expected_recent = (result['1W'] + result['1M']) / 2
+        # Check recent = (5D + 20D) / 2
+        expected_recent = (result['5D'] + result['20D']) / 2
         pd.testing.assert_series_equal(
             result['recent'],
             expected_recent,
             check_names=False
         )
 
-        # Check momentum = 1W - 2Y
-        expected_momentum = result['1W'] - result['2Y']
+        # Check momentum = 5D - 500D
+        expected_momentum = result['5D'] - result['500D']
         pd.testing.assert_series_equal(
             result['momentum'],
             expected_momentum,
@@ -233,7 +234,7 @@ class TestPatternClassifier:
         """Test error handling for missing columns"""
         invalid_df = pd.DataFrame({
             'stock_code': ['005930'],
-            '1W': [1.0]
+            '5D': [1.0]
             # Missing other period columns
         })
 
@@ -244,12 +245,13 @@ class TestPatternClassifier:
         """Test NaN handling in features"""
         df_with_nan = pd.DataFrame({
             'stock_code': ['005930'],
-            '1W': [np.nan],
-            '1M': [1.0],
-            '3M': [0.5],
-            '6M': [0.3],
-            '1Y': [0.2],
-            '2Y': [0.1],
+            '5D': [np.nan],
+            '10D': [0.8],
+            '20D': [1.0],
+            '50D': [0.5],
+            '100D': [0.3],
+            '200D': [0.2],
+            '500D': [0.1],
         })
 
         result = classifier.calculate_features(df_with_nan)
@@ -281,7 +283,7 @@ class TestPatternClassifier:
                 'average': 0.2,
             },
             'feature_config': {
-                'volatility_periods': ['1W', '1M', '3M', '6M', '1Y', '2Y'],
+                'volatility_periods': ['5D', '10D', '20D', '50D', '100D', '200D', '500D'],
                 'persistence_threshold': 0,
             }
         }
@@ -297,12 +299,13 @@ class TestPatternClassifier:
         # Negative Z-Score data (순매도)
         data = {
             'stock_code': ['005930', '000660', '035720'],
-            '1W': [-1.5, -0.5, -2.0],  # 음수 = 순매도
-            '1M': [-1.2, -0.3, -0.1],
-            '3M': [-0.8, -0.2, 0.0],
-            '6M': [-0.5, 0.0, 0.1],
-            '1Y': [-0.3, 0.2, 0.2],
-            '2Y': [-0.1, 0.3, 0.3],
+            '5D': [-1.5, -0.5, -2.0],  # 음수 = 순매도
+            '10D': [-1.3, -0.4, -1.0],
+            '20D': [-1.2, -0.3, -0.1],
+            '50D': [-0.8, -0.2, 0.0],
+            '100D': [-0.5, 0.0, 0.1],
+            '200D': [-0.3, 0.2, 0.2],
+            '500D': [-0.1, 0.3, 0.3],
         }
         df = pd.DataFrame(data)
 
@@ -322,22 +325,24 @@ class TestPatternClassifier:
         # Same absolute values, opposite signs
         long_data = {
             'stock_code': ['005930'],
-            '1W': [1.5],
-            '1M': [1.2],
-            '3M': [0.8],
-            '6M': [0.5],
-            '1Y': [0.3],
-            '2Y': [0.1],
+            '5D': [1.5],
+            '10D': [1.3],
+            '20D': [1.2],
+            '50D': [0.8],
+            '100D': [0.5],
+            '200D': [0.3],
+            '500D': [0.1],
         }
 
         short_data = {
             'stock_code': ['000660'],
-            '1W': [-1.5],
-            '1M': [-1.2],
-            '3M': [-0.8],
-            '6M': [-0.5],
-            '1Y': [-0.3],
-            '2Y': [-0.1],
+            '5D': [-1.5],
+            '10D': [-1.3],
+            '20D': [-1.2],
+            '50D': [-0.8],
+            '100D': [-0.5],
+            '200D': [-0.3],
+            '500D': [-0.1],
         }
 
         long_df = pd.DataFrame(long_data)

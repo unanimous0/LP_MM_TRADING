@@ -14,12 +14,13 @@ import sqlite3
 
 
 PERIODS = {
-    '1W': 5,
-    '1M': 21,
-    '3M': 63,
-    '6M': 126,
-    '1Y': 252,
-    '2Y': 504,
+    '5D': 5,
+    '10D': 10,
+    '20D': 20,
+    '50D': 50,
+    '100D': 100,
+    '200D': 200,
+    '500D': 500,
 }
 
 
@@ -28,7 +29,7 @@ class PrecomputeResult:
     """사전 계산 결과 컨테이너
 
     Attributes:
-        zscore_all_dates: MultiIndex(trade_date, stock_code) → [1W,1M,3M,6M,1Y,2Y]
+        zscore_all_dates: MultiIndex(trade_date, stock_code) → [5D,10D,20D,50D,100D,200D,500D]
         signals_all_dates: MultiIndex(trade_date, stock_code) → [ma_cross,ma_diff,acceleration,sync_rate,signal_count]
         price_lookup: (stock_code, trade_date) → close_price
         stock_names: stock_code → stock_name
@@ -162,7 +163,7 @@ class BacktestPrecomputer:
         return df.replace([np.inf, -np.inf], np.nan)
 
     def _compute_multi_period_zscores_all_dates(self, sff_df: pd.DataFrame) -> pd.DataFrame:
-        """6기간 Z-Score 벡터화 계산 (모든 날짜)
+        """7기간 Z-Score 벡터화 계산 (모든 날짜)
 
         performance_optimizer._calculate_zscore_vectorized와 동일 로직을
         전체 날짜에 대해 한 번에 수행.
@@ -289,11 +290,11 @@ class BacktestPrecomputer:
             except KeyError:
                 continue
 
-            long_stocks = zscore_on_date[zscore_on_date['1W'] > 0].copy()
+            long_stocks = zscore_on_date[zscore_on_date['5D'] > 0].copy()
             if not long_stocks.empty:
                 patterns_long[date] = classifier.classify_all(long_stocks, direction='long')
 
-            short_stocks = zscore_on_date[zscore_on_date['1W'] < 0].copy()
+            short_stocks = zscore_on_date[zscore_on_date['5D'] < 0].copy()
             if not short_stocks.empty:
                 patterns_short[date] = classifier.classify_all(short_stocks, direction='short')
 
@@ -311,7 +312,7 @@ class BacktestPrecomputer:
         Returns:
             (merged_long, merged_short): 각각 {trade_date: DataFrame} dict
             컬럼: stock_code, stock_name, pattern, score, direction,
-                  1W~2Y, ma_cross, ma_diff, acceleration, sync_rate, signal_count, final_score
+                  5D~500D, ma_cross, ma_diff, acceleration, sync_rate, signal_count, final_score
         """
         merged_long = {}
         merged_short = {}

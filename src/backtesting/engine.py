@@ -111,12 +111,13 @@ class BacktestEngine:
 
         # 기간 설정 (Stage 2 히트맵용)
         self.periods = {
-            '1W': 5,
-            '1M': 21,
-            '3M': 63,
-            '6M': 126,
-            '1Y': 252,
-            '2Y': 504
+            '5D': 5,
+            '10D': 10,
+            '20D': 20,
+            '50D': 50,
+            '100D': 100,
+            '200D': 200,
+            '500D': 500,
         }
 
         # 포트폴리오
@@ -224,7 +225,7 @@ class BacktestEngine:
         Returns:
             pd.DataFrame: 패턴 분류 + 시그널 통합 결과
                 - stock_code, stock_name
-                - 1W~2Y, recent, momentum, weighted, average
+                - 5D~500D, recent, momentum, weighted, average
                 - pattern, score, direction
                 - ma_cross, acceleration, sync_rate, signal_count
         """
@@ -252,13 +253,13 @@ class BacktestEngine:
         zscore_matrix = zscore_matrix.reset_index()
 
         # direction별 필터링 (양수/음수 Z-Score)
-        # Stage 2 출력에서 대표 기간(1W)으로 구분
+        # Stage 2 출력에서 대표 기간(5D)으로 구분
         if direction == 'long':
             # Long: 양수 Z-Score만 (순매수)
-            zscore_matrix = zscore_matrix[zscore_matrix['1W'] > 0].copy()
+            zscore_matrix = zscore_matrix[zscore_matrix['5D'] > 0].copy()
         else:
             # Short: 음수 Z-Score만 (순매도)
-            zscore_matrix = zscore_matrix[zscore_matrix['1W'] < 0].copy()
+            zscore_matrix = zscore_matrix[zscore_matrix['5D'] < 0].copy()
 
         if zscore_matrix.empty:
             return pd.DataFrame()

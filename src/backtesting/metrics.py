@@ -199,11 +199,11 @@ class PerformanceMetrics:
         if len(returns) == 0:
             return 0.0
 
-        # 연평균 수익률 (252 거래일 기준)
-        annual_return = returns.mean() * 252
+        # 연평균 수익률 (240 거래일 기준)
+        annual_return = returns.mean() * 240
 
         # 연변동성
-        annual_volatility = returns.std() * np.sqrt(252)
+        annual_volatility = returns.std() * np.sqrt(240)
 
         if annual_volatility == 0:
             return 0.0
@@ -253,7 +253,7 @@ class PerformanceMetrics:
         # 연평균 수익률
         total_ret = self.total_return() / 100  # % → 소수
         days = len(self.daily_values)
-        annual_return = (1 + total_ret) ** (252 / days) - 1 if days > 0 else 0
+        annual_return = (1 + total_ret) ** (240 / days) - 1 if days > 0 else 0
 
         return (annual_return * 100) / mdd
 
