@@ -88,7 +88,7 @@ st.sidebar.divider()
 
 z_score_window = st.sidebar.slider(
     "Z-Score 기준 기간 (거래일)",
-    min_value=20, max_value=1300, value=60, step=10,
+    min_value=20, max_value=1300, value=50, step=10,
     help="수급 금액 테이블의 Z-Score 계산 기준 기간 (최대 5년 = 약 1,300거래일). 실제 데이터 수보다 크면 자동으로 최대 데이터 기준으로 조정됩니다.",
 )
 

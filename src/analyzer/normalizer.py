@@ -232,9 +232,16 @@ class SupplyNormalizer:
                 rolling_mean = df_stock[col].rolling(window=window, min_periods=min_points).mean()
                 rolling_std = df_stock[col].rolling(window=window, min_periods=min_points).std()
 
-                # Z-Score = (X - 평균) / 표준편차
+                # 조건부 Z-Score: 부호 전환 시 과잉 반응 방지
+                # 같은 방향(today·mean > 0): (today - mean) / std (폭발 감지)
+                # 방향 전환(today·mean ≤ 0): today / std (크기만 평가)
                 zscore_col = col.replace('_sff', '_zscore')
-                df_stock[zscore_col] = (df_stock[col] - rolling_mean) / rolling_std
+                same_sign = (df_stock[col] * rolling_mean) > 0
+                df_stock[zscore_col] = np.where(
+                    same_sign,
+                    (df_stock[col] - rolling_mean) / rolling_std,
+                    df_stock[col] / rolling_std
+                )
 
             results.append(df_stock)
 

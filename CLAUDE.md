@@ -139,6 +139,8 @@ git push
 - **Z-Score 기간 라벨 통일**: 1W/1M/3M/6M/1Y/2Y → 5D/10D/20D/50D/100D/200D/500D (영업일 기준)
 - **방향 확신도(Direction Confidence)**: `tanh(today_sff/rolling_std)` — Z-Score가 방향과 괴리되는 문제 해결 (매도 중 종목이 모멘텀 상위 랭크 방지)
 - **[버그수정] Precomputer 방향 확신도 누락**: `_today_sff`/`_std_*D` 메타데이터 미전파 → 백테스트에서 방향 확신도 미적용 문제 수정
+- **[통일] normalizer Z-Score 조건부 공식 적용**: `normalizer.calculate_zscore()`에도 조건부 Z-Score 적용 → 종목 상세/이상 수급 등 모든 경로에서 동일한 Z-Score 공식 사용
+- **종목 상세 Z-Score 기준 기간 기본값**: 60 → 50 (50D 히트맵과 직접 비교 용이)
 - 258개 테스트 (100% 통과)
 
 **핵심 인사이트**:
@@ -702,22 +704,76 @@ LP_MM_TRADING/
 ## [방법론: 수급 레짐 스캐너]
 
 ### ① Stage 1: 데이터 정규화
-- Sff: 유통물량 대비 순매수 강도 (외국인 중심)
-  - 외국인/기관 같은 방향: `foreign_sff + institution_sff × 0.3`
-  - 반대 방향: `foreign_sff`만 사용 (기관이 외국인 신호를 상쇄하지 않음)
-- Z-Score: 변동성 보정 수급 (조건부: 부호 전환 시 `today/std`만 사용)
+
+#### Sff (Supply Flow Force) — 유통물량 대비 순매수 강도
+```
+foreign_sff     = 외국인 순매수금액 / (종가 × 유통주식수) × 100
+institution_sff = 기관 순매수금액   / (종가 × 유통주식수) × 100
+```
+예: 삼성전자 유통시총 100조, 외국인 +1000억 매수 → `sff = 0.001 × 100 = 0.1`
+
+**combined_sff** (외국인 중심 조건부 합산):
+```
+외국인·기관 같은 방향 → foreign_sff + institution_sff × 기관가중치(기본 0.3)
+외국인·기관 반대 방향 → foreign_sff만 (기관이 외국인 신호를 상쇄하지 않음)
+```
+- 기관가중치 0 → combined = foreign (외국인만)
+- 기관가중치 1.0 → combined = foreign + institution (동등 합산)
+
+#### Z-Score — 변동성 보정 수급 (조건부 공식)
+```
+평균 = 최근 N일 Sff 이동평균
+std  = 최근 N일 Sff 표준편차
+```
+**조건부 공식** (모든 경로에서 동일 적용):
+```
+같은 방향 (오늘·평균 부호 동일): Z = (오늘 - 평균) / std  ← 평균 대비 폭발 감지
+방향 전환 (오늘·평균 부호 반대): Z = 오늘 / std           ← 크기만 평가
+```
+| 상황 | 오늘 Sff | 평균 | 공식 | Z | 해석 |
+|------|---------|------|------|---|------|
+| 매수 폭발 | +2.0 | +0.5 | (2-0.5)/0.4 | **+3.75** | 평소보다 훨씬 강한 매수 |
+| 평소 매수 | +0.5 | +0.5 | (0.5-0.5)/0.4 | **0.0** | 평균 수준 |
+| 살짝 매도 전환 | -0.04 | +0.5 | -0.04/0.4 | **-0.1** | 무시 (노이즈) |
+| 강한 매도 전환 | -2.0 | +0.5 | -2.0/0.4 | **-5.0** | 강한 매도 신호 |
+
+방향 전환 시 `(오늘-평균)/std`를 쓰면 살짝 매도(-0.04)도 Z=-1.35로 과대평가 → 조건부 공식으로 해결.
+
+**적용 위치** (2개 독립 구현, 동일 공식):
+- `normalizer.calculate_zscore()` — 종목 상세 KPI, 이상 수급, Z-Score 추이 차트
+- `performance_optimizer._calculate_zscore_vectorized()` — 히트맵, 패턴 분류, 백테스트
 
 ### ② Stage 2: 시공간 매트릭스
 - 7개 기간(5D~500D) 히트맵 (영업일 기준)
 - 4가지 정렬 모드 (투자 스타일별)
-- **조건부 Z-Score**: 부호 전환 시 과잉 반응 방지
-  - 같은 방향(today·mean > 0): `Z = (today - mean) / std` (기존, 폭발 감지)
-  - 방향 전환(today·mean ≤ 0): `Z = today / std` (크기만 평가, 증폭 방지)
-- **방향 확신도(Direction Confidence)**:
-  - `confidence = tanh(today_sff / rolling_std)` — 자기 정규화 (하드코딩 상수 없음)
-  - 정렬/분류 시: `adjusted_z = z × max(confidence, 0)` (long) or `z × max(-confidence, 0)` (short)
-  - 히트맵 셀 값: 원본 Z-Score 유지 (편차 정보 보존), 정렬/패턴분류만 보정값 사용
-  - 효과: 매도세 완화 종목(양수 Z, 음수 sff)이 매수 순위 상위에 잘못 노출되는 문제 해결
+
+#### 방향 확신도 (Direction Confidence) — Z-Score 위의 별도 레이어
+
+**문제**: Z-Score는 "평균 대비 편차"를 측정 → 매도세 완화 종목도 양수 Z가 됨
+- 예: 현대모비스, 장기 매도세(-0.5) 지속 중 매도세 소폭 완화(-0.2) → Z = +0.7 (양수!)
+- 모멘텀 정렬 시 매도 종목이 매수 상위 #1에 노출
+
+**해결**: tanh 기반 방향 확신도로 정렬/분류 시에만 가중치 적용
+```
+confidence = tanh(today_sff / rolling_std)
+```
+- tanh(0) = 0 → 중립 (노이즈 감쇠)
+- tanh(1) ≈ 0.76 → 중간 신호
+- tanh(2) ≈ 0.96 → 강한 신호 보존
+- 하드코딩 상수 없음 — 각 종목 자신의 변동성(std)으로 정규화
+
+**적용 방식**:
+```
+long 정렬/분류: adjusted_z = z × max(confidence, 0)    ← 매수 방향만 반영
+short 정렬/분류: adjusted_z = z × max(-confidence, 0)   ← 매도 방향만 반영
+```
+- 매도 중(sff<0) 종목 → confidence<0 → max(confidence,0)=0 → adjusted_z=0 → 매수 순위에서 탈락
+- **히트맵 셀 값은 원본 Z-Score 유지** (편차 정보 보존), 정렬/패턴분류만 보정값 사용
+
+**⚠️ tanh는 Z-Score 공식이 아님**:
+- Z-Score 공식: 조건부 `(X-μ)/σ` or `X/σ` → 수급 편차 측정 (값 자체)
+- 방향 확신도: `tanh(sff/std)` → 정렬/분류 시 가중치 (값을 바꾸지 않음)
+- 적용 위치: `pattern_classifier.py`, `charts.py` (히트맵 정렬) — 2곳에서 독립 계산
 
 ### ③ Stage 3: 패턴 분류 & 시그널 통합
 - **패턴 분류**: 3개 바구니 (모멘텀형/지속형/전환형)
@@ -732,6 +788,54 @@ LP_MM_TRADING/
 ---
 
 ## [Progress History]
+
+### 2026-02-24 (normalizer 조건부 Z-Score 통일 + 종목상세 기본값 변경)
+
+**목표**: 종목 상세 페이지의 Z-Score가 히트맵/패턴 Z-Score와 다른 공식으로 계산되는 문제 해결
+
+**배경 — 두 가지 Z-Score 계산 경로**:
+- `normalizer.calculate_zscore()` — 종목 상세 KPI, 이상 수급, Z-Score 추이 차트
+- `performance_optimizer._calculate_zscore_vectorized()` — 히트맵, 패턴 분류, 백테스트
+- 후자는 이미 조건부 Z-Score 적용 완료, 전자는 표준 `(X-μ)/σ` 사용 중이었음
+- 결과: 동일 종목의 Z-Score가 페이지마다 다를 수 있음
+
+**구현 내용**:
+
+- ✅ **`normalizer.py` — `calculate_zscore()` 조건부 Z-Score 적용**
+  - 기존: `df_stock[zscore_col] = (df_stock[col] - rolling_mean) / rolling_std`
+  - 변경: `same_sign = (today * mean) > 0` 판단 후 조건부 분기
+  - `performance_optimizer`와 동일한 공식 → 모든 경로에서 Z-Score 통일
+  - 자동 영향: 종목 상세 KPI, Z-Score 추이 차트, 수급 금액 테이블 Z 컬럼, 이상 수급 탐지
+
+- ✅ **`5_📋_종목상세.py` — Z-Score 기준 기간 기본값 60→50**
+  - 히트맵의 50D 기간과 직접 비교 용이하도록 변경
+
+**검증 결과** (345개 전종목, institution_weight=0, window=50):
+- KPI `foreign_zscore` vs 패턴현황 `50D`: **345개 전종목 차이 0** (완벽 일치)
+- `institution_weight=0`이면 `combined_sff = foreign_sff` → 종합Z = 외국인Z (동일)
+- 기관가중치 ≠ 0이면 종합Z ≠ 외국인Z (의도된 차이 — 비교 대상이 다름)
+
+**Z-Score 공식 적용 현황 (최종)**:
+
+| 모듈 | 함수 | 조건부 Z | 용도 |
+|------|------|---------|------|
+| `normalizer.py` | `calculate_zscore()` | ✅ 적용 | 종목 상세 KPI, 이상 수급 |
+| `performance_optimizer.py` | `_calculate_zscore_vectorized()` | ✅ 기존 | 히트맵, 패턴 분류 |
+| `precomputer.py` | `_compute_multi_period_zscores_all_dates()` | ✅ 기존 | 백테스트 |
+
+**tanh 방향 확신도는 변경 불필요** — Z-Score 공식(값 자체)과 방향 확신도(정렬/분류 가중치)는 별개 레이어:
+- Z-Score: `(X-μ)/σ` or `X/σ` → 편차 측정 (이번에 통일)
+- tanh: `tanh(sff/std)` → 정렬/분류 시 adjusted_z 가중치 (기존 그대로)
+
+**파일** (2개):
+```
+src/analyzer/normalizer.py          (calculate_zscore 조건부 Z-Score 적용)
+app/pages/5_📋_종목상세.py          (z_score_window 기본값 60→50)
+```
+
+**테스트**: 258개 (100% 통과)
+
+---
 
 ### 2026-02-24 (Z-Score 기간 라벨 통일 + 방향 확신도 구현)
 
