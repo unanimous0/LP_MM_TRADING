@@ -472,6 +472,403 @@ def create_signal_distribution_chart(report_df: pd.DataFrame) -> go.Figure:
 
 
 # ---------------------------------------------------------------------------
+# 섹터 크로스 분석 차트
+# ---------------------------------------------------------------------------
+
+_PATTERN_COLORS = {
+    '모멘텀형': '#f472b6',   # pink-400
+    '지속형':   '#38bdf8',   # sky-400
+    '전환형':   '#4ade80',   # green-400
+    '기타':     '#64748b',   # slate-500
+}
+
+
+def create_sector_pattern_crosstab_chart(report_df: pd.DataFrame) -> go.Figure:
+    """섹터별 패턴 분포 스택 바차트
+
+    x축: 섹터 (종목수 내림차순), y축: 종목 수, 색상: 패턴별
+    """
+    if report_df.empty or 'sector' not in report_df.columns:
+        fig = go.Figure()
+        fig.update_layout(title='섹터별 패턴 분포 (데이터 없음)', height=400)
+        return _apply_dark(fig)
+
+    df = report_df.copy()
+    df['sector'] = df['sector'].fillna('기타')
+    df['pattern'] = df['pattern'].fillna('기타')
+
+    # 섹터별 종목수 내림차순 정렬
+    sector_order = df['sector'].value_counts().index.tolist()
+
+    patterns = ['모멘텀형', '지속형', '전환형', '기타']
+    ct = pd.crosstab(df['sector'], df['pattern'])
+
+    fig = go.Figure()
+    for pat in patterns:
+        if pat not in ct.columns:
+            continue
+        vals = [int(ct.at[s, pat]) if s in ct.index else 0 for s in sector_order]
+        fig.add_trace(go.Bar(
+            x=sector_order,
+            y=vals,
+            name=pat,
+            marker_color=_PATTERN_COLORS.get(pat, '#64748b'),
+            hovertemplate=f'%{{x}}<br>{pat}: %{{y}}개<extra></extra>',
+        ))
+
+    fig.update_layout(
+        barmode='stack',
+        title='섹터별 패턴 분포',
+        xaxis_title='',
+        yaxis_title='종목 수',
+        xaxis=dict(tickangle=-45),
+        height=450,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0),
+    )
+    return _apply_dark(fig)
+
+
+def create_sector_avg_score_chart(report_df: pd.DataFrame) -> go.Figure:
+    """섹터별 평균 점수 수평 바차트
+
+    y축: '섹터 (N개)', x축: 평균 점수, 호버: 평균 시그널 수
+    """
+    if report_df.empty or 'sector' not in report_df.columns or 'score' not in report_df.columns:
+        fig = go.Figure()
+        fig.update_layout(title='섹터별 평균 점수 (데이터 없음)', height=400)
+        return _apply_dark(fig)
+
+    df = report_df.copy()
+    df['sector'] = df['sector'].fillna('기타')
+
+    agg = df.groupby('sector').agg(
+        avg_score=('score', 'mean'),
+        count=('score', 'size'),
+        avg_signals=('signal_count', 'mean'),
+    ).reset_index()
+    agg = agg.sort_values('avg_score', ascending=True)  # 수평바: 아래→위
+
+    y_labels = [f"{row['sector']} ({row['count']}개)" for _, row in agg.iterrows()]
+
+    fig = go.Figure(data=go.Bar(
+        y=y_labels,
+        x=agg['avg_score'],
+        orientation='h',
+        marker_color='#38bdf8',
+        marker_line=dict(color=_BG_PAPER, width=0.5),
+        customdata=np.column_stack([
+            agg['avg_signals'].round(1).values,
+            agg['count'].values,
+        ]),
+        text=[f'{v:.1f}' for v in agg['avg_score']],
+        textposition='auto',
+        textfont=dict(color='#0f172a', size=11),
+        hovertemplate=(
+            '<b>%{y}</b><br>'
+            '평균 점수: %{x:.1f}<br>'
+            '평균 시그널: %{customdata[0]}개<br>'
+            '종목 수: %{customdata[1]}개'
+            '<extra></extra>'
+        ),
+    ))
+
+    fig.update_layout(
+        title='섹터별 평균 패턴 점수',
+        xaxis_title='평균 점수',
+        yaxis_title='',
+        height=max(350, len(agg) * 28 + 100),
+    )
+    return _apply_dark(fig)
+
+
+def create_sector_concentration_chart(report_df: pd.DataFrame, min_stocks: int = 5) -> go.Figure:
+    """섹터별 수급 집중도 수평 바차트
+
+    섹터점수 = 평균점수 × (1 + 고득점종목수/전체종목수)
+    고득점 = final_score ≥ 70
+    """
+    if report_df.empty or 'sector' not in report_df.columns:
+        fig = go.Figure()
+        fig.update_layout(title='섹터별 수급 집중도 (데이터 없음)', height=400)
+        return _apply_dark(fig)
+
+    df = report_df.copy()
+    df['sector'] = df['sector'].fillna('기타')
+    if 'final_score' not in df.columns:
+        df['final_score'] = df['score'] + df.get('signal_count', 0) * 5
+
+    agg = df.groupby('sector').agg(
+        avg_score=('final_score', 'mean'),
+        total_count=('stock_code', 'size'),
+    ).reset_index()
+
+    high = df[df['final_score'] >= 70].groupby('sector').size().reset_index(name='high_count')
+    agg = agg.merge(high, on='sector', how='left')
+    agg['high_count'] = agg['high_count'].fillna(0).astype(int)
+
+    # 최소 종목 수 필터
+    agg = agg[agg['total_count'] >= min_stocks]
+    if agg.empty:
+        fig = go.Figure()
+        fig.update_layout(title=f'섹터별 수급 집중도 ({min_stocks}개 이상 섹터 없음)', height=400)
+        return _apply_dark(fig)
+
+    agg['sector_score'] = agg['avg_score'] * (1 + agg['high_count'] / agg['total_count'])
+    agg = agg.nlargest(10, 'sector_score').sort_values('sector_score', ascending=True)
+
+    y_labels = [f"{row['sector']} ({row['total_count']}개)" for _, row in agg.iterrows()]
+
+    fig = go.Figure(data=go.Bar(
+        y=y_labels,
+        x=agg['sector_score'],
+        orientation='h',
+        marker_color='#fb923c',
+        marker_line=dict(color=_BG_PAPER, width=0.5),
+        customdata=np.column_stack([
+            agg['avg_score'].round(1).values,
+            agg['total_count'].values,
+            agg['high_count'].values,
+        ]),
+        text=[f'{v:.1f}' for v in agg['sector_score']],
+        textposition='auto',
+        textfont=dict(color='#0f172a', size=11),
+        hovertemplate=(
+            '<b>%{y}</b><br>'
+            '섹터 점수: %{x:.1f}<br>'
+            '평균 점수: %{customdata[0]}<br>'
+            '종목 수: %{customdata[1]}개<br>'
+            '고득점(≥70): %{customdata[2]}개'
+            '<extra></extra>'
+        ),
+    ))
+
+    fig.update_layout(
+        title='섹터별 수급 집중도 (TOP 10)',
+        xaxis_title='섹터 점수',
+        yaxis_title='',
+        height=max(350, len(agg) * 32 + 100),
+    )
+    return _apply_dark(fig)
+
+
+def create_sector_treemap_html(report_df: pd.DataFrame, top_per_sector: int = 10) -> str:
+    """섹터별 종목 Treemap — D3.js 기반 HTML 반환 (st.components.v1.html용)
+
+    박스 크기: 종합점수 비례, 색상: 빨강(낮음) → 초록(높음)
+    다크 테마, 섹터 헤더 라벨, 동적 텍스트 크기, 호버 툴팁
+    """
+    import json as _json
+
+    if report_df.empty or 'sector' not in report_df.columns:
+        return '<div style="color:#94a3b8;padding:40px;text-align:center;">데이터 없음</div>'
+
+    df = report_df.copy()
+    df['sector'] = df['sector'].fillna('기타')
+    if 'final_score' not in df.columns:
+        df['final_score'] = df['score'] + df.get('signal_count', 0) * 5
+
+    # 섹터별 상위 종목 → 계층 데이터
+    sector_order = df.groupby('sector')['final_score'].sum().nlargest(20).index.tolist()
+    treemap_data = {'name': 'root', 'children': []}
+    for sector in sector_order:
+        sec_df = df[df['sector'] == sector].nlargest(top_per_sector, 'final_score')
+        if sec_df.empty:
+            continue
+        children = []
+        for _, r in sec_df.iterrows():
+            children.append({
+                'name': str(r['stock_name']),
+                'value': float(r['final_score']),
+                'code': str(r['stock_code']),
+                'pattern': str(r.get('pattern', '기타')),
+                'score': round(float(r['final_score']), 1),
+                'signals': int(r.get('signal_count', 0)),
+            })
+        sec_avg = float(sec_df['final_score'].mean())
+        high_count = int((sec_df['final_score'] >= 70).sum())
+        sec_score = sec_avg * (1 + high_count / len(sec_df))
+        treemap_data['children'].append({
+            'name': sector,
+            'avg_score': round(sec_avg, 1),
+            'sector_score': round(sec_score, 1),
+            'children': children,
+        })
+
+    data_json = _json.dumps(treemap_data, ensure_ascii=False)
+
+    return f'''
+<div id="treemap-container" style="width:100%;background:#0f172a;border-radius:8px;position:relative;"></div>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+const iframe = window.frameElement;
+if (iframe) {{ iframe.style.width = "100%"; }}
+
+(function() {{
+const data = {data_json};
+const container = document.getElementById("treemap-container");
+const W = 1400;
+const H = 800;
+
+const svg = d3.select(container).append("svg")
+    .attr("viewBox", `0 0 ${{W}} ${{H}}`)
+    .attr("width", "100%")
+    .style("display", "block");
+
+// 툴팁
+const tip = d3.select(container).append("div")
+    .style("position","absolute").style("pointer-events","none")
+    .style("background","rgba(15,23,42,0.95)").style("color","#e2e8f0")
+    .style("border","1px solid #334155").style("border-radius","8px")
+    .style("padding","12px 16px").style("font-size","13px")
+    .style("line-height","1.7").style("opacity",0)
+    .style("box-shadow","0 8px 24px rgba(0,0,0,0.5)").style("z-index","100");
+
+// 색상: HTML 리포트와 동일한 RdYlGn
+const cScale = d3.scaleSequential()
+    .domain([40, 100])
+    .interpolator(d3.interpolateRdYlGn);
+
+function textColor(bg) {{
+    const c = d3.color(bg);
+    return (0.299*c.r + 0.587*c.g + 0.114*c.b) > 140 ? "#1F2937" : "#FFFFFF";
+}}
+
+const root = d3.hierarchy(data).sum(d => d.value).sort((a,b) => b.value - a.value);
+
+d3.treemap()
+    .size([W, H])
+    .padding(1)
+    .paddingOuter(2)
+    .paddingTop(24)
+    .round(true)(root);
+
+// 섹터 배경 (어두운 경계)
+const sectorG = svg.selectAll("g.sector")
+    .data(root.children || []).enter().append("g").attr("class","sector");
+
+sectorG.append("rect")
+    .attr("x", d => d.x0).attr("y", d => d.y0)
+    .attr("width", d => d.x1 - d.x0).attr("height", d => d.y1 - d.y0)
+    .attr("fill","#1e293b").attr("stroke","#334155").attr("stroke-width",1)
+    .attr("rx",2);
+
+// 종목 박스
+const leaves = svg.selectAll("g.leaf")
+    .data(root.leaves()).enter().append("g").attr("class","leaf")
+    .attr("transform", d => `translate(${{d.x0}},${{d.y0}})`);
+
+// clipPath (텍스트 오버플로 방지)
+const defs = svg.append("defs");
+leaves.each(function(d, i) {{
+    defs.append("clipPath").attr("id", "clip-" + i)
+        .append("rect")
+        .attr("width", Math.max(0, d.x1 - d.x0 - 2))
+        .attr("height", Math.max(0, d.y1 - d.y0 - 2))
+        .attr("x", 1).attr("y", 1);
+}});
+
+leaves.append("rect")
+    .attr("width", d => d.x1 - d.x0)
+    .attr("height", d => d.y1 - d.y0)
+    .attr("fill", d => cScale(d.data.score))
+    .attr("stroke","#475569").attr("stroke-width",1).attr("rx",3)
+    .style("cursor","pointer")
+    .on("mouseover", function(e, d) {{
+        d3.select(this).attr("stroke","#FFFFFF").attr("stroke-width",2.5)
+            .style("filter","brightness(1.1)");
+        const pat_c = {{"모멘텀형":"#f472b6","지속형":"#38bdf8","전환형":"#4ade80"}}[d.data.pattern] || "#94a3b8";
+        tip.html(
+            `<div style="border-bottom:1px solid #334155;padding-bottom:6px;margin-bottom:6px;">` +
+            `<strong style="font-size:15px;color:#38bdf8;">${{d.data.name}}</strong>` +
+            `<span style="color:#64748b;margin-left:8px;">${{d.data.code}}</span></div>` +
+            `<span style="color:#94a3b8;">섹터:</span> ${{d.parent.data.name}}<br>` +
+            `<span style="color:#94a3b8;">패턴:</span> <span style="color:${{pat_c}};font-weight:600;">${{d.data.pattern}}</span><br>` +
+            `<span style="color:#94a3b8;">점수:</span> <strong style="color:#4ade80;font-size:15px;">${{d.data.score}}</strong><br>` +
+            `<span style="color:#94a3b8;">시그널:</span> <strong style="color:#fbbf24;">${{d.data.signals}}개</strong>`
+        ).style("opacity",1)
+         .style("left", Math.min(e.offsetX + 15, W - 220) + "px")
+         .style("top", Math.max(e.offsetY - 80, 10) + "px");
+    }})
+    .on("mouseout", function() {{
+        d3.select(this).attr("stroke","#475569").attr("stroke-width",1)
+            .style("filter","none");
+        tip.style("opacity",0);
+    }});
+
+// 텍스트 그룹 (clipPath 적용)
+const textG = leaves.append("g")
+    .attr("clip-path", (d, i) => `url(#clip-${{i}})`)
+    .style("pointer-events","none");
+
+// 종목명
+textG.append("text")
+    .attr("x", d => (d.x1 - d.x0) / 2)
+    .attr("y", d => {{
+        const h = d.y1 - d.y0;
+        return h > 50 ? h/2 - 5 : h/2;
+    }})
+    .attr("text-anchor","middle").attr("dominant-baseline","middle")
+    .text(d => {{
+        const w = d.x1 - d.x0, h = d.y1 - d.y0;
+        if (w > 70 && h > 35) return d.data.name.length > 8 ? d.data.name.substring(0,7) + "…" : d.data.name;
+        if (w > 45 && h > 25) return d.data.name.length > 5 ? d.data.name.substring(0,4) + "…" : d.data.name;
+        return "";
+    }})
+    .attr("font-size", d => {{
+        const w = d.x1 - d.x0;
+        if (w > 120) return "14px";
+        if (w > 80) return "12px";
+        if (w > 50) return "10px";
+        return "8px";
+    }})
+    .attr("font-weight","700")
+    .attr("fill", d => textColor(cScale(d.data.score)));
+
+// 점수
+textG.append("text")
+    .attr("x", d => (d.x1 - d.x0) / 2)
+    .attr("y", d => {{
+        const h = d.y1 - d.y0;
+        return h > 50 ? h/2 + 14 : h/2 + 12;
+    }})
+    .attr("text-anchor","middle").attr("dominant-baseline","middle")
+    .text(d => {{
+        const w = d.x1 - d.x0, h = d.y1 - d.y0;
+        return (w > 70 && h > 45) ? d.data.score + "점" : "";
+    }})
+    .attr("font-size","11px").attr("font-weight","600")
+    .attr("fill", d => textColor(cScale(d.data.score)))
+    .style("opacity",0.9);
+
+// 섹터 라벨 배지 — leaves 위에 그려야 보임 (SVG z-order = DOM 순서)
+(root.children || []).forEach(sector => {{
+    const x0 = sector.x0;
+    const y0 = sector.y0;
+    const sW = sector.x1 - sector.x0;
+
+    const avg = sector.data.avg_score != null ? sector.data.avg_score.toFixed(1) : "";
+    const sc = sector.data.sector_score != null ? sector.data.sector_score.toFixed(1) : "";
+    const label = `${{sector.data.name}} ${{avg}}점 (${{sc}})`;
+    const labelW = Math.min(label.length * 8 + 16, sW);
+
+    svg.append("rect")
+        .attr("x", x0).attr("y", y0)
+        .attr("width", labelW).attr("height", 22)
+        .attr("fill", "rgba(15,23,42,0.85)")
+        .attr("rx", 4).style("pointer-events","none");
+
+    svg.append("text")
+        .attr("x", x0 + 8).attr("y", y0 + 15)
+        .text(sW > 80 ? label : sector.data.name)
+        .attr("font-size","12px").attr("font-weight","700")
+        .attr("fill","#FFFFFF").style("pointer-events","none");
+}});
+
+}})();
+</script>'''
+
+
+# ---------------------------------------------------------------------------
 # 이상 수급 바차트
 # ---------------------------------------------------------------------------
 
