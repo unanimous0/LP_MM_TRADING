@@ -657,18 +657,18 @@ def create_sector_concentration_chart(report_df: pd.DataFrame, min_stocks: int =
 def create_sector_treemap(report_df: pd.DataFrame, top_per_sector: int = 10) -> go.Figure:
     """섹터별 종목 Treemap — Plotly go.Treemap 기반
 
-    박스 크기: 종합점수 비례, 색상: 파스텔 (연분홍→연노랑→민트)
-    섹터 헤더: 다크 배경 + 평균점수(종합점수), 종목: 점수색 + 대비 텍스트색
+    박스 크기: 종합점수 비례, 색상: 딥 인디고→스카이→에메랄드
+    섹터 라벨: 점수 직접 표시, 종목: 이름+시그널도트 (점수는 호버)
     """
 
     def _hex_color(score: float) -> str:
-        """점수(40~100)를 파스텔 색상으로 변환"""
+        """점수(40~100)를 색상으로 변환: 딥레드 → 앰버 → 스카이 → 에메랄드"""
         stops = [
-            (0.00, (252, 165, 165)),   # rose-300   — 낮음
-            (0.30, (253, 186, 116)),   # orange-300 — 중하
-            (0.52, (254, 240, 138)),   # yellow-200 — 중간
-            (0.72, (167, 243, 208)),   # emerald-200 — 중상
-            (1.00, (110, 231, 183)),   # emerald-300 — 높음
+            (0.00, (239,  68,  68)),   # red-500     — 낮음
+            (0.30, (249, 115,  22)),   # orange-500  — 중하
+            (0.52, (234, 179,   8)),   # yellow-500  — 중간
+            (0.72, ( 56, 189, 248)),   # sky-400     — 중상 (앱 primary)
+            (1.00, ( 52, 211, 153)),   # emerald-400 — 높음
         ]
         t = max(0.0, min(1.0, (score - 40) / 60))
         for i in range(len(stops) - 1):
@@ -688,7 +688,7 @@ def create_sector_treemap(report_df: pd.DataFrame, top_per_sector: int = 10) -> 
         """배경 밝기 기반 흰색/어두운 텍스트"""
         h = hex_bg.lstrip('#')
         r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-        return '#1e293b' if (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.52 else '#f8fafc'
+        return '#0f172a' if (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.50 else '#f8fafc'
 
     if report_df.empty or 'sector' not in report_df.columns:
         fig = go.Figure()
@@ -709,10 +709,10 @@ def create_sector_treemap(report_df: pd.DataFrame, top_per_sector: int = 10) -> 
     plot_df = pd.concat(rows, ignore_index=True)
 
     ids, labels, parents, values, text_list = [], [], [], [], []
-    node_colors, node_text_colors, custom = [], [], []
+    node_colors, node_text_colors, custom, tmpl = [], [], [], []
 
     _SEC_BG   = '#1e293b'  # slate-800 — 섹터 헤더 배경
-    _SEC_TEXT = '#e2e8f0'  # slate-200 — 섹터 헤더 텍스트 (밝게)
+    _SEC_TEXT = '#e2e8f0'  # slate-200 — 섹터 헤더 텍스트
 
     for sector in top_sectors:
         sec_df = plot_df[plot_df['sector'] == sector]
@@ -724,15 +724,16 @@ def create_sector_treemap(report_df: pd.DataFrame, top_per_sector: int = 10) -> 
         sec_score = sec_avg * (1 + high_cnt / n)
         sec_id    = f'__s__{sector}'
 
-        # 섹터 노드: 평균점수(종합점수) 표시
-        ids.append(sec_id);  labels.append(sector)
-        parents.append('');  values.append(0)
-        text_list.append(f'평균 {sec_avg:.1f}점  ({sec_score:.1f})')
+        # 섹터 노드: 라벨에 점수 직접 포함 → 박스에 즉시 표시
+        ids.append(sec_id)
+        labels.append(f'{sector}  평균 {sec_avg:.1f}점  ({sec_score:.1f})')
+        parents.append('');  values.append(0);  text_list.append('')
         node_colors.append(_SEC_BG)
         node_text_colors.append(_SEC_TEXT)
         custom.append(['', '섹터', f'{n}종목', f'{sec_avg:.1f}점', f'{sec_score:.1f}'])
+        tmpl.append('<b>%{label}</b>')   # 섹터: 라벨만 (이미 점수 포함됨)
 
-        # 종목 노드: 이름만 + 시그널 도트 (점수는 호버에만)
+        # 종목 노드: 이름 + 시그널 도트 (점수는 호버에만)
         for _, row in sec_df.iterrows():
             score  = float(row['final_score'])
             pat    = str(row.get('pattern', '기타'))
@@ -743,10 +744,11 @@ def create_sector_treemap(report_df: pd.DataFrame, top_per_sector: int = 10) -> 
             labels.append(str(row['stock_name']))
             parents.append(sec_id)
             values.append(score)
-            text_list.append('●' * sig)          # 점수 제거, 시그널 도트만
+            text_list.append('●' * sig)
             node_colors.append(hex_bg)
             node_text_colors.append(_text_color(hex_bg))
             custom.append([str(row['stock_code']), pat, f'{sig}개', f'{score:.1f}점', ''])
+            tmpl.append('<b>%{label}</b><br>%{text}')   # 종목: 이름 + 시그널 도트
 
     fig = go.Figure(go.Treemap(
         ids=ids,
@@ -760,12 +762,12 @@ def create_sector_treemap(report_df: pd.DataFrame, top_per_sector: int = 10) -> 
             colors=node_colors,
             line=dict(width=2, color='#0f172a'),
         ),
-        texttemplate='<b>%{label}</b><br>%{text}',
+        texttemplate=tmpl,
         hovertemplate=(
             '<b>%{label}</b>'
-            '  <span style="opacity:0.6;font-size:12px">%{customdata[0]}</span><br>'
-            '%{customdata[1]}<br>'
-            '점수  <b>%{customdata[3]}</b>  ·  %{customdata[2]}'
+            '  <span style="opacity:0.55;font-size:12px">%{customdata[0]}</span><br>'
+            '%{customdata[1]}  ·  %{customdata[2]}<br>'
+            '점수  <b>%{customdata[3]}</b>'
             '<extra></extra>'
         ),
         textfont=dict(color=node_text_colors, size=14, family='sans-serif'),
