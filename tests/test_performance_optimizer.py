@@ -51,6 +51,7 @@ class TestOptimizedMultiPeriodCalculator:
         assert list(period_cols) == ['5D', '10D', '20D'], "Should have all period columns"
         # 방향 확신도 메타데이터 컬럼도 포함되어야 함
         assert '_today_sff' in result.columns, "Should have _today_sff metadata"
+        assert '_sff_5d_avg' in result.columns, "Should have _sff_5d_avg metadata (5-day avg sff)"
         assert len(result) > 0, "Should have stocks"
 
     def test_calculate_multi_period_all_periods(self, optimizer):

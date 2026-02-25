@@ -78,6 +78,7 @@ sort_options = {
     'momentum':     '모멘텀 (단기-장기)',
     'weighted':     '가중 평균 (최근 높은 비중)',
     'average':      '단순 평균 (7기간)',
+    'short_trend':  '단기 모멘텀 (5D-20D)',
     'signal_count': '시그널 수',
 }
 sort_by = st.sidebar.selectbox(
@@ -148,7 +149,7 @@ else:
     filtered_df['final_score'] = filtered_df['score']
 
 # 정렬 적용
-if sort_by in ('score', 'final_score', 'signal_count', 'recent', 'momentum', 'weighted', 'average'):
+if sort_by in ('score', 'final_score', 'signal_count', 'recent', 'momentum', 'weighted', 'average', 'short_trend'):
     if sort_by in filtered_df.columns:
         filtered_df = filtered_df.sort_values(sort_by, ascending=False)
 
@@ -173,7 +174,7 @@ with tab1:
     else:
         # D: 정렬 키 컬럼 토글
         show_sort_cols = st.checkbox("정렬 키 컬럼 표시", value=False,
-                                      help="recent/momentum/weighted/average 수치를 표시합니다.")
+                                      help="recent/momentum/weighted/average/short_trend/temporal_consistency 수치를 표시합니다.")
 
         display_df = filtered_df.copy()
 
@@ -182,7 +183,7 @@ with tab1:
             'score', 'signal_count', 'final_score',
         ]
         if show_sort_cols:
-            display_cols += ['recent', 'momentum', 'weighted', 'average']
+            display_cols += ['recent', 'momentum', 'weighted', 'average', 'short_trend', 'temporal_consistency']
         display_cols += ['signal_list', 'entry_point', 'stop_loss']
         display_cols = [c for c in display_cols if c in display_df.columns]
 
@@ -210,6 +211,14 @@ with tab1:
                 "average": st.column_config.NumberColumn(
                     "단순평균", format="%.2f",
                     help="7기간 Z-Score 단순 평균",
+                ),
+                "short_trend": st.column_config.NumberColumn(
+                    "단기모멘텀", format="%.2f",
+                    help="5D-20D — 양수=최근 5일이 20일보다 강함 (단기 가속), 음수=지속형에서 정상",
+                ),
+                "temporal_consistency": st.column_config.NumberColumn(
+                    "시간순서", format="%.2f",
+                    help="0~1 — 5D≥10D≥...≥500D 순서 일치 비율. 1.0=완전 모멘텀형, 0.0=완전 지속형",
                 ),
             })
 

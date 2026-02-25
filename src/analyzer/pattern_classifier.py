@@ -3,14 +3,23 @@ Pattern-based classification module
 
 Implements Stage 3 pattern classification:
 - 3개 바구니 자동 분류 (모멘텀형, 지속형, 전환형)
-- 4가지 정렬 키 통합 (Recent, Momentum, Weighted, Average)
-- 추가 특성 추출 (변동성, 지속성, 가속도)
+- 5가지 정렬 키 통합 (Recent, Momentum, Weighted, Average, ShortTrend)
+- 추가 특성 추출 (변동성, 지속성, 가속도, 시간 순서 일관성)
 - 패턴 강도 점수 계산 (0~100)
 
 용도:
-    Stage 2 히트맵 결과(4가지 정렬 키)를 통합하여
+    Stage 2 히트맵 결과(5가지 정렬 키)를 통합하여
     투자 스타일별 종목을 자동 분류하고 패턴 강도를 점수화합니다.
     -> Find "What"
+
+메트릭 계산 순서 (중요):
+    1. Z-Score 부호 반전 (short 방향)
+    2. temporal_consistency 계산 (tanh 이전 필수 — tanh 후 0>=0 오류 방지)
+    3. tanh 방향 확신도 적용
+    4. short_trend 계산 (tanh 이후 — sort key와 스케일 일치)
+    5. 정렬키/특성/패턴/점수 계산
+    6. 원본 Z-Score 복원
+    7. short_trend 재계산 (복원된 Z-Score 기준 — 출력 표시용)
 """
 
 import pandas as pd
@@ -40,11 +49,15 @@ class PatternClassifier:
                 'momentum': {
                     'momentum_min': 1.0,      # 5D-500D > 1.0
                     'recent_min': 0.5,        # (5D+20D)/2 > 0.5
+                    'temporal_consistency_min': 0.5,  # 6쌍 중 ≥3쌍 순서 일치
                 },
                 # 지속형: 장기간 일관된 추세
                 'sustained': {
                     'weighted_min': 0.8,      # 가중 평균 > 0.8
                     'persistence_min': 0.7,   # 양수 기간 비율 > 70%
+                    'temporal_consistency_min': 0.0,  # 지속형은 tc 조건 없음
+                    # ↑ 이유: 지속형의 이상적 패턴은 5D<10D<...<500D (장기>단기)
+                    #   즉, tc=0.0도 완전히 정상 → tc 기준 적용 시 오히려 우량 지속형 탈락
                 },
                 # 전환형: 추세 약화, 반대 방향 전환 대기
                 'reversal': {
@@ -53,12 +66,13 @@ class PatternClassifier:
                 }
             },
 
-            # 점수 계산 가중치 (0~100 스케일)
+            # 점수 계산 가중치 (합계 = 1.00)
             'score_weights': {
-                'recent': 0.25,       # 현재 강도
-                'momentum': 0.25,     # 전환점
-                'weighted': 0.30,     # 중장기 트렌드
-                'average': 0.20,      # 일관성
+                'recent': 0.25,       # 현재 강도 (유지)
+                'momentum': 0.20,     # 장기 개선도 (0.25 → 0.20, 장기전환 과대평가 완화)
+                'weighted': 0.30,     # 중장기 트렌드 (유지)
+                'average': 0.10,      # 전체 일관성 (0.20 → 0.10, short_trend로 대체)
+                'short_trend': 0.15,  # 단기 모멘텀 방향 (5D-20D)
             },
 
             # 특성 계산 설정
@@ -180,15 +194,19 @@ class PatternClassifier:
             4. 기타: 위 조건 미충족
         """
         thresholds = self.config['pattern_thresholds']
+        tc = row.get('temporal_consistency', 0.5)
+        tc = tc if pd.notna(tc) else 0.5
 
         # Pattern 1: 모멘텀형
         if (row['momentum'] > thresholds['momentum']['momentum_min'] and
-            row['recent'] > thresholds['momentum']['recent_min']):
+            row['recent'] > thresholds['momentum']['recent_min'] and
+            tc >= thresholds['momentum'].get('temporal_consistency_min', 0.0)):
             return '모멘텀형'
 
         # Pattern 2: 지속형
         if (row['weighted'] > thresholds['sustained']['weighted_min'] and
-            row['persistence'] > thresholds['sustained']['persistence_min']):
+            row['persistence'] > thresholds['sustained']['persistence_min'] and
+            tc >= thresholds['sustained'].get('temporal_consistency_min', 0.0)):
             return '지속형'
 
         # Pattern 3: 전환형
@@ -204,26 +222,47 @@ class PatternClassifier:
         패턴 강도 점수 계산 (0~100)
 
         Args:
-            row: 종목별 데이터 행 (recent, momentum, weighted, average 포함)
+            row: 종목별 데이터 행 (recent, momentum, weighted, average, short_trend,
+                 temporal_consistency, pattern 포함)
 
         Returns:
             float: 패턴 강도 점수 (0~100)
 
         Formula:
-            Score = Σ(정렬키 × 가중치) × 정규화 계수
+            Score = Σ(정렬키 × 패턴별 가중치) × 정규화 계수
             - Z-Score 범위 [-3, 3]을 [0, 100]으로 변환
-            - 음수 값은 0으로 클리핑
+            - 지속형은 short_trend 제외 (가중치 0, average로 흡수)
+            - 지속형은 tc_bonus 없음 (tc=0.0이 정상 패턴이므로 페널티 부적절)
+            - 모멘텀형/전환형/기타: tc_bonus ±10점 적용
+
+        Pattern-aware weights:
+            지속형: short_trend 가중치=0 (average로 재분배)
+            기타 패턴: 설정값 그대로 사용
         """
         weights = self.config['score_weights']
 
+        # 패턴별 가중치 조정
+        # 지속형: 이상적 패턴이 5D<10D<...<500D (장기>단기)이므로
+        #   short_trend(=5D-20D)가 음수가 정상 → 패널티 방지를 위해 가중치 0으로 설정
+        #   해제된 short_trend 가중치는 average로 재분배하여 total_w=1.0 유지
+        pattern = row.get('pattern', '')
+        if pattern == '지속형':
+            st_w = weights.get('short_trend', 0)
+            effective_weights = dict(weights)
+            effective_weights['short_trend'] = 0.0
+            effective_weights['average'] = weights.get('average', 0) + st_w
+        else:
+            effective_weights = weights
+
         # NaN-robust 가중 합계 계산 (데이터 부족 기간 대응)
         components = [
-            (row['recent'],   weights['recent']),
-            (row['momentum'], weights['momentum']),
-            (row['weighted'], weights['weighted']),
-            (row['average'],  weights['average']),
+            (row['recent'],                          effective_weights['recent']),
+            (row['momentum'],                        effective_weights['momentum']),
+            (row['weighted'],                        effective_weights['weighted']),
+            (row['average'],                         effective_weights['average']),
+            (row.get('short_trend', np.nan),         effective_weights.get('short_trend', 0)),
         ]
-        valid = [(v, w) for v, w in components if pd.notna(v)]
+        valid = [(v, w) for v, w in components if pd.notna(v) and w > 0]
         if not valid:
             return np.nan
 
@@ -234,10 +273,53 @@ class PatternClassifier:
 
         # Z-Score 범위 [-3, 3] → [0, 100] 변환
         # Z=3일 때 100점, Z=0일 때 50점, Z=-3일 때 0점
-        score = ((weighted_sum + 3) / 6) * 100
+        base_score = ((weighted_sum + 3) / 6) * 100
+        base_score = float(np.clip(base_score, 0, 100))
 
-        # 클리핑 (0~100 범위)
-        return float(np.clip(score, 0, 100))
+        # Temporal consistency 보너스: ±10점 (지속형 제외)
+        # 지속형은 tc=0.0(장기>단기)이 이상적이므로 tc 보너스 부적절
+        # 모멘텀형/전환형/기타: tc=1.0 → +10점, tc=0.5 → 0점, tc=0.0 → -10점
+        if pattern != '지속형':
+            tc = row.get('temporal_consistency', 0.5)
+            if pd.notna(tc):
+                tc_bonus = (tc - 0.5) * 20
+                base_score += tc_bonus
+
+        return float(np.clip(base_score, 0, 100))
+
+    @staticmethod
+    def _compute_temporal_consistency(df: pd.DataFrame) -> pd.Series:
+        """
+        인접 기간 Z-Score의 시간 순서 연속성 (0~1)
+        long 방향: 5D ≥ 10D ≥ 20D ≥ 50D ≥ 100D ≥ 200D ≥ 500D 이상적
+
+        tanh 적용 전 원본 Z-Score로 계산해야 정확 (호출 위치 중요).
+        tanh 이후 매도 종목의 Z-Score가 0으로 zeroed-out되면
+        0 >= 0 이 항상 True → tc=1.0 오류 발생.
+
+        Returns:
+            pd.Series: temporal_consistency (0.0~1.0)
+                0.0: 모든 인접 쌍이 역순
+                0.5: 절반만 순서 일치 (유효 쌍 없을 때 기본값)
+                1.0: 모든 인접 쌍이 순서 일치 (꾸준한 상승 추세)
+        """
+        pairs = [('5D', '10D'), ('10D', '20D'), ('20D', '50D'),
+                 ('50D', '100D'), ('100D', '200D'), ('200D', '500D')]
+
+        scores = pd.Series(0.0, index=df.index)
+        valid_counts = pd.Series(0.0, index=df.index)
+
+        for short_col, long_col in pairs:
+            if short_col not in df.columns or long_col not in df.columns:
+                continue
+            mask = df[short_col].notna() & df[long_col].notna()
+            scores += np.where(mask & (df[short_col] >= df[long_col]), 1.0, 0.0)
+            valid_counts += mask.astype(float)
+
+        return pd.Series(
+            np.where(valid_counts > 0, scores / valid_counts, 0.5),
+            index=df.index
+        )
 
     @staticmethod
     def _apply_direction_confidence(df: pd.DataFrame, direction: str) -> pd.DataFrame:
@@ -255,16 +337,23 @@ class PatternClassifier:
         tanh는 자기 변동성(rolling_std) 대비 상대적으로 정규화하므로
         하드코딩된 임계값 없이 종목별 자동 조정된다.
 
+        방향 판단 기준: _sff_5d_avg (5일 평균 sff) 우선, 없으면 _today_sff 폴백.
+        오늘 하루 소폭 매도가 있어도 최근 5일 평균이 매수면 long 신호 보존.
+
         Args:
-            df: Z-Score 컬럼 + _today_sff + _std_*D 메타데이터 포함 DataFrame
+            df: Z-Score 컬럼 + (_sff_5d_avg 또는 _today_sff) + _std_*D 메타데이터 포함 DataFrame
             direction: 'long' (현재 Z-Score 부호 그대로) 또는 'short' (이미 반전됨)
 
         Returns:
             pd.DataFrame: Z-Score 컬럼이 confidence 적용된 DataFrame
         """
-        if '_today_sff' not in df.columns:
+        # 방향 판단 기준: _sff_5d_avg 우선, 없으면 _today_sff 폴백
+        # _sff_5d_avg를 쓰는 이유: 오늘 하루 소폭 매도가 있어도 최근 5일이 순매수면
+        # 장기 매수 신호를 보존. today_sff만 보면 오늘 sff<0 → confidence=0 → 신호 소거
+        if '_sff_5d_avg' not in df.columns and '_today_sff' not in df.columns:
             return df
 
+        sff_col = '_sff_5d_avg' if '_sff_5d_avg' in df.columns else '_today_sff'
         period_cols = ['5D', '10D', '20D', '50D', '100D', '200D', '500D']
 
         for col in period_cols:
@@ -272,10 +361,10 @@ class PatternClassifier:
             if col not in df.columns or std_col not in df.columns:
                 continue
 
-            # confidence = tanh(today_sff / rolling_std)
+            # confidence = tanh(sff_5d_avg / rolling_std)
             # rolling_std가 0이면 confidence도 0 (안전 처리)
             std_safe = df[std_col].replace(0, np.nan)
-            confidence = np.tanh(df['_today_sff'] / std_safe).fillna(0)
+            confidence = np.tanh(df[sff_col] / std_safe).fillna(0)
 
             if direction == 'long':
                 # 양수 sff(매수)만 통과, 음수 sff(매도) 제거
@@ -298,9 +387,9 @@ class PatternClassifier:
         Returns:
             pd.DataFrame: 패턴 분류 결과
                 - stock_code: 종목코드
-                - 5D~500D: 7개 기간 Z-Score
-                - recent, momentum, weighted, average: 4가지 정렬 키
-                - volatility, persistence, sl_ratio: 추가 특성
+                - 5D~500D: 7개 기간 Z-Score (원본 값, 출력용)
+                - recent, momentum, weighted, average, short_trend: 5가지 정렬 키
+                - volatility, persistence, sl_ratio, temporal_consistency: 추가 특성
                 - pattern: 패턴명 (모멘텀형/지속형/전환형/기타)
                 - score: 패턴 강도 점수 (0~100)
                 - direction: 'long' 또는 'short'
@@ -310,6 +399,9 @@ class PatternClassifier:
             - direction='short': 음수 Z-Score 분석 (순매도)
             - 패턴 이름은 방향과 무관하게 동일 (모멘텀형/지속형/전환형)
             - short일 때 Z-Score 부호 반전하여 분석
+            - temporal_consistency: tanh 이전 계산 (0>=0 오류 방지)
+            - short_trend: tanh 이후 계산 (sort key와 스케일 일치)
+            - 출력 short_trend: 원본 Z-Score 복원 후 재계산 (표시 일관성)
 
         Example:
             >>> classifier = PatternClassifier()
@@ -333,12 +425,25 @@ class PatternClassifier:
                 if col in df.columns:
                     df[col] = -df[col]
 
+        # [temporal_consistency] — tanh 적용 전에 계산 (중요!)
+        # tanh 이후에는 매도 종목의 Z-Score가 0으로 zeroed-out되어
+        # 0>=0 이 항상 True → tc=1.0 오류 발생하므로 반드시 이전에 계산
+        df['temporal_consistency'] = self._compute_temporal_consistency(df)
+
         # 방향 확신도(direction confidence) 적용
         # Z-Score는 편차를 측정하므로, 매도 중인 종목도 Z>0이 될 수 있음 (매도 완화)
         # confidence = tanh(today_sff / rolling_std)로 실제 수급 방향을 반영
         df = self._apply_direction_confidence(df, direction)
 
-        # 1. 4가지 정렬 키 계산
+        # [short_trend] — tanh 적용 후에 계산 (중요!)
+        # recent/momentum/weighted/average와 동일한 post-tanh 스케일을 사용해야
+        # 점수 계산 시 가중치가 의도한 비율로 반영됨 (pre-tanh 값은 스케일이 다름)
+        if '5D' in df.columns and '20D' in df.columns:
+            df['short_trend'] = df['5D'] - df['20D']
+        else:
+            df['short_trend'] = np.nan
+
+        # 1. 5가지 정렬 키 계산
         df = self.calculate_sort_keys(df)
 
         # 2. 추가 특성 계산
@@ -357,11 +462,16 @@ class PatternClassifier:
         for col, original in original_zscores.items():
             df[col] = original
 
+        # 출력용 short_trend 재계산: 복원된 원본 Z-Score 기준 (표시 일관성, Fix #3)
+        # 분류/점수는 이미 post-tanh 값으로 계산 완료 → 이 재계산은 출력 컬럼 전용
+        if '5D' in df.columns and '20D' in df.columns:
+            df['short_trend'] = df['5D'] - df['20D']
+
         # 6. 컬럼 순서 정리
         base_cols = ['stock_code']
         period_cols = ['5D', '10D', '20D', '50D', '100D', '200D', '500D']
-        sort_key_cols = ['recent', 'momentum', 'weighted', 'average']
-        feature_cols = ['volatility', 'persistence', 'sl_ratio']
+        sort_key_cols = ['recent', 'momentum', 'weighted', 'average', 'short_trend']
+        feature_cols = ['volatility', 'persistence', 'sl_ratio', 'temporal_consistency']
         result_cols = ['pattern', 'score', 'direction']
 
         # 존재하는 컬럼만 선택 (유연성)

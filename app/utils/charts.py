@@ -93,15 +93,18 @@ def create_zscore_heatmap(
 
     # 방향 확신도 기반 정렬 키 계산
     # Z-Score는 편차 측정이므로 매도 중 종목도 양수 Z가 가능 (매도 완화)
-    # confidence = tanh(today_sff / rolling_std)로 실제 수급 방향을 반영하여 정렬
-    has_sff_meta = '_today_sff' in df.columns
+    # confidence = tanh(sff / rolling_std)로 실제 수급 방향을 반영하여 정렬
+    # _sff_5d_avg 우선 (5일 평균 — 오늘 하루 소폭 매도에 과잉 반응 방지)
+    # _today_sff 폴백 (5일 평균 메타데이터가 없는 경우)
+    _sff_col = '_sff_5d_avg' if '_sff_5d_avg' in df.columns else '_today_sff'
+    has_sff_meta = _sff_col in df.columns
     adj = {}
     if has_sff_meta:
         for col in period_cols:
             std_col = f'_std_{col}'
             if std_col in df.columns:
                 std_safe = df[std_col].replace(0, np.nan)
-                conf = np.tanh(df['_today_sff'] / std_safe).fillna(0)
+                conf = np.tanh(df[_sff_col] / std_safe).fillna(0)
                 adj[col] = conf
             else:
                 adj[col] = pd.Series(1.0, index=df.index)

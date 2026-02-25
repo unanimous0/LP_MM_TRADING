@@ -4,7 +4,7 @@
 - **현재 작업**: Stage 5-1 Streamlit 웹 대시보드 진행 중
 - **마지막 업데이트**: 2026-02-25
 - **백테스트 권장 시작일**: 2025-01-01 이후 (DB가 2024-01-02 시작이므로 1Y 데이터 확보)
-- **다음 시작점**: 스코어링 시스템 개선 검토 (모멘텀 방향성/시간 순서 반영)
+- **다음 시작점**: 스코어링 개선 완료 — 다음 기능 기획 또는 실제 데이터로 검증
 - **시각화**: matplotlib 5종 (PNG/PDF) + Plotly 5종 (Streamlit 인터랙티브)
 - **Streamlit**: `venv/bin/streamlit run app/streamlit_app.py` → http://localhost:8501
 - **현재 브랜치**: main
@@ -145,7 +145,14 @@ git push
 - **섹터 크로스 분석**: 섹터×패턴 스택 바차트 + 섹터별 평균 점수 + 교차 테이블 + 시그널 통계
 - **수급 집중도**: 섹터점수 = 평균점수 × (1 + 고득점/전체) + TOP 10 수평 바차트
 - **D3.js Treemap**: 섹터별 종목 박스 (크기=점수, 색=RdYlGn, 호버 툴팁, 섹터 라벨+점수)
-- 258개 테스트 (100% 통과)
+- **스코어링 개선**: Temporal Consistency(tc) + Short Trend → 인접 기간 Z-Score 순서 + 단기 모멘텀 방향 반영
+  - tc 미달 시 모멘텀형 → 기타 (tc≥0.5), 지속형은 tc 조건 없음 (장기매집 특성상 tc=0.0 정상)
+  - 점수 보너스 ±10점: `tc_bonus = (tc - 0.5) × 20` (지속형 제외)
+  - short_trend = 5D - 20D (가중치 0.15, tanh 이후 계산 — sort key 스케일 일치)
+  - 지속형은 short_trend 가중치=0 (5D<20D가 이상적 패턴이므로 패널티 방지)
+  - 방향 확신도 기준: `_sff_5d_avg` (5일 평균) 사용 — 하루 소폭 매도로 제외되는 엣지 케이스 방지
+  - 3개 경로 모두 일치: `pattern_classifier.py`, `precomputer.py`, `charts.py`
+- 269개 테스트 (100% 통과)
 
 **핵심 인사이트**:
 - 3개 패턴은 투자 스타일별 최적 종목 필터링 (단기=돌파형, 중기=매집형, 저가=반등형)
@@ -815,6 +822,74 @@ short 정렬/분류: adjusted_z = z × max(-confidence, 0)   ← 매도 방향�
 ---
 
 ## [Progress History]
+
+### 2026-02-25 (스코어링 시스템 개선 — Temporal Consistency + Short Trend)
+
+**목표**: 7개 기간 간 Z-Score 순서 일관성(tc)과 단기 모멘텀 방향(short_trend)을 점수에 반영
+
+**문제**:
+- 종목 A (5D>10D>...>500D 꾸준 상승)와 종목 B (최근만 급등, 과거 혼조)가 비슷한 점수 → 투자 신뢰도 구분 불가
+
+**1차 구현** (`src/analyzer/pattern_classifier.py`):
+
+- ✅ **`_get_default_config()` 업데이트**
+  - `temporal_consistency_min` 임계값 추가: 모멘텀형 0.5
+  - `score_weights` 업데이트: `momentum` 0.25→0.20, `average` 0.20→0.10, `short_trend` 0.15 신규 (합계 1.00 유지)
+
+- ✅ **`_compute_temporal_consistency()` 신규 static 메서드**
+  - 6개 인접 쌍 (5D≥10D, 10D≥20D, ..., 200D≥500D) 순서 일치 비율 반환 (0~1)
+  - tc=1.0: 완전 순서 일치, tc=0.5: 절반 일치(기본), tc=0.0: 완전 역순
+  - NaN 쌍은 유효 쌍으로만 계산
+
+- ✅ **`classify_all()` 수정 — 계산 순서 핵심**
+  - `temporal_consistency` — tanh **이전** 계산 (tanh 후 0≥0 항상 True → tc=1.0 오류 방지)
+  - `short_trend = 5D - 20D` — tanh **이후** 계산 (sort key와 스케일 일치)
+  - 원본 Z-Score 복원 후 `short_trend` **재계산** (출력 표시값 일관성)
+
+- ✅ **`classify_pattern()` 수정** — 모멘텀형 tc≥0.5 미달 시 기타 분류
+
+- ✅ **`calculate_pattern_score()` 수정**
+  - short_trend 5번째 컴포넌트 포함 (가중치 0.15)
+  - tc 보너스 ±10점: `tc_bonus = (tc - 0.5) × 20`
+  - **지속형 패턴 인식**: 이상적 지속형은 5D<20D(장기>단기) → short_trend 가중치=0(average로 재분배), tc_bonus 없음
+  - `valid` 필터: `w > 0` 조건 추가 → zero-weight 컴포넌트 제외 (valid_total_w=0 방지)
+
+- ✅ **출력 컬럼**: `sort_key_cols`에 `short_trend`, `feature_cols`에 `temporal_consistency`
+- ✅ **UI 노출**: `2_🔍_패턴분석.py` 정렬 옵션 + 컬럼 표시에 `short_trend`, `temporal_consistency` 추가
+
+**2차 수정 — 엣지 케이스 & 코드 리뷰**:
+
+- ✅ **방향 확신도 기준 `_sff_5d_avg` 로 교체** (3개 파일)
+  - **문제**: `_today_sff` 사용 시 "수개월 강매수 중 하루 소폭 매도" → confidence=0 → 전체 신호 소멸
+  - **해결**: 5일 rolling 평균 사용 → 단일 일 노이즈 무시
+  - `performance_optimizer.py`: `sff_5d_avg` 계산 + `_sff_5d_avg` 메타컬럼 추가
+  - `precomputer.py`: `_sff_5d_avg` 메타컬럼 추가 (백테스트 경로)
+  - `pattern_classifier._apply_direction_confidence()`: `_sff_5d_avg` 우선, `_today_sff` 폴백
+
+- ✅ **`charts.py` 히트맵 정렬도 `_sff_5d_avg` 통일**
+  - `_sff_col = '_sff_5d_avg' if '_sff_5d_avg' in df.columns else '_today_sff'`
+  - 3개 경로(pattern_classifier / precomputer / charts) 동일한 방향 확신도 기준 사용
+
+**파일** (7개):
+```
+src/analyzer/pattern_classifier.py    (tc + short_trend 구현 + 지속형 패턴인식 + sff_5d_avg)
+src/backtesting/precomputer.py        (_sff_5d_avg 메타컬럼 추가)
+src/visualizer/performance_optimizer.py (sff_5d_avg 계산 + _sff_5d_avg 메타컬럼)
+app/utils/charts.py                   (히트맵 정렬 _sff_5d_avg 통일)
+app/pages/2_🔍_패턴분석.py            (short_trend/temporal_consistency 정렬 + 컬럼 노출)
+tests/test_pattern_classifier.py      (신규 11개: tc/short_trend/지속형/sff_5d_avg 검증)
+tests/test_performance_optimizer.py   (_sff_5d_avg 메타컬럼 존재 확인)
+```
+
+**점수 변화**:
+- 꾸준한 상승 (5D>10D>...>500D) + short_trend>0: +10~15점 상승
+- 최근만 급등, 과거 혼조: ±5점 (혼조에 따라 다름)
+- tc 미달(모멘텀형 <0.5) 종목: 기타로 재분류
+- 지속형: tc 조건 없음 (tc=0.0이 장기매집 정상 패턴), short_trend 불이익 없음
+
+**테스트**: 269개 (100% 통과) — 기존 258 + 신규 11
+
+---
 
 ### 2026-02-25 (패턴분석 페이지 고도화 — 정렬/방향 필터 + 섹터 분석 4개 탭 추가)
 

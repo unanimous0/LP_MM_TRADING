@@ -198,9 +198,15 @@ class BacktestPrecomputer:
         period_cols = list(PERIODS.keys())
         df[period_cols] = df[period_cols].replace([np.inf, -np.inf], np.nan)
 
-        # _today_sff + _std_*D 메타데이터도 함께 저장 (방향 확신도용)
-        meta_cols = ['_today_sff'] + std_cols
+        # 방향 확신도 메타데이터 (_today_sff, _sff_5d_avg, _std_*D)
+        # _sff_5d_avg: 오늘 하루 소폭 매도에도 방향이 바뀌지 않도록 5일 평균 사용
+        #   (오늘만 보면: 장기 매수 중 하루 소폭 매도 → confidence=0 → 신호 소거 문제)
+        #   (5일 평균으로 보면: 하루 소폭 매도는 희석 → 장기 방향 유지)
         df['_today_sff'] = df['combined_sff']
+        df['_sff_5d_avg'] = df.groupby('stock_code')['combined_sff'].transform(
+            lambda x: x.rolling(5, min_periods=1).mean()
+        )
+        meta_cols = ['_today_sff', '_sff_5d_avg'] + std_cols
 
         result = df[['trade_date', 'stock_code'] + period_cols + meta_cols].copy()
         return result.set_index(['trade_date', 'stock_code'])

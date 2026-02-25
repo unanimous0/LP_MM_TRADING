@@ -57,6 +57,9 @@ class TestPatternClassifier:
         assert (result['persistence'] >= 0).all()
         assert (result['persistence'] <= 1).all()
 
+        # temporal_consistency is computed in classify_all, not calculate_features
+        # (that's by design — it must run before tanh)
+
     def test_calculate_sort_keys(self, classifier, sample_zscore_matrix):
         """Test sort key calculation"""
         result = classifier.calculate_sort_keys(sample_zscore_matrix)
@@ -89,7 +92,8 @@ class TestPatternClassifier:
             'recent': 1.0,
             'momentum': 1.5,
             'weighted': 0.5,
-            'persistence': 0.5
+            'persistence': 0.5,
+            'temporal_consistency': 0.6,  # 기준 0.5 충족
         })
 
         pattern = classifier.classify_pattern(row)
@@ -101,7 +105,8 @@ class TestPatternClassifier:
             'recent': 0.7,
             'momentum': 0.3,
             'weighted': 0.9,
-            'persistence': 0.8
+            'persistence': 0.8,
+            'temporal_consistency': 0.7,  # 기준 0.6 충족
         })
 
         pattern = classifier.classify_pattern(row)
@@ -160,6 +165,8 @@ class TestPatternClassifier:
         assert 'momentum' in result.columns
         assert 'weighted' in result.columns
         assert 'average' in result.columns
+        assert 'short_trend' in result.columns
+        assert 'temporal_consistency' in result.columns
 
         # Check row count
         assert len(result) == len(sample_zscore_matrix)
@@ -363,3 +370,169 @@ class TestPatternClassifier:
         """Test invalid direction parameter"""
         with pytest.raises(ValueError, match="direction must be 'long' or 'short'"):
             classifier.classify_all(sample_zscore_matrix, direction='invalid')
+
+    # ------------------------------------------------------------------
+    # 신규 테스트: Temporal Consistency + Short Trend (8개)
+    # ------------------------------------------------------------------
+
+    def test_temporal_consistency_perfect_order(self, classifier):
+        """5D > 10D > ... > 500D 완전 순서 일치 → tc = 1.0"""
+        df = pd.DataFrame({
+            'stock_code': ['A'],
+            '5D':   [3.0],
+            '10D':  [2.5],
+            '20D':  [2.0],
+            '50D':  [1.5],
+            '100D': [1.0],
+            '200D': [0.5],
+            '500D': [0.0],
+        })
+        tc = PatternClassifier._compute_temporal_consistency(df)
+        assert tc.iloc[0] == pytest.approx(1.0)
+
+    def test_temporal_consistency_reverse_order(self, classifier):
+        """5D < 10D < ... < 500D 완전 역순 → tc = 0.0"""
+        df = pd.DataFrame({
+            'stock_code': ['A'],
+            '5D':   [0.0],
+            '10D':  [0.5],
+            '20D':  [1.0],
+            '50D':  [1.5],
+            '100D': [2.0],
+            '200D': [2.5],
+            '500D': [3.0],
+        })
+        tc = PatternClassifier._compute_temporal_consistency(df)
+        assert tc.iloc[0] == pytest.approx(0.0)
+
+    def test_temporal_consistency_mixed(self, classifier):
+        """절반 정도 순서 일치 → tc ≈ 0.5"""
+        df = pd.DataFrame({
+            'stock_code': ['A'],
+            '5D':   [2.0],  # 5D>=10D ✓
+            '10D':  [1.0],  # 10D<20D ✗
+            '20D':  [1.5],  # 20D>=50D ✓
+            '50D':  [1.0],  # 50D<100D ✗
+            '100D': [1.2],  # 100D>=200D ✓
+            '200D': [1.0],  # 200D<500D ✗
+            '500D': [1.1],
+        })
+        tc = PatternClassifier._compute_temporal_consistency(df)
+        assert tc.iloc[0] == pytest.approx(0.5)
+
+    def test_temporal_consistency_with_nan(self, classifier):
+        """NaN 포함 시 유효 쌍으로만 계산 (NaN 쌍은 건너뜀)"""
+        df = pd.DataFrame({
+            'stock_code': ['A'],
+            '5D':   [2.0],
+            '10D':  [1.0],   # 5D>=10D ✓
+            '20D':  [np.nan],  # 10D~20D 쌍 무효
+            '50D':  [np.nan],  # 20D~50D 쌍 무효
+            '100D': [1.5],
+            '200D': [1.0],   # 100D>=200D ✓
+            '500D': [0.5],   # 200D>=500D ✓
+        })
+        tc = PatternClassifier._compute_temporal_consistency(df)
+        # 유효 쌍: (5D,10D) ✓, (100D,200D) ✓, (200D,500D) ✓ → 3/3 = 1.0
+        assert tc.iloc[0] == pytest.approx(1.0)
+
+    def test_short_trend_in_output(self, classifier, sample_zscore_matrix):
+        """classify_all 결과의 short_trend = 출력 5D - 출력 20D (원본 Z-Score 기준)"""
+        result = classifier.classify_all(sample_zscore_matrix)
+        assert 'short_trend' in result.columns
+        # 출력 5D/20D는 원본 Z-Score 복원값 → short_trend도 원본 기준이어야 함 (Fix #3)
+        expected_st = result['5D'] - result['20D']
+        pd.testing.assert_series_equal(
+            result['short_trend'].reset_index(drop=True),
+            expected_st.reset_index(drop=True),
+            check_names=False,
+        )
+
+    def test_temporal_consistency_in_output(self, classifier, sample_zscore_matrix):
+        """classify_all 결과에 temporal_consistency 컬럼 존재 및 범위 확인"""
+        result = classifier.classify_all(sample_zscore_matrix)
+        assert 'temporal_consistency' in result.columns
+        assert (result['temporal_consistency'] >= 0.0).all()
+        assert (result['temporal_consistency'] <= 1.0).all()
+
+    def test_momentum_pattern_blocks_low_tc(self, classifier):
+        """tc 미달(0.3 < 0.5) 종목은 모멘텀형 → 기타로 분류"""
+        row = pd.Series({
+            'recent': 1.0,
+            'momentum': 1.5,
+            'weighted': 0.4,
+            'persistence': 0.4,
+            'temporal_consistency': 0.3,  # 기준 0.5 미달
+        })
+        pattern = classifier.classify_pattern(row)
+        # 모멘텀형 tc 기준(0.5) 미달이므로 기타
+        assert pattern != '모멘텀형'
+
+    def test_score_increases_with_consistency(self, classifier):
+        """tc=1.0이 tc=0.0보다 점수가 10점 이상 높음 (비-지속형 패턴)"""
+        base = {
+            'recent': 1.0,
+            'momentum': 0.5,
+            'weighted': 0.8,
+            'average': 0.6,
+            'short_trend': 0.3,
+            # 'pattern' 없음 → '' → tc_bonus 적용됨
+        }
+        row_high_tc = pd.Series({**base, 'temporal_consistency': 1.0})
+        row_low_tc  = pd.Series({**base, 'temporal_consistency': 0.0})
+
+        score_high = classifier.calculate_pattern_score(row_high_tc)
+        score_low  = classifier.calculate_pattern_score(row_low_tc)
+
+        # tc=1.0 → +10점, tc=0.0 → -10점 → 차이 = 20점
+        assert score_high - score_low == pytest.approx(20.0, abs=0.1)
+
+    def test_sustained_pattern_with_low_tc(self, classifier):
+        """지속형은 tc 조건이 없으므로 tc=0.1도 지속형으로 분류됨"""
+        row = pd.Series({
+            'recent': 0.7,
+            'momentum': 0.3,
+            'weighted': 0.9,
+            'persistence': 0.8,
+            'temporal_consistency': 0.1,  # 낮은 tc → 지속형은 0.0 이상이면 통과
+        })
+        pattern = classifier.classify_pattern(row)
+        assert pattern == '지속형'
+
+    def test_sustained_score_no_short_trend_penalty(self, classifier):
+        """지속형은 short_trend 음수여도 점수 패널티 없음 (가중치 0 처리)"""
+        base = {
+            'recent': 0.7,
+            'momentum': 0.3,
+            'weighted': 0.9,
+            'average': 0.6,
+            'temporal_consistency': 0.2,
+            'pattern': '지속형',
+        }
+        row_neg_st = pd.Series({**base, 'short_trend': -1.0})  # 음수: 지속형에서 정상
+        row_pos_st = pd.Series({**base, 'short_trend':  1.0})  # 양수: 단기 모멘텀 있음
+
+        score_neg = classifier.calculate_pattern_score(row_neg_st)
+        score_pos = classifier.calculate_pattern_score(row_pos_st)
+
+        # 지속형은 short_trend 가중치 = 0 → 음수/양수 상관없이 동일 점수
+        assert score_neg == pytest.approx(score_pos, abs=0.01)
+
+    def test_sustained_no_tc_bonus(self, classifier):
+        """지속형은 tc 보너스 없음 — tc=1.0 vs tc=0.0 점수 동일"""
+        base = {
+            'recent': 0.7,
+            'momentum': 0.3,
+            'weighted': 0.9,
+            'average': 0.6,
+            'short_trend': -0.5,
+            'pattern': '지속형',
+        }
+        row_high_tc = pd.Series({**base, 'temporal_consistency': 1.0})
+        row_low_tc  = pd.Series({**base, 'temporal_consistency': 0.0})
+
+        score_high = classifier.calculate_pattern_score(row_high_tc)
+        score_low  = classifier.calculate_pattern_score(row_low_tc)
+
+        # 지속형: tc_bonus 미적용 → 두 점수 동일
+        assert score_high == pytest.approx(score_low, abs=0.01)

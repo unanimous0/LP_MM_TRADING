@@ -99,17 +99,21 @@ class OptimizedMultiPeriodCalculator:
         for period_name, result in results.items():
             if isinstance(result, pd.DataFrame) and 'zscore' in result.columns:
                 zscore_cols[period_name] = result['zscore']
-                metadata[period_name] = result[['combined_sff', 'rolling_std']]
+                meta_extract = ['combined_sff', 'rolling_std']
+                if 'sff_5d_avg' in result.columns:
+                    meta_extract.append('sff_5d_avg')
+                metadata[period_name] = result[meta_extract]
             else:
                 zscore_cols[period_name] = result
 
         df_result = pd.DataFrame(zscore_cols)
 
-        # 방향 확신도 계산용 메타데이터 추가 (_today_sff, _std_*D)
-        # today_sff는 모든 기간에서 동일 (당일 combined_sff), 아무 기간이나 사용
+        # 방향 확신도 계산용 메타데이터 추가 (_today_sff, _sff_5d_avg, _std_*D)
+        # today_sff / sff_5d_avg는 모든 기간에서 동일 (당일/5일평균 combined_sff)
         if metadata:
             first_period = list(metadata.keys())[0]
             df_result['_today_sff'] = metadata[first_period]['combined_sff']
+            df_result['_sff_5d_avg'] = metadata[first_period]['sff_5d_avg']
             for p_name, meta_df in metadata.items():
                 df_result[f'_std_{p_name}'] = meta_df['rolling_std']
 
@@ -142,7 +146,7 @@ class OptimizedMultiPeriodCalculator:
         if self._sff_cache is None or self._sff_cache.empty:
             print("[WARN] Sff cache is empty")
             if return_metadata:
-                return pd.DataFrame(columns=['zscore', 'combined_sff', 'rolling_std'])
+                return pd.DataFrame(columns=['zscore', 'combined_sff', 'rolling_std', 'sff_5d_avg'])
             return pd.Series(dtype=float)
 
         # 메모리 최적화: 필요한 컬럼만 선택하여 복사 (메모리 사용량 감소)
@@ -174,12 +178,20 @@ class OptimizedMultiPeriodCalculator:
         # inf/nan 처리 (std=0인 경우)
         df['zscore'] = df['zscore'].replace([np.inf, -np.inf], np.nan)
 
+        # 5일 rolling mean (방향 확신도 분모로 사용)
+        # 오늘 하루 소폭 매도에도 방향이 바뀌지 않도록 5일 평균 사용
+        df['sff_5d_avg'] = df.groupby('stock_code')['combined_sff'].transform(
+            lambda x: x.rolling(5, min_periods=1).mean()
+        )
+
         # 최신 날짜만 추출
         latest_date = df['trade_date'].max()
         df_latest = df[df['trade_date'] == latest_date]
 
         if return_metadata:
-            return df_latest.set_index('stock_code')[['zscore', 'combined_sff', 'rolling_std']]
+            return df_latest.set_index('stock_code')[
+                ['zscore', 'combined_sff', 'rolling_std', 'sff_5d_avg']
+            ]
         return df_latest.set_index('stock_code')['zscore']
 
     def _calculate_parallel(self, periods_dict: Dict[str, int]) -> Dict[str, pd.Series]:
@@ -214,7 +226,7 @@ class OptimizedMultiPeriodCalculator:
                 except Exception as e:
                     print(f"  - Failed {period_name}: {e}")
                     results[period_name] = pd.DataFrame(
-                        columns=['zscore', 'combined_sff', 'rolling_std']
+                        columns=['zscore', 'combined_sff', 'rolling_std', 'sff_5d_avg']
                     )
 
         return results
