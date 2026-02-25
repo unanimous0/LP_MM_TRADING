@@ -14,7 +14,6 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 import streamlit as st
-import streamlit.components.v1 as components
 import pandas as pd
 from datetime import datetime
 
@@ -28,7 +27,7 @@ from utils.charts import (
     create_sector_avg_score_chart,
     create_sector_zscore_heatmap,
     create_sector_concentration_chart,
-    create_sector_treemap_html,
+    create_sector_treemap,
 )
 from src.analyzer.integrated_report import IntegratedReport
 
@@ -334,9 +333,8 @@ with tab7:
         st.info("데이터가 없습니다.")
     else:
         st.caption("박스 크기: 종합점수 비례 | 색상: 빨강(낮음) → 초록(높음) | 섹터별 상위 10개 종목")
-        st.markdown('<style>.stElementContainer:has(iframe) iframe { width: 100% !important; }</style>', unsafe_allow_html=True)
-        treemap_html = create_sector_treemap_html(_src_df)
-        components.html(treemap_html, height=820, scrolling=False)
+        fig_treemap = create_sector_treemap(_src_df)
+        st.plotly_chart(fig_treemap, width='stretch', theme=None)
 
 # ---------------------------------------------------------------------------
 # 종목 상세

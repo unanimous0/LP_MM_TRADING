@@ -654,221 +654,132 @@ def create_sector_concentration_chart(report_df: pd.DataFrame, min_stocks: int =
     return _apply_dark(fig)
 
 
-def create_sector_treemap_html(report_df: pd.DataFrame, top_per_sector: int = 10) -> str:
-    """섹터별 종목 Treemap — D3.js 기반 HTML 반환 (st.components.v1.html용)
+def create_sector_treemap(report_df: pd.DataFrame, top_per_sector: int = 10) -> go.Figure:
+    """섹터별 종목 Treemap — Plotly go.Treemap 기반
 
     박스 크기: 종합점수 비례, 색상: 빨강(낮음) → 초록(높음)
-    다크 테마, 섹터 헤더 라벨, 동적 텍스트 크기, 호버 툴팁
+    다크 테마, 섹터 헤더에 평균점수/종목수 표시, 호버 툴팁
     """
-    import json as _json
-
     if report_df.empty or 'sector' not in report_df.columns:
-        return '<div style="color:#94a3b8;padding:40px;text-align:center;">데이터 없음</div>'
+        fig = go.Figure()
+        fig.add_annotation(
+            text="데이터 없음", x=0.5, y=0.5, xref='paper', yref='paper',
+            showarrow=False, font=dict(size=16, color='#94a3b8'),
+        )
+        return _apply_dark(fig)
 
     df = report_df.copy()
     df['sector'] = df['sector'].fillna('기타')
     if 'final_score' not in df.columns:
-        df['final_score'] = df['score'] + df.get('signal_count', 0) * 5
+        df['final_score'] = df.get('score', 50) + df.get('signal_count', 0) * 5
 
-    # 섹터별 상위 종목 → 계층 데이터
-    sector_order = df.groupby('sector')['final_score'].sum().nlargest(20).index.tolist()
-    treemap_data = {'name': 'root', 'children': []}
-    for sector in sector_order:
-        sec_df = df[df['sector'] == sector].nlargest(top_per_sector, 'final_score')
+    # 상위 20개 섹터 × 섹터별 top_per_sector 종목
+    top_sectors = df.groupby('sector')['final_score'].sum().nlargest(20).index.tolist()
+    rows = [df[df['sector'] == s].nlargest(top_per_sector, 'final_score') for s in top_sectors]
+    rows = [r for r in rows if not r.empty]
+    if not rows:
+        return _apply_dark(go.Figure())
+    plot_df = pd.concat(rows, ignore_index=True)
+
+    # 노드 빌드 (sector → stock, branchvalues='remainder' → 부모 value=0)
+    ids, labels, parents = [], [], []
+    values, text_list, colors, custom = [], [], [], []
+
+    _PAT_LABEL = {'모멘텀형': '▲ 모멘텀형', '지속형': '◆ 지속형', '전환형': '↩ 전환형'}
+
+    for sector in top_sectors:
+        sec_df = plot_df[plot_df['sector'] == sector]
         if sec_df.empty:
             continue
-        children = []
-        for _, r in sec_df.iterrows():
-            children.append({
-                'name': str(r['stock_name']),
-                'value': float(r['final_score']),
-                'code': str(r['stock_code']),
-                'pattern': str(r.get('pattern', '기타')),
-                'score': round(float(r['final_score']), 1),
-                'signals': int(r.get('signal_count', 0)),
-            })
         sec_avg = float(sec_df['final_score'].mean())
-        high_count = int((sec_df['final_score'] >= 70).sum())
-        sec_score = sec_avg * (1 + high_count / len(sec_df))
-        treemap_data['children'].append({
-            'name': sector,
-            'avg_score': round(sec_avg, 1),
-            'sector_score': round(sec_score, 1),
-            'children': children,
-        })
+        n = len(sec_df)
+        sec_id = f'__sec__{sector}'
 
-    data_json = _json.dumps(treemap_data, ensure_ascii=False)
+        ids.append(sec_id)
+        labels.append(sector)
+        parents.append('')
+        values.append(0)
+        text_list.append(f'평균 {sec_avg:.1f}점  ·  {n}종목')
+        colors.append(sec_avg)
+        custom.append(['', '섹터', str(n), f'{sec_avg:.1f}'])
 
-    return f'''
-<div id="treemap-container" style="width:100%;background:#0f172a;border-radius:8px;position:relative;"></div>
-<script src="https://d3js.org/d3.v7.min.js"></script>
-<script>
-const iframe = window.frameElement;
-if (iframe) {{ iframe.style.width = "100%"; }}
+        for _, row in sec_df.iterrows():
+            score = float(row['final_score'])
+            pat = str(row.get('pattern', '기타'))
+            sig = int(row.get('signal_count', 0))
+            sig_str = '●' * sig if sig > 0 else ''
 
-(function() {{
-const data = {data_json};
-const container = document.getElementById("treemap-container");
-const W = 1400;
-const H = 800;
+            ids.append(str(row['stock_code']))
+            labels.append(str(row['stock_name']))
+            parents.append(sec_id)
+            values.append(score)
+            text_list.append(f'{score:.0f}점  {sig_str}')
+            colors.append(score)
+            custom.append([
+                str(row['stock_code']),
+                _PAT_LABEL.get(pat, pat),
+                str(sig),
+                f'{score:.1f}',
+            ])
 
-const svg = d3.select(container).append("svg")
-    .attr("viewBox", `0 0 ${{W}} ${{H}}`)
-    .attr("width", "100%")
-    .style("display", "block");
+    _RDYLGN = [
+        [0.00, '#991b1b'],  # red-800
+        [0.20, '#dc2626'],  # red-600
+        [0.42, '#ca8a04'],  # yellow-600
+        [0.58, '#65a30d'],  # lime-600
+        [0.80, '#16a34a'],  # green-600
+        [1.00, '#15803d'],  # green-700
+    ]
 
-// 툴팁
-const tip = d3.select(container).append("div")
-    .style("position","absolute").style("pointer-events","none")
-    .style("background","rgba(15,23,42,0.95)").style("color","#e2e8f0")
-    .style("border","1px solid #334155").style("border-radius","8px")
-    .style("padding","12px 16px").style("font-size","13px")
-    .style("line-height","1.7").style("opacity",0)
-    .style("box-shadow","0 8px 24px rgba(0,0,0,0.5)").style("z-index","100");
+    fig = go.Figure(go.Treemap(
+        ids=ids,
+        labels=labels,
+        parents=parents,
+        values=values,
+        text=text_list,
+        customdata=custom,
+        branchvalues='remainder',
+        marker=dict(
+            colors=colors,
+            colorscale=_RDYLGN,
+            cmin=40, cmax=100,
+            showscale=True,
+            colorbar=dict(
+                thickness=14,
+                len=0.6,
+                x=1.01,
+                tickfont=dict(color='#94a3b8', size=11),
+                tickvals=[40, 55, 70, 85, 100],
+                ticktext=['40', '55', '70', '85', '100'],
+                outlinewidth=0,
+                bgcolor='rgba(0,0,0,0)',
+            ),
+            line=dict(width=2, color='#0f172a'),
+        ),
+        texttemplate='<b>%{label}</b><br>%{text}',
+        hovertemplate=(
+            '<b>%{label}</b>  '
+            '<span style="color:#64748b">%{customdata[0]}</span><br>'
+            '%{customdata[1]}<br>'
+            '점수: <b>%{customdata[3]}</b>  '
+            '시그널: <b>%{customdata[2]}개</b>'
+            '<extra></extra>'
+        ),
+        textfont=dict(color='#ffffff', size=14, family='sans-serif'),
+        insidetextfont=dict(color='#ffffff', size=14),
+        uniformtext=dict(minsize=11, mode='hide'),
+        pathbar=dict(visible=False),
+        tiling=dict(pad=3, squarifyratio=1.618),
+    ))
 
-// 색상: HTML 리포트와 동일한 RdYlGn
-const cScale = d3.scaleSequential()
-    .domain([40, 100])
-    .interpolator(d3.interpolateRdYlGn);
+    fig.update_layout(
+        height=700,
+        margin=dict(t=10, l=5, r=60, b=5),
+        paper_bgcolor='#0f172a',
+        plot_bgcolor='#0f172a',
+    )
 
-function textColor(bg) {{
-    const c = d3.color(bg);
-    return (0.299*c.r + 0.587*c.g + 0.114*c.b) > 140 ? "#1F2937" : "#FFFFFF";
-}}
-
-const root = d3.hierarchy(data).sum(d => d.value).sort((a,b) => b.value - a.value);
-
-d3.treemap()
-    .size([W, H])
-    .padding(1)
-    .paddingOuter(2)
-    .paddingTop(24)
-    .round(true)(root);
-
-// 섹터 배경 (어두운 경계)
-const sectorG = svg.selectAll("g.sector")
-    .data(root.children || []).enter().append("g").attr("class","sector");
-
-sectorG.append("rect")
-    .attr("x", d => d.x0).attr("y", d => d.y0)
-    .attr("width", d => d.x1 - d.x0).attr("height", d => d.y1 - d.y0)
-    .attr("fill","#1e293b").attr("stroke","#334155").attr("stroke-width",1)
-    .attr("rx",2);
-
-// 종목 박스
-const leaves = svg.selectAll("g.leaf")
-    .data(root.leaves()).enter().append("g").attr("class","leaf")
-    .attr("transform", d => `translate(${{d.x0}},${{d.y0}})`);
-
-// clipPath (텍스트 오버플로 방지)
-const defs = svg.append("defs");
-leaves.each(function(d, i) {{
-    defs.append("clipPath").attr("id", "clip-" + i)
-        .append("rect")
-        .attr("width", Math.max(0, d.x1 - d.x0 - 2))
-        .attr("height", Math.max(0, d.y1 - d.y0 - 2))
-        .attr("x", 1).attr("y", 1);
-}});
-
-leaves.append("rect")
-    .attr("width", d => d.x1 - d.x0)
-    .attr("height", d => d.y1 - d.y0)
-    .attr("fill", d => cScale(d.data.score))
-    .attr("stroke","#475569").attr("stroke-width",1).attr("rx",3)
-    .style("cursor","pointer")
-    .on("mouseover", function(e, d) {{
-        d3.select(this).attr("stroke","#FFFFFF").attr("stroke-width",2.5)
-            .style("filter","brightness(1.1)");
-        const pat_c = {{"모멘텀형":"#f472b6","지속형":"#38bdf8","전환형":"#4ade80"}}[d.data.pattern] || "#94a3b8";
-        tip.html(
-            `<div style="border-bottom:1px solid #334155;padding-bottom:6px;margin-bottom:6px;">` +
-            `<strong style="font-size:15px;color:#38bdf8;">${{d.data.name}}</strong>` +
-            `<span style="color:#64748b;margin-left:8px;">${{d.data.code}}</span></div>` +
-            `<span style="color:#94a3b8;">섹터:</span> ${{d.parent.data.name}}<br>` +
-            `<span style="color:#94a3b8;">패턴:</span> <span style="color:${{pat_c}};font-weight:600;">${{d.data.pattern}}</span><br>` +
-            `<span style="color:#94a3b8;">점수:</span> <strong style="color:#4ade80;font-size:15px;">${{d.data.score}}</strong><br>` +
-            `<span style="color:#94a3b8;">시그널:</span> <strong style="color:#fbbf24;">${{d.data.signals}}개</strong>`
-        ).style("opacity",1)
-         .style("left", Math.min(e.offsetX + 15, W - 220) + "px")
-         .style("top", Math.max(e.offsetY - 80, 10) + "px");
-    }})
-    .on("mouseout", function() {{
-        d3.select(this).attr("stroke","#475569").attr("stroke-width",1)
-            .style("filter","none");
-        tip.style("opacity",0);
-    }});
-
-// 텍스트 그룹 (clipPath 적용)
-const textG = leaves.append("g")
-    .attr("clip-path", (d, i) => `url(#clip-${{i}})`)
-    .style("pointer-events","none");
-
-// 종목명
-textG.append("text")
-    .attr("x", d => (d.x1 - d.x0) / 2)
-    .attr("y", d => {{
-        const h = d.y1 - d.y0;
-        return h > 50 ? h/2 - 5 : h/2;
-    }})
-    .attr("text-anchor","middle").attr("dominant-baseline","middle")
-    .text(d => {{
-        const w = d.x1 - d.x0, h = d.y1 - d.y0;
-        if (w > 70 && h > 35) return d.data.name.length > 8 ? d.data.name.substring(0,7) + "…" : d.data.name;
-        if (w > 45 && h > 25) return d.data.name.length > 5 ? d.data.name.substring(0,4) + "…" : d.data.name;
-        return "";
-    }})
-    .attr("font-size", d => {{
-        const w = d.x1 - d.x0;
-        if (w > 120) return "14px";
-        if (w > 80) return "12px";
-        if (w > 50) return "10px";
-        return "8px";
-    }})
-    .attr("font-weight","700")
-    .attr("fill", d => textColor(cScale(d.data.score)));
-
-// 점수
-textG.append("text")
-    .attr("x", d => (d.x1 - d.x0) / 2)
-    .attr("y", d => {{
-        const h = d.y1 - d.y0;
-        return h > 50 ? h/2 + 14 : h/2 + 12;
-    }})
-    .attr("text-anchor","middle").attr("dominant-baseline","middle")
-    .text(d => {{
-        const w = d.x1 - d.x0, h = d.y1 - d.y0;
-        return (w > 70 && h > 45) ? d.data.score + "점" : "";
-    }})
-    .attr("font-size","11px").attr("font-weight","600")
-    .attr("fill", d => textColor(cScale(d.data.score)))
-    .style("opacity",0.9);
-
-// 섹터 라벨 배지 — leaves 위에 그려야 보임 (SVG z-order = DOM 순서)
-(root.children || []).forEach(sector => {{
-    const x0 = sector.x0;
-    const y0 = sector.y0;
-    const sW = sector.x1 - sector.x0;
-
-    const avg = sector.data.avg_score != null ? sector.data.avg_score.toFixed(1) : "";
-    const sc = sector.data.sector_score != null ? sector.data.sector_score.toFixed(1) : "";
-    const label = `${{sector.data.name}} ${{avg}}점 (${{sc}})`;
-    const labelW = Math.min(label.length * 8 + 16, sW);
-
-    svg.append("rect")
-        .attr("x", x0).attr("y", y0)
-        .attr("width", labelW).attr("height", 22)
-        .attr("fill", "rgba(15,23,42,0.85)")
-        .attr("rx", 4).style("pointer-events","none");
-
-    svg.append("text")
-        .attr("x", x0 + 8).attr("y", y0 + 15)
-        .text(sW > 80 ? label : sector.data.name)
-        .attr("font-size","12px").attr("font-weight","700")
-        .attr("fill","#FFFFFF").style("pointer-events","none");
-}});
-
-}})();
-</script>'''
+    return fig
 
 
 # ---------------------------------------------------------------------------
