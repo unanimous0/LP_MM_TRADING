@@ -144,7 +144,10 @@ git push
 - **패턴분석 페이지 고도화**: 사이드바 정렬/방향 필터 + 7개 탭 (종목리스트/패턴통계/시그널/섹터크로스/섹터Z히트맵/수급집중도/Treemap)
 - **섹터 크로스 분석**: 섹터×패턴 스택 바차트 + 섹터별 평균 점수 + 교차 테이블 + 시그널 통계
 - **수급 집중도**: 섹터점수 = 평균점수 × (1 + 고득점/전체) + TOP 10 수평 바차트
-- **D3.js Treemap**: 섹터별 종목 박스 (크기=점수, 색=RdYlGn, 호버 툴팁, 섹터 라벨+점수)
+- **Plotly Treemap**: D3.js → `go.Treemap` 교체 (섹터 라벨에 점수 직접 표시, 다크테마 통합, CDN 의존성 제거)
+  - 섹터 노드 라벨: `'섹터명  평균 XX.X점  (종합점수)'` — 호버 없이 박스에 즉시 표시
+  - per-node texttemplate 배열: 섹터/종목 노드별 다른 표시 형식
+  - 색상: 딥레드→앰버→옐로→sky-400(앱 primary)→에메랄드
 - **스코어링 개선**: Temporal Consistency(tc) + Short Trend → 인접 기간 Z-Score 순서 + 단기 모멘텀 방향 반영
   - tc 미달 시 모멘텀형 → 기타 (tc≥0.5), 지속형은 tc 조건 없음 (장기매집 특성상 tc=0.0 정상)
   - 점수 보너스 ±10점: `tc_bonus = (tc - 0.5) × 20` (지속형 제외)
@@ -152,6 +155,7 @@ git push
   - 지속형은 short_trend 가중치=0 (5D<20D가 이상적 패턴이므로 패널티 방지)
   - 방향 확신도 기준: `_sff_5d_avg` (5일 평균) 사용 — 하루 소폭 매도로 제외되는 엣지 케이스 방지
   - 3개 경로 모두 일치: `pattern_classifier.py`, `precomputer.py`, `charts.py`
+- **프로젝트 보고서**: `WHALE_SUPPLY_REPORT.html` — 배경·수식·파이프라인·사용법·해석 가이드 포함
 - 269개 테스트 (100% 통과)
 
 **핵심 인사이트**:
@@ -888,6 +892,40 @@ tests/test_performance_optimizer.py   (_sff_5d_avg 메타컬럼 존재 확인)
 - 지속형: tc 조건 없음 (tc=0.0이 장기매집 정상 패턴), short_trend 불이익 없음
 
 **테스트**: 269개 (100% 통과) — 기존 258 + 신규 11
+
+---
+
+### 2026-02-25 (Treemap D3.js → Plotly 전환 + 프로젝트 보고서 생성)
+
+**목표**: Treemap 섹터 라벨/점수 가시성 문제 해결 + 프로젝트 전체 보고서 작성
+
+**구현 내용**:
+
+- ✅ **Treemap D3.js → Plotly `go.Treemap` 완전 교체** (`charts.py`, `2_🔍_패턴분석.py`)
+  - 기존 `create_sector_treemap_html()` (HTML 문자열 반환) → `create_sector_treemap()` (go.Figure 반환)
+  - `st.components.v1.html()` → `st.plotly_chart()` 전환 (다크테마 자동 통합)
+  - **섹터 라벨에 점수 직접 임베드**: `f'{sector}  평균 {sec_avg:.1f}점  ({sec_score:.1f})'`
+    → 호버 없이 박스에 즉시 표시 (D3.js에서 섹터 라벨이 보이지 않던 문제 해결)
+  - **per-node texttemplate 배열**: 섹터 노드 `'<b>%{label}</b>'` / 종목 노드 `'<b>%{label}</b><br>%{text}'`
+  - **색상 개선**: 딥레드(#ef4444) → 오렌지(#f97316) → 옐로(#eab308) → sky-400(#38bdf8, 앱 primary) → 에메랄드(#34d399)
+  - 호버 보조 텍스트: `opacity:0.55` 적응형 (기존 회색 하드코딩 제거)
+  - 종목 박스: 시그널 도트(`●`) 표시, 점수는 호버에만 노출
+
+- ✅ **프로젝트 보고서 생성** (`WHALE_SUPPLY_REPORT.html`)
+  - 배경 및 목적, 데이터 현황, 핵심 지표 수식 (Sff/Combined Sff/Z-Score/방향 확신도)
+  - 분석 파이프라인 구조, 패턴 분류 시스템 (점수 공식/Temporal Consistency/Short Trend)
+  - 추가 시그널, 백테스트 시스템, 대시보드 기능 안내
+  - Step-by-Step 사용 방법, 결과 해석 가이드 (Z-Score 해석표, 점수 기준, 백테스트 지표)
+  - 성능 수치 (Precomputer 165배 향상), 용어 정리 15개
+
+**파일** (3개):
+```
+app/utils/charts.py            (create_sector_treemap_html → create_sector_treemap 교체)
+app/pages/2_🔍_패턴분석.py    (components.html → st.plotly_chart 전환)
+WHALE_SUPPLY_REPORT.html       (신규 — 프로젝트 전체 보고서)
+```
+
+**테스트**: 269개 (100% 통과)
 
 ---
 
