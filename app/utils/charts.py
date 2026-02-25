@@ -658,14 +658,42 @@ def create_sector_treemap(report_df: pd.DataFrame, top_per_sector: int = 10) -> 
     """섹터별 종목 Treemap — Plotly go.Treemap 기반
 
     박스 크기: 종합점수 비례, 색상: 빨강(낮음) → 초록(높음)
-    다크 테마, 섹터 헤더에 평균점수/종목수 표시, 호버 툴팁
+    섹터 헤더: 다크 배경 + 평균점수/종목수, 종목: RdYlGn + 대비 텍스트색
     """
+
+    def _hex_color(score: float) -> str:
+        """점수(40~100)를 RdYlGn hex 색상으로 변환"""
+        stops = [
+            (0.00, (153,  27,  27)),   # red-800
+            (0.30, (220,  38,  38)),   # red-600
+            (0.50, (234, 179,   8)),   # yellow-500
+            (0.72, (132, 204,  22)),   # lime-500
+            (1.00, ( 21, 128,  61)),   # green-700
+        ]
+        t = max(0.0, min(1.0, (score - 40) / 60))
+        for i in range(len(stops) - 1):
+            t0, c0 = stops[i]
+            t1, c1 = stops[i + 1]
+            if t <= t1:
+                f = (t - t0) / (t1 - t0) if t1 > t0 else 0.0
+                return '#{:02x}{:02x}{:02x}'.format(
+                    int(c0[0] + f * (c1[0] - c0[0])),
+                    int(c0[1] + f * (c1[1] - c0[1])),
+                    int(c0[2] + f * (c1[2] - c0[2])),
+                )
+        r, g, b = stops[-1][1]
+        return f'#{r:02x}{g:02x}{b:02x}'
+
+    def _text_color(hex_bg: str) -> str:
+        """배경색 밝기에 따라 흰색/어두운 텍스트 반환"""
+        h = hex_bg.lstrip('#')
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return '#1f2937' if (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.52 else '#f8fafc'
+
     if report_df.empty or 'sector' not in report_df.columns:
         fig = go.Figure()
-        fig.add_annotation(
-            text="데이터 없음", x=0.5, y=0.5, xref='paper', yref='paper',
-            showarrow=False, font=dict(size=16, color='#94a3b8'),
-        )
+        fig.add_annotation(text="데이터 없음", x=0.5, y=0.5, xref='paper', yref='paper',
+                           showarrow=False, font=dict(size=16, color='#94a3b8'))
         return _apply_dark(fig)
 
     df = report_df.copy()
@@ -673,7 +701,6 @@ def create_sector_treemap(report_df: pd.DataFrame, top_per_sector: int = 10) -> 
     if 'final_score' not in df.columns:
         df['final_score'] = df.get('score', 50) + df.get('signal_count', 0) * 5
 
-    # 상위 20개 섹터 × 섹터별 top_per_sector 종목
     top_sectors = df.groupby('sector')['final_score'].sum().nlargest(20).index.tolist()
     rows = [df[df['sector'] == s].nlargest(top_per_sector, 'final_score') for s in top_sectors]
     rows = [r for r in rows if not r.empty]
@@ -681,55 +708,43 @@ def create_sector_treemap(report_df: pd.DataFrame, top_per_sector: int = 10) -> 
         return _apply_dark(go.Figure())
     plot_df = pd.concat(rows, ignore_index=True)
 
-    # 노드 빌드 (sector → stock, branchvalues='remainder' → 부모 value=0)
-    ids, labels, parents = [], [], []
-    values, text_list, colors, custom = [], [], [], []
+    ids, labels, parents, values, text_list = [], [], [], [], []
+    node_colors, node_text_colors, custom = [], [], []
 
-    _PAT_LABEL = {'모멘텀형': '▲ 모멘텀형', '지속형': '◆ 지속형', '전환형': '↩ 전환형'}
+    _SEC_BG   = '#1e293b'  # slate-800 — 섹터 헤더 배경
+    _SEC_TEXT = '#94a3b8'  # slate-400 — 섹터 헤더 텍스트
 
     for sector in top_sectors:
         sec_df = plot_df[plot_df['sector'] == sector]
         if sec_df.empty:
             continue
         sec_avg = float(sec_df['final_score'].mean())
-        n = len(sec_df)
-        sec_id = f'__sec__{sector}'
+        n       = len(sec_df)
+        sec_id  = f'__s__{sector}'
 
-        ids.append(sec_id)
-        labels.append(sector)
-        parents.append('')
-        values.append(0)
+        # 섹터 노드
+        ids.append(sec_id);     labels.append(sector)
+        parents.append('');     values.append(0)
         text_list.append(f'평균 {sec_avg:.1f}점  ·  {n}종목')
-        colors.append(sec_avg)
+        node_colors.append(_SEC_BG)
+        node_text_colors.append(_SEC_TEXT)
         custom.append(['', '섹터', str(n), f'{sec_avg:.1f}'])
 
+        # 종목 노드
         for _, row in sec_df.iterrows():
-            score = float(row['final_score'])
-            pat = str(row.get('pattern', '기타'))
-            sig = int(row.get('signal_count', 0))
-            sig_str = '●' * sig if sig > 0 else ''
+            score  = float(row['final_score'])
+            pat    = str(row.get('pattern', '기타'))
+            sig    = int(row.get('signal_count', 0))
+            hex_bg = _hex_color(score)
 
             ids.append(str(row['stock_code']))
             labels.append(str(row['stock_name']))
             parents.append(sec_id)
             values.append(score)
-            text_list.append(f'{score:.0f}점  {sig_str}')
-            colors.append(score)
-            custom.append([
-                str(row['stock_code']),
-                _PAT_LABEL.get(pat, pat),
-                str(sig),
-                f'{score:.1f}',
-            ])
-
-    _RDYLGN = [
-        [0.00, '#991b1b'],  # red-800
-        [0.20, '#dc2626'],  # red-600
-        [0.42, '#ca8a04'],  # yellow-600
-        [0.58, '#65a30d'],  # lime-600
-        [0.80, '#16a34a'],  # green-600
-        [1.00, '#15803d'],  # green-700
-    ]
+            text_list.append(f"{score:.0f}점{'  ' + '●' * sig if sig else ''}")
+            node_colors.append(hex_bg)
+            node_text_colors.append(_text_color(hex_bg))
+            custom.append([str(row['stock_code']), pat, str(sig), f'{score:.1f}'])
 
     fig = go.Figure(go.Treemap(
         ids=ids,
@@ -740,41 +755,27 @@ def create_sector_treemap(report_df: pd.DataFrame, top_per_sector: int = 10) -> 
         customdata=custom,
         branchvalues='remainder',
         marker=dict(
-            colors=colors,
-            colorscale=_RDYLGN,
-            cmin=40, cmax=100,
-            showscale=True,
-            colorbar=dict(
-                thickness=14,
-                len=0.6,
-                x=1.01,
-                tickfont=dict(color='#94a3b8', size=11),
-                tickvals=[40, 55, 70, 85, 100],
-                ticktext=['40', '55', '70', '85', '100'],
-                outlinewidth=0,
-                bgcolor='rgba(0,0,0,0)',
-            ),
+            colors=node_colors,
             line=dict(width=2, color='#0f172a'),
         ),
         texttemplate='<b>%{label}</b><br>%{text}',
         hovertemplate=(
-            '<b>%{label}</b>  '
-            '<span style="color:#64748b">%{customdata[0]}</span><br>'
-            '%{customdata[1]}<br>'
-            '점수: <b>%{customdata[3]}</b>  '
-            '시그널: <b>%{customdata[2]}개</b>'
+            '<b>%{label}</b>'
+            '<span style="color:#64748b">  %{customdata[0]}</span><br>'
+            '<span style="color:#94a3b8">패턴</span>  %{customdata[1]}<br>'
+            '<span style="color:#94a3b8">점수</span>  <b>%{customdata[3]}</b>'
+            '  <span style="color:#94a3b8">시그널</span>  <b>%{customdata[2]}개</b>'
             '<extra></extra>'
         ),
-        textfont=dict(color='#ffffff', size=14, family='sans-serif'),
-        insidetextfont=dict(color='#ffffff', size=14),
-        uniformtext=dict(minsize=11, mode='hide'),
+        textfont=dict(color=node_text_colors, size=14, family='sans-serif'),
+        insidetextfont=dict(color=node_text_colors, size=14),
         pathbar=dict(visible=False),
-        tiling=dict(pad=3, squarifyratio=1.618),
+        tiling=dict(pad=4, squarifyratio=1.618),
     ))
 
     fig.update_layout(
         height=700,
-        margin=dict(t=10, l=5, r=60, b=5),
+        margin=dict(t=10, l=5, r=5, b=5),
         paper_bgcolor='#0f172a',
         plot_bgcolor='#0f172a',
     )
