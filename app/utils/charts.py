@@ -1280,3 +1280,163 @@ def create_wf_period_returns_chart(wf_df: pd.DataFrame) -> go.Figure:
         height=400,
     )
     return _apply_dark(fig)
+
+
+# ---------------------------------------------------------------------------
+# 종목 비교 차트
+# ---------------------------------------------------------------------------
+
+_COMPARE_PALETTE = [
+    '#38bdf8',  # sky-400
+    '#f472b6',  # pink-400
+    '#fb923c',  # orange-400
+    '#4ade80',  # green-400
+    '#a78bfa',  # violet-400
+]
+
+
+def create_compare_zscore_chart(
+    zscore_data: dict,
+    z_col: str = 'combined_zscore',
+    start_date: str = None,
+) -> go.Figure:
+    """
+    여러 종목의 Z-Score 시계열 오버레이 라인 차트.
+
+    Parameters
+    ----------
+    zscore_data : {stock_label: DataFrame(trade_date, combined_zscore, ...)}
+    z_col       : Z-Score 컬럼명
+    start_date  : 표시 시작일 (None이면 전체)
+
+    Returns
+    -------
+    go.Figure
+    """
+    fig = go.Figure()
+
+    for idx, (label, df) in enumerate(zscore_data.items()):
+        if df.empty:
+            continue
+        color = _COMPARE_PALETTE[idx % len(_COMPARE_PALETTE)]
+        plot_df = df.copy()
+        if 'trade_date' not in plot_df.columns and plot_df.index.name == 'trade_date':
+            plot_df = plot_df.reset_index()
+        if start_date and 'trade_date' in plot_df.columns:
+            plot_df = plot_df[plot_df['trade_date'] >= start_date]
+        if z_col not in plot_df.columns:
+            continue
+        fig.add_trace(go.Scatter(
+            x=plot_df['trade_date'],
+            y=plot_df[z_col],
+            mode='lines',
+            name=label,
+            line=dict(color=color, width=1.8),
+            hovertemplate=f'{label}<br>%{{x}}<br>Z-Score: %{{y:.2f}}<extra></extra>',
+        ))
+
+    # ±2σ 기준선
+    fig.add_hline(y=2, line_dash='dash', line_color='rgba(74,222,128,0.4)', line_width=1,
+                  annotation_text='+2σ', annotation_font_size=10)
+    fig.add_hline(y=-2, line_dash='dash', line_color='rgba(248,113,113,0.4)', line_width=1,
+                  annotation_text='-2σ', annotation_font_size=10)
+    fig.add_hline(y=0, line_dash='dot', line_color='rgba(148,163,184,0.3)', line_width=1)
+
+    fig.update_layout(
+        title='Z-Score 추이 비교',
+        xaxis_title='날짜',
+        yaxis_title='Z-Score',
+        height=420,
+        legend=dict(orientation='h', y=1.05, x=0),
+    )
+    return _apply_dark(fig)
+
+
+def create_compare_multiperiod_bar(
+    rows: list,
+    period_cols: list = None,
+) -> go.Figure:
+    """
+    여러 종목의 멀티기간 Z-Score 그룹 바차트.
+
+    Parameters
+    ----------
+    rows        : [{'label': str, **{period: z_score}}]
+    period_cols : Z-Score 기간 컬럼 리스트
+    """
+    if not rows:
+        return go.Figure()
+    if period_cols is None:
+        period_cols = ['5D', '10D', '20D', '50D', '100D', '200D', '500D']
+
+    fig = go.Figure()
+    for idx, row in enumerate(rows):
+        color = _COMPARE_PALETTE[idx % len(_COMPARE_PALETTE)]
+        label = row.get('label', f'종목{idx+1}')
+        y_vals = [row.get(p, None) for p in period_cols]
+        fig.add_trace(go.Bar(
+            name=label,
+            x=period_cols,
+            y=y_vals,
+            marker_color=color,
+            hovertemplate=f'{label}<br>%{{x}}: %{{y:.2f}}<extra></extra>',
+        ))
+
+    fig.add_hline(y=2, line_dash='dash', line_color='rgba(74,222,128,0.4)', line_width=1)
+    fig.add_hline(y=-2, line_dash='dash', line_color='rgba(248,113,113,0.4)', line_width=1)
+    fig.add_hline(y=0, line_dash='dot', line_color='rgba(148,163,184,0.3)', line_width=1)
+
+    fig.update_layout(
+        title='멀티기간 Z-Score 비교',
+        barmode='group',
+        xaxis_title='기간',
+        yaxis_title='Z-Score',
+        height=360,
+        legend=dict(orientation='h', y=1.05, x=0),
+    )
+    return _apply_dark(fig)
+
+
+def create_compare_score_radar(
+    rows: list,
+) -> go.Figure:
+    """
+    여러 종목의 패턴 점수 레이더 차트.
+    rows: [{'label':str, 'recent':f, 'momentum':f, 'weighted':f, 'average':f, 'short_trend':f}]
+    """
+    if not rows:
+        return go.Figure()
+    categories = ['최근수급', '모멘텀', '가중평균', '단순평균', '단기모멘텀']
+    keys = ['recent', 'momentum', 'weighted', 'average', 'short_trend']
+
+    fig = go.Figure()
+    for idx, row in enumerate(rows):
+        color = _COMPARE_PALETTE[idx % len(_COMPARE_PALETTE)]
+        label = row.get('label', f'종목{idx+1}')
+        values = [float(row.get(k, 0) or 0) for k in keys]
+        values.append(values[0])  # close the polygon
+        # Hex → RGB 변환 (fill 투명도용)
+        _hex = color.lstrip('#')
+        _r, _g, _b = int(_hex[0:2], 16), int(_hex[2:4], 16), int(_hex[4:6], 16)
+        _fill_color = f'rgba({_r},{_g},{_b},0.12)'
+        fig.add_trace(go.Scatterpolar(
+            r=values,
+            theta=categories + [categories[0]],
+            name=label,
+            line=dict(color=color, width=2),
+            fill='toself',
+            fillcolor=_fill_color,
+        ))
+
+    fig.update_layout(
+        title='패턴 점수 구성 비교',
+        polar=dict(
+            radialaxis=dict(visible=True, range=[-1, 3]),
+            bgcolor=_BG_PLOT,
+        ),
+        height=400,
+        legend=dict(orientation='h', y=1.1, x=0),
+        paper_bgcolor=_BG_PAPER,
+        font_color=_TEXT,
+    )
+    return fig

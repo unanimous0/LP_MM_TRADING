@@ -28,3 +28,8 @@ icon = ":material/sync:"
 path = "pages/5_📋_종목상세.py"
 name = "종목 상세"
 icon = ":material/bar_chart:"
+
+[[pages]]
+path = "pages/6_🔀_종목비교.py"
+name = "종목 비교"
+icon = ":material/compare:"

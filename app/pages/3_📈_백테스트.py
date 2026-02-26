@@ -25,6 +25,9 @@ from utils.data_loader import (
     get_trades_from_result,
     get_date_range,
     get_db_connection,
+    save_backtest_history,
+    get_backtest_history,
+    delete_backtest_history,
 )
 from src.backtesting.plotly_visualizer import PlotlyVisualizer
 
@@ -290,6 +293,27 @@ institution_weight = st.sidebar.slider(
 
 ※ 순수 외국인 관점으로 보려면 0으로 설정하세요.""",
 )
+with st.sidebar.expander("스코어링 버전", expanded=False):
+    st.caption("현재 스코어링 개선 항목(2026-02-25)의 적용 여부를 설정합니다. OFF 시 개선 이전 점수 체계로 백테스트해 효과를 비교할 수 있습니다.")
+    use_tc = st.checkbox(
+        "Temporal Consistency (tc)",
+        value=True,
+        key="w_use_tc",
+        help="tc 기준: 5D≥10D≥…≥500D 순서 일관성 (0~1)\n"
+             "ON: 모멘텀형 진입조건(tc≥0.5) + 점수 보너스 ±10점 적용\n"
+             "OFF: 조건 무시, 보너스 없음 (개선 이전 동작)",
+    )
+    use_short_trend = st.checkbox(
+        "Short Trend (5D − 20D)",
+        value=True,
+        key="w_use_short_trend",
+        help="단기 모멘텀 방향을 점수에 반영 (가중치 0.15)\n"
+             "ON: 현재 가중치 (momentum 0.20 / average 0.10 / short_trend 0.15)\n"
+             "OFF: 레거시 가중치 (momentum 0.25 / average 0.20 / short_trend 0.00)",
+    )
+    if not use_tc or not use_short_trend:
+        st.info("⚠️ 일부 OFF — 스코어링 개선 이전 동작으로 실행됩니다.")
+
 with st.sidebar.expander("거래 비용", expanded=False):
     tax_rate = st.number_input("증권거래세 (%)", 0.00, 1.00, 0.20, step=0.01, format="%.2f", key="w_tax_rate") / 100
     commission_rate = st.number_input("수수료 (%)", 0.000, 1.000, 0.015, step=0.001, format="%.3f", key="w_commission_rate") / 100
@@ -319,10 +343,14 @@ if run_clicked:
         commission_rate=commission_rate,
         slippage_rate=slippage_rate,
         borrowing_rate=borrowing_rate,
+        use_tc=use_tc,
+        use_short_trend=use_short_trend,
     )
     st.session_state['bt_use_split'] = use_split
     st.session_state['bt_opt_period'] = (opt_start_date.strftime("%Y-%m-%d"), opt_end_date.strftime("%Y-%m-%d"))
     st.session_state['bt_val_period'] = (val_start_date.strftime("%Y-%m-%d"), val_end_date.strftime("%Y-%m-%d"))
+    st.session_state['bt_use_tc'] = use_tc
+    st.session_state['bt_use_short_trend'] = use_short_trend
 
 # ---------------------------------------------------------------------------
 # Optuna 최적화 실행
@@ -363,6 +391,8 @@ if opt_clicked:
         commission_rate=commission_rate,
         slippage_rate=slippage_rate,
         borrowing_rate=borrowing_rate,
+        use_tc=use_tc,
+        use_short_trend=use_short_trend,
     )
     _opt_progress_bar.empty()
     _opt_status.empty()
@@ -397,11 +427,15 @@ if opt_clicked:
             commission_rate=commission_rate,
             slippage_rate=slippage_rate,
             borrowing_rate=borrowing_rate,
+            use_tc=use_tc,
+            use_short_trend=use_short_trend,
         )
         _bt_progress_bar.empty()
         st.session_state['bt_use_split'] = use_split
         st.session_state['bt_opt_period'] = (opt_start_date.strftime("%Y-%m-%d"), opt_end_date.strftime("%Y-%m-%d"))
         st.session_state['bt_val_period'] = (val_start_date.strftime("%Y-%m-%d"), val_end_date.strftime("%Y-%m-%d"))
+        st.session_state['bt_use_tc'] = use_tc
+        st.session_state['bt_use_short_trend'] = use_short_trend
         st.rerun()
     else:
         st.error("최적화 실패: 완료된 Trial이 없습니다. Trial 수를 늘리거나 기간을 조정해보세요.")
@@ -527,6 +561,19 @@ if _use_split and _opt_p and _val_p:
     )
 elif _val_p:
     st.caption(f"백테스트 기간: {_val_p[0]} ~ {_val_p[1]}")
+
+# 스코어링 버전 배너
+_bt_use_tc = st.session_state.get('bt_use_tc', True)
+_bt_use_short_trend = st.session_state.get('bt_use_short_trend', True)
+if _bt_use_tc and _bt_use_short_trend:
+    st.caption("📐 스코어링: **현재 버전** (Temporal Consistency + Short Trend 적용)")
+else:
+    _off_items = []
+    if not _bt_use_tc:
+        _off_items.append("Temporal Consistency OFF")
+    if not _bt_use_short_trend:
+        _off_items.append("Short Trend OFF")
+    st.warning(f"📐 스코어링: **이전 버전** ({', '.join(_off_items)}) — 개선 효과 비교용")
 
 # ---------------------------------------------------------------------------
 # 기간 종료 청산 종목 표시
@@ -702,3 +749,84 @@ with st.container(border=True):
             file_name="backtest_trades.csv",
             mime="text/csv",
         )
+
+# ---------------------------------------------------------------------------
+# 결과 저장 (히스토리)
+# ---------------------------------------------------------------------------
+st.divider()
+with st.expander("💾 이 결과를 히스토리에 저장", expanded=False):
+    _hist_label = st.text_input(
+        "레이블 (선택)",
+        placeholder="예: 현재 스코어링 롱 전략, 레거시 비교",
+        key="hist_label_input",
+    )
+    _hist_note = st.text_area(
+        "메모 (선택)", height=80,
+        placeholder="파라미터 조정 내용, 특이사항 등",
+        key="hist_note_input",
+    )
+    if st.button("📥 히스토리 저장", use_container_width=False):
+        _hist_sd = str(st.session_state.get('bt_val_period', [None, None])[0] or '')
+        _hist_ed = str(st.session_state.get('bt_val_period', [None, None])[1] or '')
+        _row_id = save_backtest_history(
+            result=result,
+            start_date=_hist_sd,
+            end_date=_hist_ed,
+            note=_hist_note,
+            label=_hist_label,
+        )
+        st.success(f"히스토리에 저장되었습니다. (ID: {_row_id})")
+        st.rerun()
+
+# ---------------------------------------------------------------------------
+# 백테스트 히스토리 조회
+# ---------------------------------------------------------------------------
+st.divider()
+with st.expander("📋 백테스트 히스토리", expanded=False):
+    hist_df = get_backtest_history(limit=50)
+    if hist_df.empty:
+        st.info("저장된 히스토리가 없습니다. 위 '이 결과를 히스토리에 저장'으로 저장하세요.")
+    else:
+        _hist_cols = [
+            'id', 'run_at', 'label', 'strategy',
+            'start_date', 'end_date',
+            'total_return', 'mdd', 'sharpe', 'calmar',
+            'win_rate', 'total_trades',
+        ]
+        _hist_cols = [c for c in _hist_cols if c in hist_df.columns]
+        _hist_cfg = {
+            'id':           st.column_config.NumberColumn('ID', format='%d'),
+            'run_at':       st.column_config.TextColumn('실행시각'),
+            'label':        st.column_config.TextColumn('레이블'),
+            'strategy':     st.column_config.TextColumn('전략'),
+            'start_date':   st.column_config.TextColumn('시작일'),
+            'end_date':     st.column_config.TextColumn('종료일'),
+            'total_return': st.column_config.NumberColumn('총수익률(%)', format='%.2f'),
+            'mdd':          st.column_config.NumberColumn('MDD(%)', format='%.2f'),
+            'sharpe':       st.column_config.NumberColumn('샤프', format='%.2f'),
+            'calmar':       st.column_config.NumberColumn('칼마', format='%.2f'),
+            'win_rate':     st.column_config.NumberColumn('승률(%)', format='%.1f'),
+            'total_trades': st.column_config.NumberColumn('거래수', format='%d'),
+        }
+        _hist_cfg = {k: v for k, v in _hist_cfg.items() if k in _hist_cols}
+
+        st.dataframe(
+            hist_df[_hist_cols].reset_index(drop=True),
+            column_config=_hist_cfg,
+            use_container_width=True,
+            hide_index=True,
+            height=min(500, len(hist_df) * 40 + 40),
+        )
+
+        # 삭제 UI
+        _del_ids = st.multiselect(
+            "삭제할 항목 ID 선택",
+            options=hist_df['id'].tolist(),
+            format_func=lambda x: f"ID {x} — {hist_df[hist_df['id']==x]['label'].values[0] or hist_df[hist_df['id']==x]['run_at'].values[0]}",
+            key="hist_del_sel",
+        )
+        if st.button("🗑️ 선택 항목 삭제", disabled=not _del_ids):
+            for _did in _del_ids:
+                delete_backtest_history(_did)
+            st.toast(f"{len(_del_ids)}개 삭제 완료", icon="🗑️")
+            st.rerun()

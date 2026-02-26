@@ -171,6 +171,8 @@ def run_walk_forward(args):
         reverse_signal_threshold=args.reverse_threshold,
         max_hold_days=args.max_days,
         force_exit_on_end=False,
+        use_tc=not args.no_tc,
+        use_short_trend=not args.no_short_trend,
     )
     analyzer = WalkForwardAnalyzer(
         db_path=str(project_root / DB_PATH),
@@ -197,6 +199,8 @@ def run_optimization(args):
         reverse_signal_threshold=args.reverse_threshold,
         max_hold_days=args.max_days,
         force_exit_on_end=False,
+        use_tc=not args.no_tc,
+        use_short_trend=not args.no_short_trend,
     )
 
     optimizer = OptunaOptimizer(
@@ -299,6 +303,12 @@ def main():
     parser.add_argument('--strategy', choices=['long', 'short', 'both'], default='long',
                         help='전략 방향 (long: 순매수, short: 순매도, both: 롱+숏, 기본: long)')
 
+    # 스코어링 버전 (2026-02-25 개선 항목 개별 토글)
+    parser.add_argument('--no-tc', action='store_true',
+                        help='Temporal Consistency 비활성화 (use_tc=False)')
+    parser.add_argument('--no-short-trend', action='store_true',
+                        help='Short Trend 비활성화 (use_short_trend=False)')
+
     # 출력 설정
     parser.add_argument('--save-csv', help='거래 내역 CSV 저장 경로')
     parser.add_argument('--quiet', action='store_true', help='진행 상황 출력 안함')
@@ -361,7 +371,9 @@ def main():
         reverse_signal_threshold=args.reverse_threshold,
         allowed_patterns=allowed_patterns,
         strategy=args.strategy,
-        force_exit_on_end=False  # 백테스트 종료 시 강제 청산 안 함
+        force_exit_on_end=False,
+        use_tc=not args.no_tc,
+        use_short_trend=not args.no_short_trend,
     )
 
     # 데이터베이스 연결

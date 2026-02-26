@@ -30,14 +30,34 @@ from typing import Optional, Dict, List, Tuple
 class PatternClassifier:
     """수급 패턴 분류 클래스"""
 
-    def __init__(self, config: Optional[dict] = None):
+    # 스코어링 개선(tc + short_trend) 이전 가중치 — use_short_trend=False 시 사용
+    # 변경 이력: momentum 0.25→0.20, average 0.20→0.10, short_trend 0.15 신규
+    _LEGACY_SCORE_WEIGHTS = {
+        'recent':      0.25,
+        'momentum':    0.25,   # short_trend 추가 이전 값
+        'weighted':    0.30,
+        'average':     0.20,   # short_trend 추가 이전 값
+        'short_trend': 0.00,
+    }
+
+    def __init__(self, config: Optional[dict] = None,
+                 use_tc: bool = True,
+                 use_short_trend: bool = True):
         """
         Args:
             config: 패턴 분류 설정
                 - pattern_thresholds: 패턴별 임계값
                 - score_weights: 점수 가중치
+            use_tc: Temporal Consistency 적용 여부
+                True(기본): tc 임계값 조건 + tc_bonus ±10점 적용
+                False: tc 조건 무시 (스코어링 개선 이전 동작)
+            use_short_trend: Short Trend 점수 반영 여부
+                True(기본): 현재 가중치 (short_trend=0.15) 사용
+                False: 레거시 가중치 사용 (short_trend=0.00, 스코어링 개선 이전 동작)
         """
         self.config = config or self._get_default_config()
+        self.use_tc = use_tc
+        self.use_short_trend = use_short_trend
 
     @staticmethod
     def _get_default_config() -> dict:
@@ -198,12 +218,17 @@ class PatternClassifier:
         tc = tc if pd.notna(tc) else 0.5
 
         # Pattern 1: 모멘텀형
+        # use_tc=False이면 tc 임계값 조건을 무시 (스코어링 개선 이전 동작)
+        tc_ok_momentum = (not self.use_tc) or (
+            tc >= thresholds['momentum'].get('temporal_consistency_min', 0.0)
+        )
         if (row['momentum'] > thresholds['momentum']['momentum_min'] and
             row['recent'] > thresholds['momentum']['recent_min'] and
-            tc >= thresholds['momentum'].get('temporal_consistency_min', 0.0)):
+            tc_ok_momentum):
             return '모멘텀형'
 
         # Pattern 2: 지속형
+        # 지속형은 tc_min=0.0 (항상 통과) → use_tc 토글 무관
         if (row['weighted'] > thresholds['sustained']['weighted_min'] and
             row['persistence'] > thresholds['sustained']['persistence_min'] and
             tc >= thresholds['sustained'].get('temporal_consistency_min', 0.0)):
@@ -239,7 +264,9 @@ class PatternClassifier:
             지속형: short_trend 가중치=0 (average로 재분배)
             기타 패턴: 설정값 그대로 사용
         """
-        weights = self.config['score_weights']
+        # use_short_trend=False → 레거시 가중치 (short_trend 도입 이전)
+        # use_short_trend=True  → 현재 가중치 (short_trend=0.15 포함)
+        weights = self.config['score_weights'] if self.use_short_trend else self._LEGACY_SCORE_WEIGHTS
 
         # 패턴별 가중치 조정
         # 지속형: 이상적 패턴이 5D<10D<...<500D (장기>단기)이므로
@@ -276,10 +303,11 @@ class PatternClassifier:
         base_score = ((weighted_sum + 3) / 6) * 100
         base_score = float(np.clip(base_score, 0, 100))
 
-        # Temporal consistency 보너스: ±10점 (지속형 제외)
+        # Temporal consistency 보너스: ±10점 (지속형 제외, use_tc=True일 때만)
         # 지속형은 tc=0.0(장기>단기)이 이상적이므로 tc 보너스 부적절
         # 모멘텀형/전환형/기타: tc=1.0 → +10점, tc=0.5 → 0점, tc=0.0 → -10점
-        if pattern != '지속형':
+        # use_tc=False이면 보너스 미적용 (스코어링 개선 이전 동작)
+        if self.use_tc and pattern != '지속형':
             tc = row.get('temporal_consistency', 0.5)
             if pd.notna(tc):
                 tc_bonus = (tc - 0.5) * 20

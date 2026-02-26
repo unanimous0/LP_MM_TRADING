@@ -356,6 +356,8 @@ def run_backtest(
     commission_rate: float = 0.00015,
     slippage_rate: float = 0.001,
     borrowing_rate: float = 0.03,
+    use_tc: bool = True,
+    use_short_trend: bool = True,
 ) -> Dict:
     """
     백테스트 실행 (캐싱)
@@ -383,6 +385,8 @@ def run_backtest(
         strategy=strategy,
         institution_weight=institution_weight,
         force_exit_on_end=True,
+        use_tc=use_tc,
+        use_short_trend=use_short_trend,
         tax_rate=tax_rate,
         commission_rate=commission_rate,
         slippage_rate=slippage_rate,
@@ -449,6 +453,8 @@ def run_backtest_with_progress(
     commission_rate: float = 0.00015,
     slippage_rate: float = 0.001,
     borrowing_rate: float = 0.03,
+    use_tc: bool = True,
+    use_short_trend: bool = True,
 ) -> Dict:
     """백테스트 실행 (캐시 없음, progress_callback 지원)"""
     conn = get_db_connection()
@@ -465,6 +471,8 @@ def run_backtest_with_progress(
         strategy=strategy,
         institution_weight=institution_weight,
         force_exit_on_end=True,
+        use_tc=use_tc,
+        use_short_trend=use_short_trend,
         tax_rate=tax_rate,
         commission_rate=commission_rate,
         slippage_rate=slippage_rate,
@@ -538,6 +546,8 @@ def run_optuna_optimization(
     commission_rate: float = 0.00015,
     slippage_rate: float = 0.001,
     borrowing_rate: float = 0.03,
+    use_tc: bool = True,
+    use_short_trend: bool = True,
 ) -> Optional[Dict]:
     """
     Optuna Persistent Bayesian Optimization 실행
@@ -566,6 +576,8 @@ def run_optuna_optimization(
         reverse_signal_threshold=reverse_threshold,
         institution_weight=institution_weight,
         force_exit_on_end=True,
+        use_tc=use_tc,
+        use_short_trend=use_short_trend,
         tax_rate=tax_rate,
         commission_rate=commission_rate,
         slippage_rate=slippage_rate,
@@ -587,3 +599,353 @@ def run_optuna_optimization(
         progress_callback=progress_callback,
         reset=reset_study,
     )
+
+
+# ---------------------------------------------------------------------------
+# 관심종목 (Watchlist)
+# ---------------------------------------------------------------------------
+
+def _ensure_watchlist_table() -> None:
+    """watchlist 테이블이 없으면 생성 (앱 최초 실행 시 자동 호출)"""
+    db_path = str(_PROJECT_ROOT / DB_PATH)
+    conn = sqlite3.connect(db_path)
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS watchlist (
+            stock_code TEXT PRIMARY KEY,
+            stock_name TEXT NOT NULL,
+            sector     TEXT,
+            added_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            note       TEXT DEFAULT ''
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+
+# 모듈 임포트 시 테이블 자동 생성
+_ensure_watchlist_table()
+
+
+def get_watchlist() -> pd.DataFrame:
+    """관심종목 목록 반환 (stock_code, stock_name, sector, added_at, note)"""
+    db_path = str(_PROJECT_ROOT / DB_PATH)
+    conn = sqlite3.connect(db_path)
+    df = pd.read_sql_query(
+        "SELECT stock_code, stock_name, sector, added_at, note FROM watchlist ORDER BY added_at DESC",
+        conn,
+    )
+    conn.close()
+    return df
+
+
+def is_in_watchlist(stock_code: str) -> bool:
+    """해당 종목이 관심종목에 포함되어 있는지 확인"""
+    db_path = str(_PROJECT_ROOT / DB_PATH)
+    conn = sqlite3.connect(db_path)
+    cursor = conn.execute(
+        "SELECT 1 FROM watchlist WHERE stock_code = ?", (stock_code,)
+    )
+    result = cursor.fetchone() is not None
+    conn.close()
+    return result
+
+
+def add_to_watchlist(stock_code: str, stock_name: str, sector: str = '', note: str = '') -> None:
+    """관심종목 추가 (이미 있으면 무시)"""
+    db_path = str(_PROJECT_ROOT / DB_PATH)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT OR IGNORE INTO watchlist (stock_code, stock_name, sector, note) VALUES (?, ?, ?, ?)",
+        (stock_code, stock_name, sector or '', note),
+    )
+    conn.commit()
+    conn.close()
+
+
+def remove_from_watchlist(stock_code: str) -> None:
+    """관심종목 삭제"""
+    db_path = str(_PROJECT_ROOT / DB_PATH)
+    conn = sqlite3.connect(db_path)
+    conn.execute("DELETE FROM watchlist WHERE stock_code = ?", (stock_code,))
+    conn.commit()
+    conn.close()
+
+
+def update_watchlist_note(stock_code: str, note: str) -> None:
+    """관심종목 메모 수정"""
+    db_path = str(_PROJECT_ROOT / DB_PATH)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE watchlist SET note = ? WHERE stock_code = ?", (note, stock_code)
+    )
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# 백테스트 결과 히스토리
+# ---------------------------------------------------------------------------
+
+def _ensure_backtest_history_table() -> None:
+    """backtest_history 테이블이 없으면 생성"""
+    db_path = str(_PROJECT_ROOT / DB_PATH)
+    conn = sqlite3.connect(db_path)
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS backtest_history (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            strategy      TEXT,
+            start_date    TEXT,
+            end_date      TEXT,
+            total_return  REAL,
+            mdd           REAL,
+            sharpe        REAL,
+            calmar        REAL,
+            win_rate      REAL,
+            total_trades  INTEGER,
+            profit_factor REAL,
+            min_score     REAL,
+            min_signals   INTEGER,
+            target_return REAL,
+            stop_loss     REAL,
+            max_positions INTEGER,
+            max_hold_days INTEGER,
+            institution_weight REAL,
+            note          TEXT DEFAULT '',
+            label         TEXT DEFAULT ''
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+
+# 모듈 임포트 시 테이블 자동 생성
+_ensure_backtest_history_table()
+
+
+def save_backtest_history(
+    result: dict,
+    start_date: str,
+    end_date: str,
+    note: str = '',
+    label: str = '',
+) -> int:
+    """
+    백테스트 결과를 히스토리 DB에 저장하고 id 반환.
+
+    Parameters
+    ----------
+    result     : dict   run_backtest() / run_backtest_with_progress() 반환값
+    start_date : str    백테스트 시작일
+    end_date   : str    백테스트 종료일
+    note       : str    사용자 메모
+    label      : str    결과 식별 레이블
+    """
+    metrics = get_metrics_from_result(result)
+    cfg = result.get('config', {})
+    mdd_info = metrics.max_drawdown() if metrics else {}
+    total_trades = len(get_trades_from_result(result))
+
+    db_path = str(_PROJECT_ROOT / DB_PATH)
+    conn = sqlite3.connect(db_path)
+    cursor = conn.execute('''
+        INSERT INTO backtest_history (
+            strategy, start_date, end_date,
+            total_return, mdd, sharpe, calmar, win_rate,
+            total_trades, profit_factor,
+            min_score, min_signals, target_return, stop_loss,
+            max_positions, max_hold_days, institution_weight,
+            note, label
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        cfg.get('strategy', 'long'),
+        start_date,
+        end_date,
+        metrics.total_return()  if metrics else 0.0,
+        mdd_info.get('mdd', 0.0),
+        metrics.sharpe_ratio()  if metrics else 0.0,
+        metrics.calmar_ratio()  if metrics else 0.0,
+        metrics.win_rate()      if metrics else 0.0,
+        total_trades,
+        metrics.profit_factor() if metrics else 0.0,
+        cfg.get('min_score', 60),
+        cfg.get('min_signals', 1),
+        cfg.get('target_return', 0.10),
+        cfg.get('stop_loss', -0.05),
+        cfg.get('max_positions', 5),
+        cfg.get('max_hold_days', 999),
+        cfg.get('institution_weight', 0.3),
+        note,
+        label,
+    ))
+    row_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return row_id
+
+
+def get_backtest_history(limit: int = 50) -> pd.DataFrame:
+    """저장된 백테스트 히스토리 조회 (최신순)"""
+    db_path = str(_PROJECT_ROOT / DB_PATH)
+    conn = sqlite3.connect(db_path)
+    df = pd.read_sql_query(
+        f"SELECT * FROM backtest_history ORDER BY run_at DESC LIMIT {limit}",
+        conn,
+    )
+    conn.close()
+    return df
+
+
+def delete_backtest_history(row_id: int) -> None:
+    """백테스트 히스토리 행 삭제"""
+    db_path = str(_PROJECT_ROOT / DB_PATH)
+    conn = sqlite3.connect(db_path)
+    conn.execute("DELETE FROM backtest_history WHERE id = ?", (row_id,))
+    conn.commit()
+    conn.close()
+
+
+# ---------------------------------------------------------------------------
+# 고득점 변동 알림 (Score Change Log)
+# ---------------------------------------------------------------------------
+
+_SCORE_LOG_TABLE = "score_change_log"
+_SCORE_HIGH_THRESHOLD = 70   # "고득점" 기준
+
+
+def _ensure_score_change_log_table() -> None:
+    """score_change_log 테이블이 없으면 생성"""
+    db_path = str(_PROJECT_ROOT / DB_PATH)
+    conn = sqlite3.connect(db_path)
+    conn.execute(f'''
+        CREATE TABLE IF NOT EXISTS {_SCORE_LOG_TABLE} (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            logged_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            analysis_date TEXT NOT NULL,
+            stock_code    TEXT NOT NULL,
+            stock_name    TEXT,
+            sector        TEXT,
+            pattern       TEXT,
+            score         REAL,
+            signal_count  INTEGER,
+            prev_score    REAL,
+            change_type   TEXT  -- 'new_entry', 'score_up', 'score_down', 'exit'
+        )
+    ''')
+    conn.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_scl_date ON {_SCORE_LOG_TABLE}(analysis_date DESC)"
+    )
+    conn.commit()
+    conn.close()
+
+
+# 모듈 임포트 시 테이블 자동 생성
+_ensure_score_change_log_table()
+
+
+# 직전 분석 결과를 메모리에 캐시 (모듈 레벨)
+_prev_score_snapshot: Optional[pd.DataFrame] = None
+
+
+def snapshot_scores(report_df: pd.DataFrame, analysis_date: str) -> None:
+    """
+    현재 분석 결과를 score_change_log에 스냅샷 저장.
+    직전 스냅샷과 비교하여 신규 진입 / 급등 / 이탈 이벤트를 기록한다.
+
+    Parameters
+    ----------
+    report_df     : 현재 분석 결과 DataFrame (get_stage_report 결과)
+    analysis_date : YYYY-MM-DD 기준일 문자열
+    """
+    global _prev_score_snapshot
+
+    db_path = str(_PROJECT_ROOT / DB_PATH)
+    conn = sqlite3.connect(db_path)
+
+    # 직전 스냅샷: DB에서 가장 최근 날짜의 고득점 종목
+    prev_df = pd.read_sql_query(
+        f"""
+        SELECT stock_code, score, pattern
+        FROM {_SCORE_LOG_TABLE}
+        WHERE analysis_date = (
+            SELECT MAX(analysis_date)
+            FROM {_SCORE_LOG_TABLE}
+            WHERE analysis_date < ?
+        )
+        """,
+        conn,
+        params=(analysis_date,),
+    )
+    prev_scores = dict(zip(prev_df['stock_code'], prev_df['score'])) if not prev_df.empty else {}
+
+    # 현재 고득점 종목 (threshold 이상)
+    high_df = report_df[report_df['score'] >= _SCORE_HIGH_THRESHOLD].copy()
+    curr_codes = set(high_df['stock_code'].tolist())
+    prev_codes = set(prev_scores.keys())
+
+    rows = []
+    for _, row in high_df.iterrows():
+        code = row['stock_code']
+        curr_s = float(row.get('score', 0))
+        prev_s = prev_scores.get(code)
+
+        if code not in prev_codes:
+            change_type = 'new_entry'
+        elif curr_s - (prev_s or 0) >= 5:
+            change_type = 'score_up'
+        elif (prev_s or 0) - curr_s >= 5:
+            change_type = 'score_down'
+        else:
+            change_type = None  # 변동 없음 → 로그 불필요 (중복 방지)
+
+        if change_type:
+            rows.append((
+                analysis_date,
+                code,
+                str(row.get('stock_name', '')),
+                str(row.get('sector', '')),
+                str(row.get('pattern', '')),
+                curr_s,
+                int(row.get('signal_count', 0)),
+                prev_s,
+                change_type,
+            ))
+
+    # 이탈 종목 (직전 고득점이었으나 지금 없음)
+    for code in prev_codes - curr_codes:
+        rows.append((
+            analysis_date, code, '', '', '', None, 0, prev_scores.get(code), 'exit',
+        ))
+
+    if rows:
+        conn.executemany(
+            f"""INSERT INTO {_SCORE_LOG_TABLE}
+            (analysis_date, stock_code, stock_name, sector, pattern,
+             score, signal_count, prev_score, change_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            rows,
+        )
+        conn.commit()
+
+    conn.close()
+    _prev_score_snapshot = high_df
+
+
+def get_score_change_alerts(limit: int = 100) -> pd.DataFrame:
+    """
+    최근 고득점 변동 알림 조회.
+    Returns: DataFrame (analysis_date, change_type, stock_code, stock_name, score, prev_score, ...)
+    """
+    db_path = str(_PROJECT_ROOT / DB_PATH)
+    conn = sqlite3.connect(db_path)
+    df = pd.read_sql_query(
+        f"""
+        SELECT *
+        FROM {_SCORE_LOG_TABLE}
+        ORDER BY logged_at DESC
+        LIMIT {limit}
+        """,
+        conn,
+    )
+    conn.close()
+    return df

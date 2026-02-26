@@ -37,6 +37,8 @@ class BacktestConfig:
                  strategy: str = 'long',  # 'long', 'short', 'both'
                  institution_weight: float = 0.3,  # 기관 가중치 (0.0=외국인만, 0.3=기본, 0.5=기관 강조)
                  force_exit_on_end: bool = False,  # 백테스트 종료 시 강제 청산 여부
+                 use_tc: bool = True,              # Temporal Consistency 적용 여부
+                 use_short_trend: bool = True,     # Short Trend 점수 반영 여부
                  tax_rate: float = 0.0020,  # 증권거래세 (매도 시, 0.20%)
                  commission_rate: float = 0.00015,  # 수수료 (매수/매도, 0.015%)
                  slippage_rate: float = 0.001,  # 슬리피지 (매수/매도, 0.1%)
@@ -57,6 +59,10 @@ class BacktestConfig:
             strategy: 전략 방향 ('long': 순매수, 'short': 순매도, 'both': 롱+숏)
             institution_weight: 기관 가중치 (0.0=외국인만, 0.3=기본, 0.5=기관 강조)
             force_exit_on_end: 백테스트 종료일에 강제 청산 여부 (기본: False)
+            use_tc: Temporal Consistency 적용 여부 (기본: True)
+                False이면 모멘텀형 tc 조건 무시 + tc_bonus 미적용 (스코어링 개선 이전)
+            use_short_trend: Short Trend 점수 반영 여부 (기본: True)
+                False이면 레거시 가중치 사용 (스코어링 개선 이전)
             tax_rate: 증권거래세 (매도 시, 기본 0.20%)
             commission_rate: 수수료 (매수/매도, 기본 0.015%)
             slippage_rate: 슬리피지 (매수/매도, 기본 0.1%)
@@ -74,6 +80,8 @@ class BacktestConfig:
         self.strategy = strategy
         self.institution_weight = institution_weight
         self.force_exit_on_end = force_exit_on_end
+        self.use_tc = use_tc
+        self.use_short_trend = use_short_trend
         self.tax_rate = tax_rate
         self.commission_rate = commission_rate
         self.slippage_rate = slippage_rate
@@ -106,7 +114,10 @@ class BacktestEngine:
         self.calculator = OptimizedMultiPeriodCalculator(
             self.normalizer, enable_caching=False  # 백테스트는 end_date가 매번 바뀌므로 캐싱 비활성화
         )
-        self.classifier = PatternClassifier()
+        self.classifier = PatternClassifier(
+            use_tc=self.config.use_tc,
+            use_short_trend=self.config.use_short_trend,
+        )
         self.signal_detector = SignalDetector(conn, institution_weight=self.config.institution_weight)
 
         # 기간 설정 (Stage 2 히트맵용)
@@ -516,7 +527,12 @@ class BacktestEngine:
         elif preload_data:
             if verbose:
                 print("데이터 프리로드 중...")
-            pc = BacktestPrecomputer(self.conn, self.config.institution_weight)
+            pc = BacktestPrecomputer(
+                self.conn,
+                institution_weight=self.config.institution_weight,
+                use_tc=self.config.use_tc,
+                use_short_trend=self.config.use_short_trend,
+            )
             self._precomputed = pc.precompute(end_date, verbose=verbose)
 
         if verbose:

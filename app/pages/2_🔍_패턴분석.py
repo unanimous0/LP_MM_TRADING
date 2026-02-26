@@ -20,6 +20,7 @@ from datetime import datetime
 from utils.data_loader import (
     run_analysis_pipeline_with_progress, get_sectors, get_date_range,
     get_stock_list, get_db_connection,
+    get_watchlist, is_in_watchlist, add_to_watchlist, remove_from_watchlist,
 )
 from utils.charts import (
     create_signal_distribution_chart,
@@ -221,12 +222,47 @@ with tab1:
                 ),
             })
 
+        # 관심종목 여부 컬럼 추가 (★ / -)
+        _wl_codes = set(get_watchlist()['stock_code'].tolist())
+        display_df['관심'] = display_df['stock_code'].apply(lambda c: '⭐' if c in _wl_codes else '')
+        _final_cols = ['관심'] + display_cols
+        _final_cols = [c for c in _final_cols if c in display_df.columns]
+        col_config['관심'] = st.column_config.TextColumn("관심", width="small")
+
         st.dataframe(
-            display_df[display_cols].reset_index(drop=True),
+            display_df[_final_cols].reset_index(drop=True),
             use_container_width=True,
             height=min(600, len(display_df) * 40 + 40),
             column_config=col_config,
         )
+
+        # 관심종목 추가/제거 UI
+        with st.expander("⭐ 관심종목 관리", expanded=False):
+            _stock_opts = [
+                f"{r['stock_name']} ({r['stock_code']})"
+                for _, r in display_df.iterrows()
+            ]
+            _sel = st.multiselect(
+                "추가할 종목 선택 (현재 필터 기준)",
+                options=_stock_opts,
+                placeholder="종목명 또는 코드로 검색...",
+                key="wl_add_sel",
+            )
+            _c1, _c2 = st.columns(2)
+            if _c1.button("⭐ 선택 종목 추가", use_container_width=True, disabled=not _sel):
+                for _opt in _sel:
+                    _scode = _opt.split('(')[-1].rstrip(')')
+                    _sname = _opt.rsplit(' (', 1)[0]
+                    _ssector = display_df[display_df['stock_code'] == _scode]['sector'].values
+                    add_to_watchlist(_scode, _sname, str(_ssector[0]) if len(_ssector) else '')
+                st.toast(f"{len(_sel)}개 종목을 관심종목에 추가했습니다.", icon="⭐")
+                st.rerun()
+            if _c2.button("🗑️ 선택 종목 제거", use_container_width=True, disabled=not _sel):
+                for _opt in _sel:
+                    _scode = _opt.split('(')[-1].rstrip(')')
+                    remove_from_watchlist(_scode)
+                st.toast(f"{len(_sel)}개 종목을 관심종목에서 제거했습니다.", icon="🗑️")
+                st.rerun()
 
 # ---- Tab 2: 패턴별 통계 ----
 with tab2:

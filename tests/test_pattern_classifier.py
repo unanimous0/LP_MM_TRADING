@@ -536,3 +536,130 @@ class TestPatternClassifier:
 
         # 지속형: tc_bonus 미적용 → 두 점수 동일
         assert score_high == pytest.approx(score_low, abs=0.01)
+
+
+class TestScoringToggle:
+    """use_tc / use_short_trend 토글 파라미터 검증 (스코어링 개선 before/after 비교용)"""
+
+    @pytest.fixture
+    def classifier_default(self):
+        """기본값 (use_tc=True, use_short_trend=True) — 현재 스코어링"""
+        return PatternClassifier()
+
+    @pytest.fixture
+    def classifier_no_tc(self):
+        """use_tc=False — tc 조건/보너스 비활성"""
+        return PatternClassifier(use_tc=False)
+
+    @pytest.fixture
+    def classifier_no_st(self):
+        """use_short_trend=False — 레거시 가중치 사용"""
+        return PatternClassifier(use_short_trend=False)
+
+    @pytest.fixture
+    def classifier_legacy(self):
+        """use_tc=False, use_short_trend=False — 스코어링 개선 이전 완전 재현"""
+        return PatternClassifier(use_tc=False, use_short_trend=False)
+
+    def test_use_tc_false_bypasses_momentum_tc_condition(self, classifier_no_tc):
+        """use_tc=False이면 tc<0.5여도 모멘텀형으로 분류됨"""
+        row = pd.Series({
+            'recent': 1.0,
+            'momentum': 1.5,
+            'weighted': 0.4,
+            'persistence': 0.4,
+            'temporal_consistency': 0.2,  # 기준 0.5 미달이지만 use_tc=False
+        })
+        assert classifier_no_tc.classify_pattern(row) == '모멘텀형'
+
+    def test_use_tc_true_still_blocks_low_tc(self, classifier_default):
+        """기본값(use_tc=True)에서는 tc<0.5면 모멘텀형 탈락 — 기존 동작 유지"""
+        row = pd.Series({
+            'recent': 1.0,
+            'momentum': 1.5,
+            'weighted': 0.4,
+            'persistence': 0.4,
+            'temporal_consistency': 0.2,
+        })
+        assert classifier_default.classify_pattern(row) != '모멘텀형'
+
+    def test_use_tc_false_no_tc_bonus_in_score(self, classifier_no_tc):
+        """use_tc=False이면 tc_bonus(±10점)가 적용되지 않음"""
+        base = {
+            'recent': 1.0,
+            'momentum': 0.5,
+            'weighted': 0.8,
+            'average': 0.6,
+            'short_trend': 0.3,
+        }
+        score_high_tc = classifier_no_tc.calculate_pattern_score(
+            pd.Series({**base, 'temporal_consistency': 1.0})
+        )
+        score_low_tc = classifier_no_tc.calculate_pattern_score(
+            pd.Series({**base, 'temporal_consistency': 0.0})
+        )
+        # tc_bonus 없으면 두 점수 동일
+        assert score_high_tc == pytest.approx(score_low_tc, abs=0.01)
+
+    def test_use_short_trend_false_uses_legacy_weights(
+        self, classifier_default, classifier_no_st
+    ):
+        """use_short_trend=False이면 short_trend가 점수에 영향을 주지 않음"""
+        base = {
+            'recent': 1.0,
+            'momentum': 0.5,
+            'weighted': 0.8,
+            'average': 0.6,
+            'temporal_consistency': 0.5,
+        }
+        # short_trend 값만 다른 두 행
+        score_pos = classifier_no_st.calculate_pattern_score(
+            pd.Series({**base, 'short_trend': 2.0})
+        )
+        score_neg = classifier_no_st.calculate_pattern_score(
+            pd.Series({**base, 'short_trend': -2.0})
+        )
+        # 레거시 가중치에서 short_trend=0.00 → 두 점수 동일
+        assert score_pos == pytest.approx(score_neg, abs=0.01)
+
+    def test_use_short_trend_true_affects_score(self, classifier_default):
+        """기본값(use_short_trend=True)에서는 short_trend가 점수에 영향"""
+        base = {
+            'recent': 1.0,
+            'momentum': 0.5,
+            'weighted': 0.8,
+            'average': 0.6,
+            'temporal_consistency': 0.5,
+        }
+        score_pos = classifier_default.calculate_pattern_score(
+            pd.Series({**base, 'short_trend': 2.0})
+        )
+        score_neg = classifier_default.calculate_pattern_score(
+            pd.Series({**base, 'short_trend': -2.0})
+        )
+        # short_trend=0.15 가중치 → 두 점수 달라야 함
+        assert score_pos != pytest.approx(score_neg, abs=0.1)
+
+    def test_legacy_classifier_weights_sum_to_one(self, classifier_legacy):
+        """레거시 가중치 합계 = 1.00"""
+        weights = PatternClassifier._LEGACY_SCORE_WEIGHTS
+        total = sum(weights.values())
+        assert total == pytest.approx(1.0, abs=1e-9)
+
+    def test_default_and_legacy_score_differ_for_high_short_trend(
+        self, classifier_default, classifier_legacy
+    ):
+        """동일 데이터에서 현재 vs 이전 스코어링 결과가 다름 (검증 비교 가능 확인)"""
+        row = pd.Series({
+            'recent': 1.2,
+            'momentum': 0.8,
+            'weighted': 0.9,
+            'average': 0.7,
+            'short_trend': 1.5,   # 강한 단기 모멘텀 (현재만 반영)
+            'temporal_consistency': 0.8,  # 높은 tc (현재만 반영)
+            'pattern': '모멘텀형',
+        })
+        score_current = classifier_default.calculate_pattern_score(row)
+        score_legacy = classifier_legacy.calculate_pattern_score(row)
+        # 현재 버전이 레거시보다 높아야 함 (tc_bonus + short_trend 가중치 효과)
+        assert score_current > score_legacy

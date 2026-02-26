@@ -19,6 +19,7 @@ from utils.data_loader import (
     get_stock_list, get_date_range,
     get_stock_zscore_history, get_stock_raw_history,
     _stage_classify, _stage_report, _stage_signals,
+    get_watchlist, is_in_watchlist, add_to_watchlist, remove_from_watchlist,
 )
 from utils.charts import (
     create_zscore_history_chart,
@@ -172,10 +173,24 @@ stock_signals = (
 )
 
 # ---------------------------------------------------------------------------
-# 헤더
+# 헤더 + 관심종목 버튼
 # ---------------------------------------------------------------------------
-st.title(stock_name)
-st.caption(f"{sector} · 마켓 {market_id} · {stock_code}")
+_h_col, _star_col = st.columns([8, 1])
+_h_col.title(stock_name)
+_h_col.caption(f"{sector} · 마켓 {market_id} · {stock_code}")
+
+# ⭐ 관심종목 토글 버튼
+_in_watchlist = is_in_watchlist(stock_code)
+if _in_watchlist:
+    if _star_col.button("⭐ 관심 해제", key="wl_toggle", use_container_width=True):
+        remove_from_watchlist(stock_code)
+        st.toast(f"'{stock_name}' 관심종목에서 제거했습니다.", icon="🗑️")
+        st.rerun()
+else:
+    if _star_col.button("☆ 관심 추가", key="wl_toggle", use_container_width=True):
+        add_to_watchlist(stock_code, stock_name, sector)
+        st.toast(f"'{stock_name}'을(를) 관심종목에 추가했습니다.", icon="⭐")
+        st.rerun()
 
 # ---------------------------------------------------------------------------
 # KPI 카드 5개

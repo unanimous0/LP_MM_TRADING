@@ -90,6 +90,8 @@ class OptunaOptimizer:
             'strategy': c.strategy,
             'institution_weight': c.institution_weight,
             'force_exit_on_end': c.force_exit_on_end,
+            'use_tc': c.use_tc,
+            'use_short_trend': c.use_short_trend,
             'tax_rate': c.tax_rate,
             'commission_rate': c.commission_rate,
             'slippage_rate': c.slippage_rate,
@@ -327,7 +329,12 @@ class OptunaOptimizer:
             print(f"\n[Precompute] 사전 계산 중...")
         conn_pre = sqlite3.connect(self.db_path)
         try:
-            pc = BacktestPrecomputer(conn_pre, self.base_config.institution_weight)
+            pc = BacktestPrecomputer(
+                conn_pre,
+                institution_weight=self.base_config.institution_weight,
+                use_tc=self.base_config.use_tc,
+                use_short_trend=self.base_config.use_short_trend,
+            )
             shared_precomputed = pc.precompute(
                 self.end_date, start_date=self.start_date, verbose=verbose
             )
