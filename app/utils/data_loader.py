@@ -862,6 +862,15 @@ def snapshot_scores(report_df: pd.DataFrame, analysis_date: str) -> None:
     db_path = str(_PROJECT_ROOT / DB_PATH)
     conn = sqlite3.connect(db_path)
 
+    # 같은 analysis_date로 이미 기록된 이벤트가 있으면 중복 삽입 방지
+    existing = conn.execute(
+        f"SELECT COUNT(*) FROM {_SCORE_LOG_TABLE} WHERE analysis_date = ?",
+        (analysis_date,),
+    ).fetchone()[0]
+    if existing > 0:
+        conn.close()
+        return
+
     # 직전 스냅샷: DB에서 가장 최근 날짜의 고득점 종목
     prev_df = pd.read_sql_query(
         f"""

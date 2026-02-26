@@ -58,7 +58,7 @@ start_date_str = (
 )
 
 z_score_window = st.sidebar.slider(
-    "Z-Score 기준 기간 (거래일)", 20, 500, 50, step=10,
+    "Z-Score 기준 기간 (거래일)", 20, 1300, 50, step=10,
 )
 
 institution_weight = st.sidebar.slider(

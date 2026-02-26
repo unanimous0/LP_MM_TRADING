@@ -122,9 +122,11 @@ _prog.progress(1.0, text="완료 100%")
 _prog.empty()
 
 # 분석 완료 후 고득점 변동 스냅샷 저장 (세션당 1회)
+# ※ 스냅샷 기준일은 항상 최신 분석 날짜 (이상 수급 기준일과 무관)
 if not st.session_state.get('home_snapshot_done'):
     try:
-        snapshot_scores(report_df, end_date_str)
+        _, _latest_date = get_date_range()
+        snapshot_scores(report_df, _latest_date)
         st.session_state['home_snapshot_done'] = True
     except Exception:
         pass  # 스냅샷 실패는 무시 (비핵심 기능)

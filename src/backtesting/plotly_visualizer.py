@@ -560,7 +560,8 @@ class PlotlyVisualizer:
 
         if not self.daily_values.empty:
             v = self.daily_values['value'].values
-            mdd = float((v - np.maximum.accumulate(v)).min() / np.maximum.accumulate(v).max() * 100)
+            _running_max = np.maximum.accumulate(v)
+            mdd = float(((v - _running_max) / _running_max).min() * 100)
         else:
             mdd = 0.0
 

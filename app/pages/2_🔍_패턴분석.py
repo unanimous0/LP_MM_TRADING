@@ -266,6 +266,7 @@ with tab1:
 
 # ---- Tab 2: 패턴별 통계 ----
 with tab2:
+    st.caption("※ 사이드바 필터와 무관하게 전체 분석 종목 기준으로 집계됩니다.")
     summary_df = report_gen.get_pattern_summary_report(report_df)
     if summary_df.empty:
         st.info("패턴 통계 데이터가 없습니다.")
