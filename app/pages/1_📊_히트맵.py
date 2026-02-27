@@ -4,7 +4,6 @@
 고도화 기능:
   A. 히트맵 클릭 → 하단 미니 상세 (KPI + Z-Score 바차트 + 상세 페이지 이동 버튼)
   B. 호버에 패턴/점수/시그널 정보 표시
-  C. 패턴/점수/시그널 필터 사이드바 추가
   D. 섹터 평균 히트맵 탭 추가
 """
 
@@ -88,24 +87,8 @@ top_n = st.sidebar.slider("표시 종목 수", min_value=10, max_value=200, valu
 
 st.sidebar.divider()
 
-# C: 섹터 / 패턴 / 점수 / 시그널 필터
 sectors = get_sectors()
 selected_sector = st.sidebar.selectbox("섹터 필터", options=["전체"] + sectors)
-
-pattern_options = ['전체', '모멘텀형', '지속형', '전환형', '기타']
-selected_pattern = st.sidebar.selectbox(
-    "패턴 필터", pattern_options,
-    help="특정 패턴 종목만 표시합니다.",
-)
-
-min_score = st.sidebar.slider(
-    "최소 점수", 0.0, 100.0, 0.0, step=5.0,
-    help="패턴 점수가 이 값 이상인 종목만 표시합니다.",
-)
-min_signals = st.sidebar.slider(
-    "최소 시그널 수", 0, 3, 0,
-    help="활성 시그널이 이 개수 이상인 종목만 표시합니다.",
-)
 
 # ---------------------------------------------------------------------------
 # 데이터 로드
@@ -131,23 +114,6 @@ if selected_sector != "전체":
         report_df = report_df[report_df['stock_code'].isin(sector_stocks)]
     if zscore_matrix.empty:
         st.info(f"'{selected_sector}' 섹터에 해당하는 종목이 없습니다.")
-        st.stop()
-
-# C: 패턴 / 점수 / 시그널 필터
-_any_filter = selected_pattern != '전체' or min_score > 0 or min_signals > 0
-if _any_filter and not report_df.empty:
-    _fr = report_df.copy()
-    if selected_pattern != '전체':
-        _fr = _fr[_fr['pattern'] == selected_pattern]
-    if min_score > 0:
-        _fr = _fr[_fr['score'] >= min_score]
-    if min_signals > 0 and 'signal_count' in _fr.columns:
-        _fr = _fr[_fr['signal_count'] >= min_signals]
-    _valid_codes = set(_fr['stock_code'].tolist())
-    zscore_matrix = zscore_matrix[zscore_matrix['stock_code'].isin(_valid_codes)]
-    report_df = _fr
-    if zscore_matrix.empty:
-        st.info("필터 조건에 맞는 종목이 없습니다. 조건을 완화해 보세요.")
         st.stop()
 
 # ---------------------------------------------------------------------------
@@ -233,7 +199,7 @@ with tab1:
         _rrow = None
         if not report_df.empty and selected_code in report_df['stock_code'].values:
             _rrow = report_df[report_df['stock_code'] == selected_code].iloc[0]
-            _m2.metric("패턴", str(_rrow.get('pattern', '-')))
+            _m2.metric("패턴", str(_rrow.get('pattern_label', _rrow.get('pattern', '-'))))
             _m3.metric("점수", f"{float(_rrow.get('score', 0)):.0f}")
             _m4.metric("시그널", f"{int(_rrow.get('signal_count', 0))}개")
         else:
@@ -254,7 +220,7 @@ with tab1:
 
 with tab2:
     # D: 섹터 평균 히트맵
-    st.caption("섹터별 종목들의 평균 Z-Score. 현재 적용된 필터(패턴/점수/시그널)가 반영됩니다.")
+    st.caption("섹터별 종목들의 평균 Z-Score. 섹터 필터가 적용된 경우 해당 섹터만 표시됩니다.")
     fig_sector = create_sector_zscore_heatmap(
         zscore_matrix, stock_list=stock_list, sort_by=sort_by,
     )

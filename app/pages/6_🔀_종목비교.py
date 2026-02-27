@@ -144,7 +144,7 @@ for code, lbl in zip(selected_codes, labels):
     # 비교 테이블 행
     row = {'종목': lbl, '종목코드': code}
     if r_row is not None:
-        row['패턴']       = r_row.get('pattern', '-')
+        row['패턴']       = r_row.get('pattern_label', r_row.get('pattern', '-'))
         row['패턴 점수']  = round(float(r_row.get('score', 0)), 1)
         row['시그널 수']  = int(r_row.get('signal_count', 0))
         row['진입가']     = r_row.get('entry_point', None)

@@ -123,7 +123,9 @@ def create_zscore_heatmap(
         if sort_by == 'recent':
             return _adj_z('5D', dir_mode) if '5D' in df.columns else _adj_z(period_cols[0], dir_mode)
         elif sort_by == 'momentum':
-            first, last = period_cols[0], period_cols[-1]
+            first = period_cols[0]
+            # 장기 기준 = 200D (500D는 참고용, 모멘텀 계산에서 제외)
+            last = '200D' if '200D' in period_cols else period_cols[-2] if len(period_cols) > 1 else period_cols[0]
             return _adj_z(first, dir_mode) - _adj_z(last, dir_mode)
         elif sort_by == 'weighted':
             weights = list(range(len(period_cols), 0, -1))
@@ -168,7 +170,7 @@ def create_zscore_heatmap(
         cd = np.empty((n_s, n_p, 3), dtype=object)
         for i, code in enumerate(df['stock_code'].tolist()):
             if code in rmap.index:
-                pat = str(rmap.at[code, 'pattern'])
+                pat = str(rmap.at[code, 'pattern_label']) if 'pattern_label' in rmap.columns else str(rmap.at[code, 'pattern'])
                 sc  = float(rmap.at[code, 'score']) if 'score' in rmap.columns else 0.0
                 sig = int(rmap.at[code, 'signal_count']) if 'signal_count' in rmap.columns else 0
             else:
@@ -206,7 +208,7 @@ def create_zscore_heatmap(
 
     sort_label = {
         'recent':   '5D Z',
-        'momentum': '모멘텀(5D-500D)',
+        'momentum': '모멘텀(5D-200D)',
         'weighted': '가중평균',
         'average':  '단순평균',
     }.get(sort_by, sort_by)
@@ -309,7 +311,8 @@ def create_sector_zscore_heatmap(
     if sort_by == 'recent':
         sort_key = sector_df['5D'] if '5D' in sector_df.columns else sector_df[period_cols[0]]
     elif sort_by == 'momentum':
-        first, last = period_cols[0], period_cols[-1]
+        first = period_cols[0]
+        last = '200D' if '200D' in period_cols else period_cols[-2] if len(period_cols) > 1 else period_cols[0]
         sort_key = sector_df[first] - sector_df[last]
     elif sort_by == 'weighted':
         weights = list(range(len(period_cols), 0, -1))
@@ -323,7 +326,7 @@ def create_sector_zscore_heatmap(
 
     sort_label = {
         'recent':   '5D Z',
-        'momentum': '모멘텀(5D-500D)',
+        'momentum': '모멘텀(5D-200D)',
         'weighted': '가중평균',
         'average':  '단순평균',
     }.get(sort_by, sort_by)
@@ -736,7 +739,7 @@ def create_sector_treemap(report_df: pd.DataFrame, top_per_sector: int = 10) -> 
         # 종목 노드: 이름 + 시그널 도트 (점수는 호버에만)
         for _, row in sec_df.iterrows():
             score  = float(row['final_score'])
-            pat    = str(row.get('pattern', '기타'))
+            pat    = str(row.get('pattern_label', row.get('pattern', '기타')))
             sig    = int(row.get('signal_count', 0))
             hex_bg = _hex_color(score)
 

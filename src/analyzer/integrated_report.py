@@ -192,7 +192,8 @@ class IntegratedReport:
         # 빈 DataFrame 처리
         if classified_df.empty:
             return pd.DataFrame(columns=[
-                'stock_code', 'stock_name', 'sector', 'pattern', 'score',
+                'stock_code', 'stock_name', 'sector',
+                'pattern', 'sub_type', 'pattern_label', 'score',
                 'signal_count', 'signal_list', 'entry_point', 'stop_loss'
             ])
 
@@ -231,13 +232,14 @@ class IntegratedReport:
 
         # 4. 컬럼 순서 정리
         base_cols = ['stock_code', 'stock_name', 'sector']
-        pattern_cols = ['pattern', 'score']
-        sort_key_cols = ['recent', 'momentum', 'weighted', 'average']
+        pattern_cols = ['pattern', 'sub_type', 'pattern_label', 'score']
+        sort_key_cols = ['recent', 'momentum', 'weighted', 'average', 'short_trend']
+        feature_cols = ['temporal_consistency']
         signal_cols = ['signal_count', 'signal_list']
         action_cols = ['entry_point', 'stop_loss']
 
         output_cols = []
-        for col in (base_cols + pattern_cols + sort_key_cols + signal_cols + action_cols):
+        for col in (base_cols + pattern_cols + sort_key_cols + feature_cols + signal_cols + action_cols):
             if col in df_report.columns:
                 output_cols.append(col)
 
@@ -419,8 +421,10 @@ class IntegratedReport:
             df_export = report_df
         else:
             # 핵심 컬럼만 선택
-            core_cols = ['stock_code', 'stock_name', 'sector', 'pattern', 'score',
-                        'recent', 'momentum', 'weighted', 'average',
+            core_cols = ['stock_code', 'stock_name', 'sector',
+                        'pattern', 'sub_type', 'pattern_label', 'score',
+                        'recent', 'momentum', 'weighted', 'average', 'short_trend',
+                        'temporal_consistency',
                         'signal_count', 'entry_point', 'stop_loss']
 
             # 존재하는 컬럼만 선택

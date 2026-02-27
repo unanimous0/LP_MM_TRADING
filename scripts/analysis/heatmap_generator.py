@@ -130,7 +130,7 @@ def main():
         default='recent',
         help='''Y축 정렬 기준:
   recent: 최근 기간(5D+20D) 우선 (기본, 추천!)
-  momentum: 수급 모멘텀(5D-500D) - 전환점 포착
+  momentum: 수급 모멘텀(5D-200D) - 전환점 포착
   weighted: 가중 평균 (최근 높은 가중치)
   average: 단순 평균 (deprecated)'''
     )

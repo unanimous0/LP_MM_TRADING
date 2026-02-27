@@ -137,21 +137,22 @@ if not st.session_state.get('home_snapshot_done'):
 st.markdown(f"**기준일**: {end_date_str}")
 
 # ---------------------------------------------------------------------------
-# KPI 카드 (5개)
+# KPI 카드 (6개)
 # ---------------------------------------------------------------------------
 total = len(report_df)
 watchlist_df = report_df[
     (report_df['score'] >= 70) & (report_df['signal_count'] >= 2)
 ].copy()
 signal_2plus = len(report_df[report_df['signal_count'] >= 2])
-
-col1, col2, col3, col4, col5 = st.columns(5)
 _saved_count = len(get_watchlist())
-col1.metric("분석 종목", f"{total}개")
-col2.metric("관심 종목", f"{len(watchlist_df)}개 / ⭐{_saved_count}개", help="점수70+·시그널2+ / 저장된 관심종목")
-col3.metric("강한 매수", f"{len(abnormal_buy)}개", help="Z-Score > 2σ")
-col4.metric("강한 매도", f"{len(abnormal_sell)}개", help="Z-Score < -2σ")
-col5.metric("시그널 2+", f"{signal_2plus}개", help="시그널 2개 이상 종목")
+
+col1, col2, col3, col4, col5, col6 = st.columns(6)
+col1.metric("분석 종목", f"{total}개", help="전체 분석 대상 종목 수")
+col2.metric("고득점 종목", f"{len(watchlist_df)}개", help="점수 70+ & 시그널 2개 이상")
+col3.metric("저장 관심종목", f"{_saved_count}개", help="내가 저장한 관심종목 수")
+col4.metric("강한 매수", f"{len(abnormal_buy)}개", help="Z-Score > 2σ")
+col5.metric("강한 매도", f"{len(abnormal_sell)}개", help="Z-Score < -2σ")
+col6.metric("시그널 2+", f"{signal_2plus}개", help="시그널 2개 이상 종목")
 
 st.divider()
 
@@ -364,8 +365,9 @@ with _tab_cond:
     if watchlist_df.empty:
         st.info("현재 조건을 만족하는 관심 종목이 없습니다.")
     else:
+        _wl_pat_col = 'pattern_label' if 'pattern_label' in watchlist_df.columns else 'pattern'
         display_cols = [
-            'stock_code', 'stock_name', 'sector', 'pattern',
+            'stock_code', 'stock_name', 'sector', _wl_pat_col,
             'score', 'signal_count', 'entry_point', 'stop_loss',
         ]
         display_cols = [c for c in display_cols if c in watchlist_df.columns]
@@ -375,6 +377,7 @@ with _tab_cond:
             'stock_name': st.column_config.TextColumn('종목명'),
             'sector': st.column_config.TextColumn('섹터'),
             'pattern': st.column_config.TextColumn('패턴'),
+            'pattern_label': st.column_config.TextColumn('패턴'),
             'score': st.column_config.ProgressColumn(
                 '최종점수', min_value=0, max_value=115, format='%d점',
             ),
@@ -401,8 +404,11 @@ with _tab_saved:
     else:
         # 현재 분석 결과와 조인하여 최신 패턴/점수 표시
         if not report_df.empty:
+            _merge_cols = ['stock_code', 'score', 'signal_count', 'entry_point', 'stop_loss']
+            _merge_pat = 'pattern_label' if 'pattern_label' in report_df.columns else 'pattern'
+            _merge_cols.insert(1, _merge_pat)
             merged = saved_wl.merge(
-                report_df[['stock_code', 'pattern', 'score', 'signal_count', 'entry_point', 'stop_loss']],
+                report_df[[c for c in _merge_cols if c in report_df.columns]],
                 on='stock_code', how='left',
             )
         else:
@@ -410,18 +416,20 @@ with _tab_saved:
             for col in ['pattern', 'score', 'signal_count']:
                 merged[col] = None
 
-        _saved_cols = ['stock_code', 'stock_name', 'sector', 'pattern',
+        _saved_pat_col = 'pattern_label' if 'pattern_label' in merged.columns else 'pattern'
+        _saved_cols = ['stock_code', 'stock_name', 'sector', _saved_pat_col,
                        'score', 'signal_count', 'added_at', 'note']
         _saved_cols = [c for c in _saved_cols if c in merged.columns]
         _saved_cfg = {
-            'stock_code':   st.column_config.TextColumn('종목코드'),
-            'stock_name':   st.column_config.TextColumn('종목명'),
-            'sector':       st.column_config.TextColumn('섹터'),
-            'pattern':      st.column_config.TextColumn('패턴'),
-            'score':        st.column_config.NumberColumn('점수', format='%.1f'),
-            'signal_count': st.column_config.NumberColumn('시그널', format='%d'),
-            'added_at':     st.column_config.TextColumn('추가일시'),
-            'note':         st.column_config.TextColumn('메모'),
+            'stock_code':    st.column_config.TextColumn('종목코드'),
+            'stock_name':    st.column_config.TextColumn('종목명'),
+            'sector':        st.column_config.TextColumn('섹터'),
+            'pattern':       st.column_config.TextColumn('패턴'),
+            'pattern_label': st.column_config.TextColumn('패턴'),
+            'score':         st.column_config.NumberColumn('점수', format='%.1f'),
+            'signal_count':  st.column_config.NumberColumn('시그널', format='%d'),
+            'added_at':      st.column_config.TextColumn('추가일시'),
+            'note':          st.column_config.TextColumn('메모'),
         }
         _saved_cfg = {k: v for k, v in _saved_cfg.items() if k in _saved_cols}
 

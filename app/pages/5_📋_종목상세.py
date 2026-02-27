@@ -233,9 +233,10 @@ col5.metric("활성 시그널", f"{signal_count}개")
 # 패턴 배너
 # ---------------------------------------------------------------------------
 if stock_report is not None:
-    pattern     = stock_report.get('pattern', '-')
-    score       = stock_report.get('score', 0)
-    signal_list = stock_report.get('signal_list', '') or ''
+    pattern       = stock_report.get('pattern', '-')
+    pattern_label = stock_report.get('pattern_label', pattern)
+    score         = stock_report.get('score', 0)
+    signal_list   = stock_report.get('signal_list', '') or ''
 
     _PATTERN_COLORS = {
         '모멘텀형': '#f472b6',
@@ -252,7 +253,7 @@ if stock_report is not None:
     st.markdown(
         f'<div style="border-left:4px solid {pcolor}; padding:8px 16px; '
         f'background-color:#1e293b; border-radius:4px; margin:8px 0;">'
-        f'<b>현재 패턴:</b> {pattern} &nbsp;|&nbsp; '
+        f'<b>현재 패턴:</b> {pattern_label} &nbsp;|&nbsp; '
         f'<b>패턴 점수:</b> {score:.0f}점 &nbsp;|&nbsp; '
         f'<b>시그널:</b> {signals_text}'
         f'</div>',

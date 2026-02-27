@@ -128,9 +128,9 @@ class HeatmapRenderer:
                 sort_label = f"recent ({periods[0]})"
 
         elif sort_by == 'momentum':
-            # 수급 모멘텀 (5D - 500D, 양수 = 최근 개선)
+            # 수급 모멘텀 (5D - 200D, 양수 = 최근 개선). 500D는 참고용, 모멘텀에서 제외
             first_period = periods[0]
-            last_period = periods[-1]
+            last_period = '200D' if '200D' in periods else periods[-2] if len(periods) > 1 else periods[0]
             zscore_matrix['_sort_key'] = zscore_matrix[first_period] - zscore_matrix[last_period]
             sort_label = f"momentum ({first_period} - {last_period})"
 

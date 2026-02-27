@@ -67,7 +67,7 @@ class PatternClassifier:
             'pattern_thresholds': {
                 # 모멘텀형: 단기 모멘텀 매우 강함
                 'momentum': {
-                    'momentum_min': 1.0,      # 5D-500D > 1.0
+                    'momentum_min': 1.0,      # 5D-200D > 1.0
                     'recent_min': 0.5,        # (5D+20D)/2 > 0.5
                     'temporal_consistency_min': 0.5,  # 6쌍 중 ≥3쌍 순서 일치
                 },
@@ -82,7 +82,7 @@ class PatternClassifier:
                 # 전환형: 추세 약화, 반대 방향 전환 대기
                 'reversal': {
                     'weighted_min': 0.5,      # 가중 평균 > 0.5
-                    'momentum_max': 0,        # 5D-500D < 0 (최근 약화)
+                    'momentum_max': 0,        # 5D-200D < 0 (최근 약화)
                 }
             },
 
@@ -99,7 +99,32 @@ class PatternClassifier:
             'feature_config': {
                 'volatility_periods': ['5D', '10D', '20D', '50D', '100D', '200D', '500D'],
                 'persistence_threshold': 0,  # 양수 기준
-            }
+            },
+
+            # 복합 패턴(sub_type) 임계값
+            'sub_type_thresholds': {
+                'long_base_200d': 0.3,          # ① 장기기반: 200D 최소값
+                'long_base_100d': 0.3,          # ① 장기기반: 100D 최소값
+                'breakout_5d': 1.0,             # ② 단기돌파: 5D 최소값
+                'breakout_short_trend': 0.5,    # ② 단기돌파: short_trend 최소값
+                'v_bounce_5d': 1.0,             # ③ V자반등: 5D 최소값
+                'v_bounce_recent': 0.5,         # ③ V자반등: recent 최소값
+                'uniform_std_max': 0.5,         # ④ 전면수급: 5D~200D std 최대값
+                'weakening_short_trend': -0.3,  # ⑤ 모멘텀약화: short_trend 최대값
+                'decel_short_trend': -0.3,      # ⑥ 감속: short_trend 최대값
+                'dead_cat_long_z': -0.3,        # ⑦ 단기반등: 200D/100D 최대값
+            },
+
+            # sub_type별 점수 보정
+            'sub_type_score_bonus': {
+                '장기기반': 5,
+                '단기돌파': 5,
+                'V자반등': 3,
+                '전면수급': 3,
+                '모멘텀약화': -5,
+                '감속': -5,
+                '단기반등': -8,
+            },
         }
 
     def calculate_features(self, zscore_matrix: pd.DataFrame) -> pd.DataFrame:
@@ -152,7 +177,7 @@ class PatternClassifier:
         Returns:
             pd.DataFrame: 4가지 정렬 키 추가
                 - recent: (5D+20D)/2 - 현재 강도
-                - momentum: 5D-500D - 수급 개선도
+                - momentum: 5D-200D - 수급 개선도
                 - weighted: 가중 평균 - 중장기 트렌드
                 - average: 단순 평균 - 전체 일관성
         """
@@ -166,10 +191,10 @@ class PatternClassifier:
         # 1. Recent: (5D+20D)/2
         df['recent'] = (df['5D'] + df['20D']) / 2
 
-        # 2. Momentum: 5D - 가장 긴 유효 기간 (500D→200D→100D→50D→20D 순서 폴백)
+        # 2. Momentum: 5D - 가장 긴 유효 기간 (200D→100D→50D→20D 순서 폴백)
+        # 500D는 참고용 — 모멘텀 계산에서 제외 (장기 기준 = 200D/100D)
         # 백테스트 초기처럼 DB 데이터 부족 시 긴 기간이 NaN일 수 있으므로 폴백 적용
-        _longest = (df['500D']
-                    .fillna(df['200D'])
+        _longest = (df['200D']
                     .fillna(df['100D'])
                     .fillna(df['50D'])
                     .fillna(df['20D']))
@@ -350,6 +375,82 @@ class PatternClassifier:
         )
 
     @staticmethod
+    def _classify_sub_type(pattern: str, row: pd.Series, config: dict) -> Optional[str]:
+        """
+        복합 패턴 sub_type 판정
+
+        기본 패턴(모멘텀형/지속형/전환형) 위에 추가 한정자를 부여한다.
+        위험 패턴을 먼저 체크 (단기반등 → 감속 → 장기기반 순서).
+
+        Args:
+            pattern: 기본 패턴 문자열 ('모멘텀형', '지속형', '전환형', '기타')
+            row: Z-Score/feature 행 (5D~500D + sort keys + features)
+            config: sub_type_thresholds 포함 설정 딕셔너리
+
+        Returns:
+            sub_type 문자열 또는 None (해당 없음)
+        """
+        th = config.get('sub_type_thresholds', {})
+        if not th:
+            return None
+
+        def _get(key, default=np.nan):
+            v = row.get(key, default)
+            return v if pd.notna(v) else default
+
+        if pattern == '모멘텀형':
+            # ⑦ 단기반등 (위험 먼저): 장기 매도 속 단기 반등 함정
+            z200 = _get('200D', 0.0)
+            z100 = _get('100D', 0.0)
+            if z200 < th.get('dead_cat_long_z', -0.3) or z100 < th.get('dead_cat_long_z', -0.3):
+                return '단기반등'
+
+            # ⑥ 감속: 모멘텀 피크아웃
+            st = _get('short_trend', 0.0)
+            if st < th.get('decel_short_trend', -0.3):
+                return '감속'
+
+            # ① 장기기반: 장기매집 위에 단기폭발
+            if z200 > th.get('long_base_200d', 0.3) and z100 > th.get('long_base_100d', 0.3):
+                return '장기기반'
+
+            return None
+
+        elif pattern == '지속형':
+            # ② 단기돌파: 매집→돌파 시작
+            z5 = _get('5D', 0.0)
+            st = _get('short_trend', 0.0)
+            if z5 > th.get('breakout_5d', 1.0) and st > th.get('breakout_short_trend', 0.5):
+                return '단기돌파'
+
+            # ④ 전면수급: 5D~200D 모두 양수 & 표준편차 낮음
+            check_cols = ['5D', '10D', '20D', '50D', '100D', '200D']
+            vals = [_get(c, np.nan) for c in check_cols]
+            valid_vals = [v for v in vals if not np.isnan(v)]
+            if valid_vals and all(v > 0 for v in valid_vals) and len(valid_vals) >= 4:
+                if np.std(valid_vals) < th.get('uniform_std_max', 0.5):
+                    return '전면수급'
+
+            # ⑤ 모멘텀약화: 매집세 약화 중
+            z20 = _get('20D', 0.0)
+            if st < th.get('weakening_short_trend', -0.3) and z5 < z20:
+                return '모멘텀약화'
+
+            return None
+
+        elif pattern == '전환형':
+            # ③ V자반등: 강한 V자 반등
+            z5 = _get('5D', 0.0)
+            recent = _get('recent', 0.0)
+            if z5 > th.get('v_bounce_5d', 1.0) and recent > th.get('v_bounce_recent', 0.5):
+                return 'V자반등'
+
+            return None
+
+        # 기타 패턴은 sub_type 없음
+        return None
+
+    @staticmethod
     def _apply_direction_confidence(df: pd.DataFrame, direction: str) -> pd.DataFrame:
         """
         방향 확신도를 Z-Score에 적용하여 실제 수급 방향을 반영
@@ -480,8 +581,30 @@ class PatternClassifier:
         # 3. 패턴 분류
         df['pattern'] = df.apply(self.classify_pattern, axis=1)
 
+        # 3.5. 복합 패턴 sub_type 판정
+        # Note: 기본 패턴과 동일하게 post-tanh(방향 확신도 보정) 값으로 평가
+        df['sub_type'] = df.apply(
+            lambda r: self._classify_sub_type(r['pattern'], r, self.config),
+            axis=1,
+        )
+        df['pattern_label'] = df.apply(
+            lambda r: f"{r['pattern']}({r['sub_type']})" if pd.notna(r['sub_type']) else r['pattern'],
+            axis=1,
+        )
+
         # 4. 패턴 강도 점수 계산
         df['score'] = df.apply(self.calculate_pattern_score, axis=1)
+
+        # 4.5. sub_type 점수 보정 (tc_bonus와 별개)
+        sub_bonus_map = self.config.get('sub_type_score_bonus', {})
+        if sub_bonus_map:
+            df['score'] = df.apply(
+                lambda r: float(np.clip(
+                    r['score'] + sub_bonus_map.get(r['sub_type'], 0),
+                    0, 100,
+                )) if pd.notna(r['sub_type']) else r['score'],
+                axis=1,
+            )
 
         # 5. direction 컬럼 추가
         df['direction'] = direction
@@ -500,7 +623,7 @@ class PatternClassifier:
         period_cols = ['5D', '10D', '20D', '50D', '100D', '200D', '500D']
         sort_key_cols = ['recent', 'momentum', 'weighted', 'average', 'short_trend']
         feature_cols = ['volatility', 'persistence', 'sl_ratio', 'temporal_consistency']
-        result_cols = ['pattern', 'score', 'direction']
+        result_cols = ['pattern', 'sub_type', 'pattern_label', 'score', 'direction']
 
         # 존재하는 컬럼만 선택 (유연성)
         output_cols = []

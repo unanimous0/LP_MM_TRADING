@@ -78,8 +78,8 @@ class TestPatternClassifier:
             check_names=False
         )
 
-        # Check momentum = 5D - 500D
-        expected_momentum = result['5D'] - result['500D']
+        # Check momentum = 5D - 200D (500D는 참고용, 모멘텀 계산에서 제외)
+        expected_momentum = result['5D'] - result['200D']
         pd.testing.assert_series_equal(
             result['momentum'],
             expected_momentum,
@@ -663,3 +663,219 @@ class TestScoringToggle:
         score_legacy = classifier_legacy.calculate_pattern_score(row)
         # 현재 버전이 레거시보다 높아야 함 (tc_bonus + short_trend 가중치 효과)
         assert score_current > score_legacy
+
+
+class TestSubType:
+    """복합 패턴(sub_type) 분류 테스트"""
+
+    @pytest.fixture
+    def classifier(self):
+        return PatternClassifier()
+
+    def test_sub_type_momentum_long_base(self, classifier):
+        """① 모멘텀형 + 200D>0.3 AND 100D>0.3 → sub_type='장기기반'"""
+        row = pd.Series({
+            '5D': 2.0, '10D': 1.5, '20D': 1.0, '50D': 0.8,
+            '100D': 0.5, '200D': 0.5, '500D': 0.2,
+            'recent': 1.5, 'momentum': 1.8, 'weighted': 1.0,
+            'average': 0.8, 'short_trend': 1.0, 'persistence': 0.8,
+            'temporal_consistency': 0.8,
+        })
+        result = PatternClassifier._classify_sub_type('모멘텀형', row, classifier.config)
+        assert result == '장기기반'
+
+    def test_sub_type_sustained_breakout(self, classifier):
+        """② 지속형 + 5D>1.0 AND short_trend>0.5 → sub_type='단기돌파'"""
+        row = pd.Series({
+            '5D': 1.5, '10D': 1.0, '20D': 0.5, '50D': 0.8,
+            '100D': 0.9, '200D': 1.0, '500D': 0.8,
+            'recent': 1.0, 'momentum': 0.7, 'weighted': 0.9,
+            'average': 0.8, 'short_trend': 1.0, 'persistence': 0.8,
+            'temporal_consistency': 0.2,
+        })
+        result = PatternClassifier._classify_sub_type('지속형', row, classifier.config)
+        assert result == '단기돌파'
+
+    def test_sub_type_reversal_v_bounce(self, classifier):
+        """③ 전환형 + 5D>1.0 AND recent>0.5 → sub_type='V자반등'"""
+        row = pd.Series({
+            '5D': 1.5, '10D': 0.5, '20D': -0.2, '50D': -0.3,
+            '100D': -0.5, '200D': -0.2, '500D': 0.1,
+            'recent': 0.65, 'momentum': -0.5, 'weighted': 0.6,
+            'average': 0.1, 'short_trend': 1.7, 'persistence': 0.5,
+        })
+        result = PatternClassifier._classify_sub_type('전환형', row, classifier.config)
+        assert result == 'V자반등'
+
+    def test_sub_type_sustained_uniform(self, classifier):
+        """④ 지속형 + 5D~200D 모두 양수 & std<0.5 → sub_type='전면수급'"""
+        row = pd.Series({
+            '5D': 0.8, '10D': 0.9, '20D': 0.7, '50D': 0.8,
+            '100D': 0.9, '200D': 0.8, '500D': 0.7,
+            'recent': 0.75, 'momentum': 0.1, 'weighted': 0.85,
+            'average': 0.8, 'short_trend': 0.1, 'persistence': 1.0,
+            'temporal_consistency': 0.3,
+        })
+        result = PatternClassifier._classify_sub_type('지속형', row, classifier.config)
+        assert result == '전면수급'
+
+    def test_sub_type_sustained_weakening(self, classifier):
+        """⑤ 지속형 + short_trend<-0.3 AND 5D<20D → sub_type='모멘텀약화'
+        주의: 전면수급 조건(모든 Z>0 + std<0.5) 불충족하도록 std>0.5 설정
+        """
+        row = pd.Series({
+            '5D': 0.3, '10D': 0.5, '20D': 0.8, '50D': 1.0,
+            '100D': 1.5, '200D': 2.0, '500D': 1.0,  # std > 0.5 (전면수급 불충족)
+            'recent': 0.55, 'momentum': -0.7, 'weighted': 0.9,
+            'average': 0.8, 'short_trend': -0.5, 'persistence': 1.0,
+            'temporal_consistency': 0.0,
+        })
+        result = PatternClassifier._classify_sub_type('지속형', row, classifier.config)
+        assert result == '모멘텀약화'
+
+    def test_sub_type_momentum_decel(self, classifier):
+        """⑥ 모멘텀형 + short_trend<-0.3 → sub_type='감속'"""
+        row = pd.Series({
+            '5D': 1.0, '10D': 1.5, '20D': 1.8, '50D': 0.5,
+            '100D': 0.3, '200D': 0.2, '500D': 0.1,
+            'recent': 1.4, 'momentum': 0.9, 'weighted': 0.7,
+            'average': 0.6, 'short_trend': -0.8, 'persistence': 0.7,
+            'temporal_consistency': 0.6,
+        })
+        result = PatternClassifier._classify_sub_type('모멘텀형', row, classifier.config)
+        assert result == '감속'
+
+    def test_sub_type_momentum_dead_cat(self, classifier):
+        """⑦ 모멘텀형 + 200D<-0.3 → sub_type='단기반등' (위험 먼저 체크)"""
+        row = pd.Series({
+            '5D': 2.0, '10D': 1.5, '20D': 1.0, '50D': 0.5,
+            '100D': -0.2, '200D': -0.5, '500D': -0.3,
+            'recent': 1.5, 'momentum': 2.3, 'weighted': 0.5,
+            'average': 0.4, 'short_trend': 1.0, 'persistence': 0.5,
+            'temporal_consistency': 0.6,
+        })
+        result = PatternClassifier._classify_sub_type('모멘텀형', row, classifier.config)
+        assert result == '단기반등'
+
+    def test_sub_type_none_for_other_pattern(self, classifier):
+        """기타 패턴은 항상 sub_type=None"""
+        row = pd.Series({
+            '5D': 0.2, '10D': 0.1, '20D': 0.3, '50D': 0.1,
+            '100D': 0.0, '200D': -0.1, '500D': 0.0,
+        })
+        result = PatternClassifier._classify_sub_type('기타', row, classifier.config)
+        assert result is None
+
+    def test_pattern_label_format(self, classifier):
+        """pattern_label = 'pattern(sub_type)' 또는 'pattern' (sub_type None)"""
+        data = {
+            'stock_code': ['A', 'B'],
+            '5D':   [2.0, 0.2],
+            '10D':  [1.5, 0.1],
+            '20D':  [1.0, 0.3],
+            '50D':  [0.8, 0.1],
+            '100D': [0.5, 0.0],
+            '200D': [0.5, -0.1],
+            '500D': [0.2, 0.0],
+        }
+        result = classifier.classify_all(pd.DataFrame(data))
+        for _, row in result.iterrows():
+            if pd.notna(row['sub_type']):
+                assert row['pattern_label'] == f"{row['pattern']}({row['sub_type']})"
+            else:
+                assert row['pattern_label'] == row['pattern']
+
+    def test_sub_type_score_bonus_applied(self, classifier):
+        """sub_type 점수 보정이 적용됨 (장기기반 +5, 단기반등 -8)"""
+        # 장기기반 데이터 (모멘텀형 + 200D>0.3 + 100D>0.3)
+        data_good = {
+            'stock_code': ['A'],
+            '5D': [2.0], '10D': [1.5], '20D': [1.0], '50D': [0.8],
+            '100D': [0.5], '200D': [0.5], '500D': [0.2],
+        }
+        # 단기반등 데이터 (모멘텀형 + 200D<-0.3)
+        data_bad = {
+            'stock_code': ['B'],
+            '5D': [2.0], '10D': [1.5], '20D': [1.0], '50D': [0.5],
+            '100D': [-0.2], '200D': [-0.5], '500D': [-0.3],
+        }
+        result_good = classifier.classify_all(pd.DataFrame(data_good))
+        result_bad = classifier.classify_all(pd.DataFrame(data_bad))
+        assert result_good.iloc[0]['sub_type'] == '장기기반'
+        assert result_bad.iloc[0]['sub_type'] == '단기반등'
+        # 장기기반 점수가 단기반등보다 높아야 함 (+5 vs -8 = 13점 차이 최소)
+        assert result_good.iloc[0]['score'] > result_bad.iloc[0]['score']
+
+    def test_classify_all_has_sub_type_columns(self, classifier):
+        """classify_all() 결과에 sub_type, pattern_label 컬럼 존재"""
+        data = {
+            'stock_code': ['A', 'B', 'C'],
+            '5D': [1.5, -0.5, 2.0], '10D': [1.3, -0.4, 1.0],
+            '20D': [1.2, -0.3, 0.1], '50D': [0.8, 0.2, 0.0],
+            '100D': [0.5, 0.5, -0.1], '200D': [0.3, 0.8, 0.1],
+            '500D': [0.1, 1.0, 0.0],
+        }
+        result = classifier.classify_all(pd.DataFrame(data))
+        assert 'sub_type' in result.columns
+        assert 'pattern_label' in result.columns
+
+    def test_sub_type_short_direction(self, classifier):
+        """direction='short' 시 sub_type이 정상 분류되는지 확인"""
+        # 강한 매도세: 음수 Z-Score (short에서 부호 반전 → 양수)
+        data = {
+            'stock_code': ['A'],
+            '5D': [-2.0], '10D': [-1.5], '20D': [-1.0], '50D': [-0.8],
+            '100D': [-0.5], '200D': [-0.5], '500D': [-0.2],
+            '_today_sff': [-0.5], '_sff_5d_avg': [-0.5],
+            '_std_5D': [0.3], '_std_10D': [0.3], '_std_20D': [0.3],
+            '_std_50D': [0.3], '_std_100D': [0.3], '_std_200D': [0.3],
+            '_std_500D': [0.3],
+        }
+        result = classifier.classify_all(pd.DataFrame(data), direction='short')
+        assert 'sub_type' in result.columns
+        assert 'pattern_label' in result.columns
+        # short 방향: Z 부호 반전 후 200D>0.3, 100D>0.3 → 장기기반 가능
+        sub = result.iloc[0]['sub_type']
+        # sub_type이 None이 아니면 유효한 값이어야 함
+        valid_sub_types = {'장기기반', '단기돌파', 'V자반등', '전면수급',
+                          '모멘텀약화', '감속', '단기반등', None}
+        assert sub in valid_sub_types or pd.isna(sub)
+
+    def test_sub_type_with_scoring_toggles(self, classifier):
+        """use_tc=False, use_short_trend=False에서도 sub_type 정상 분류"""
+        data = {
+            'stock_code': ['A'],
+            '5D': [2.0], '10D': [1.5], '20D': [1.0], '50D': [0.8],
+            '100D': [0.5], '200D': [0.5], '500D': [0.2],
+        }
+        # 기본 (tc+short_trend ON)
+        clf_default = PatternClassifier(use_tc=True, use_short_trend=True)
+        r_default = clf_default.classify_all(pd.DataFrame(data))
+
+        # 레거시 (tc+short_trend OFF)
+        clf_legacy = PatternClassifier(use_tc=False, use_short_trend=False)
+        r_legacy = clf_legacy.classify_all(pd.DataFrame(data))
+
+        # 두 경우 모두 sub_type/pattern_label 컬럼 존재
+        assert 'sub_type' in r_default.columns
+        assert 'sub_type' in r_legacy.columns
+        assert 'pattern_label' in r_legacy.columns
+
+        # sub_type 값 자체는 동일해야 함 (tc/short_trend는 점수에만 영향, 분류 조건 무관)
+        assert r_default.iloc[0]['sub_type'] == r_legacy.iloc[0]['sub_type']
+
+    def test_sub_type_priority_sustained_breakout_over_uniform(self, classifier):
+        """지속형에서 단기돌파 + 전면수급 동시 충족 시 단기돌파 우선"""
+        row = pd.Series({
+            # 단기돌파 조건: 5D>1.0 AND short_trend>0.5
+            '5D': 1.5, '10D': 0.9, '20D': 0.8, '50D': 0.7,
+            '100D': 0.6, '200D': 0.5, '500D': 0.4,
+            'short_trend': 0.7,
+            # 전면수급 조건: all>0 (충족), std < 0.5
+            # std([1.5,0.9,0.8,0.7,0.6,0.5]) ≈ 0.33 < 0.5 (충족)
+            'recent': 1.15, 'momentum': 1.1, 'weighted': 0.8,
+            'average': 0.77, 'persistence': 0.8,
+            'temporal_consistency': 0.8,
+        })
+        result = PatternClassifier._classify_sub_type('지속형', row, classifier.config)
+        assert result == '단기돌파', f"단기돌파가 전면수급보다 우선이어야 함, got: {result}"
