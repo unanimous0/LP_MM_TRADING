@@ -293,7 +293,7 @@ def create_sector_zscore_heatmap(
     Args:
         zscore_matrix: stock_code + 기간 컬럼 DataFrame
         stock_list: stock_code / sector 컬럼 포함 종목 마스터
-        sort_by: 정렬 기준 (recent / momentum / weighted / average)
+        sort_by: 정렬 기준 (recent / mid_momentum / momentum / weighted / average)
     """
     if zscore_matrix.empty or stock_list is None or stock_list.empty:
         fig = go.Figure()

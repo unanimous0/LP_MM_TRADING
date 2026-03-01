@@ -16,10 +16,10 @@ Implements Stage 3 pattern classification:
     1. Z-Score 부호 반전 (short 방향)
     2. temporal_consistency 계산 (tanh 이전 필수 — tanh 후 0>=0 오류 방지)
     3. tanh 방향 확신도 적용
-    4. short_trend 계산 (tanh 이후 — sort key와 스케일 일치)
+    4. short_trend, mid_momentum 계산 (tanh 이후 — sort key와 스케일 일치)
     5. 정렬키/특성/패턴/점수 계산
     6. 원본 Z-Score 복원
-    7. short_trend 재계산 (복원된 Z-Score 기준 — 출력 표시용)
+    7. short_trend, mid_momentum 재계산 (복원된 Z-Score 기준 — 출력 표시용)
 """
 
 import pandas as pd
@@ -52,9 +52,9 @@ class PatternClassifier:
             use_tc: Temporal Consistency 적용 여부
                 True(기본): tc 임계값 조건 + tc_bonus ±10점 적용
                 False: tc 조건 무시 (스코어링 개선 이전 동작)
-            use_short_trend: Short Trend 점수 반영 여부
-                True(기본): 현재 가중치 (short_trend=0.15) 사용
-                False: 레거시 가중치 사용 (short_trend=0.00, 스코어링 개선 이전 동작)
+            use_short_trend: Short Trend / Mid Momentum 점수 반영 여부
+                True(기본): 현재 가중치 (short_trend=0.10, mid_momentum=0.10) 사용
+                False: 레거시 가중치 사용 (short_trend=0.00, mid_momentum=0.00, 스코어링 개선 이전 동작)
         """
         self.config = config or self._get_default_config()
         self.use_tc = use_tc
@@ -171,15 +171,16 @@ class PatternClassifier:
 
     def calculate_sort_keys(self, zscore_matrix: pd.DataFrame) -> pd.DataFrame:
         """
-        4가지 정렬 키 계산
+        5가지 정렬 키 계산
 
         Args:
             zscore_matrix: Stage 2 출력 (stock_code, 5D~500D)
 
         Returns:
-            pd.DataFrame: 4가지 정렬 키 추가
+            pd.DataFrame: 5가지 정렬 키 추가
                 - recent: (5D+20D)/2 - 현재 강도
-                - momentum: 5D-200D - 수급 개선도
+                - mid_momentum: 5D-100D - 중기 수급 개선도
+                - momentum: 5D-200D - 장기 수급 개선도
                 - weighted: 가중 평균 - 중장기 트렌드
                 - average: 단순 평균 - 전체 일관성
         """
@@ -527,7 +528,7 @@ class PatternClassifier:
             pd.DataFrame: 패턴 분류 결과
                 - stock_code: 종목코드
                 - 5D~500D: 7개 기간 Z-Score (원본 값, 출력용)
-                - recent, momentum, weighted, average, short_trend: 5가지 정렬 키
+                - recent, mid_momentum, momentum, weighted, average, short_trend: 6가지 정렬 키
                 - volatility, persistence, sl_ratio, temporal_consistency: 추가 특성
                 - pattern: 패턴명 (모멘텀형/지속형/전환형/기타)
                 - score: 패턴 강도 점수 (0~100)
@@ -539,8 +540,8 @@ class PatternClassifier:
             - 패턴 이름은 방향과 무관하게 동일 (모멘텀형/지속형/전환형)
             - short일 때 Z-Score 부호 반전하여 분석
             - temporal_consistency: tanh 이전 계산 (0>=0 오류 방지)
-            - short_trend: tanh 이후 계산 (sort key와 스케일 일치)
-            - 출력 short_trend: 원본 Z-Score 복원 후 재계산 (표시 일관성)
+            - short_trend, mid_momentum: tanh 이후 계산 (sort key와 스케일 일치)
+            - 출력 short_trend, mid_momentum: 원본 Z-Score 복원 후 재계산 (표시 일관성)
 
         Example:
             >>> classifier = PatternClassifier()
@@ -633,8 +634,11 @@ class PatternClassifier:
         # 분류/점수는 이미 post-tanh 값으로 계산 완료 → 이 재계산은 출력 컬럼 전용
         if '5D' in df.columns and '20D' in df.columns:
             df['short_trend'] = df['5D'] - df['20D']
-        if '5D' in df.columns and '100D' in df.columns:
-            df['mid_momentum'] = df['5D'] - df['100D']
+        if '5D' in df.columns:
+            _mid_out = df.get('100D', pd.Series(np.nan, index=df.index))
+            if '50D' in df.columns:
+                _mid_out = _mid_out.fillna(df['50D'])
+            df['mid_momentum'] = df['5D'] - _mid_out
 
         # 6. 컬럼 순서 정리
         base_cols = ['stock_code']

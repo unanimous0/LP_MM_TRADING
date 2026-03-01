@@ -127,6 +127,13 @@ class HeatmapRenderer:
                 zscore_matrix['_sort_key'] = zscore_matrix[periods[0]]
                 sort_label = f"recent ({periods[0]})"
 
+        elif sort_by == 'mid_momentum':
+            # 중기 모멘텀 (5D - 100D, 양수 = 최근 중기 개선)
+            first_period = periods[0]
+            mid_period = '100D' if '100D' in periods else '50D' if '50D' in periods else periods[0]
+            zscore_matrix['_sort_key'] = zscore_matrix[first_period] - zscore_matrix[mid_period]
+            sort_label = f"mid_momentum ({first_period} - {mid_period})"
+
         elif sort_by == 'momentum':
             # 수급 모멘텀 (5D - 200D, 양수 = 최근 개선). 500D는 참고용, 모멘텀에서 제외
             first_period = periods[0]

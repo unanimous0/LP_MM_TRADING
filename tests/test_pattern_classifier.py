@@ -947,6 +947,48 @@ class TestMidMomentum:
         assert result['mid_momentum'].iloc[0] == pytest.approx(0.7, abs=0.01)
 
 
+    def test_mid_momentum_in_classify_all_matches_original(self, classifier, sample_zscore_matrix):
+        """classify_all 출력의 mid_momentum == 복원된 5D - 100D (50D 폴백 포함)"""
+        result = classifier.classify_all(sample_zscore_matrix)
+        for _, row in result.iterrows():
+            expected_mid = row['100D'] if pd.notna(row.get('100D')) else row.get('50D', np.nan)
+            if pd.notna(expected_mid):
+                assert row['mid_momentum'] == pytest.approx(row['5D'] - expected_mid, abs=0.01)
+
+    def test_use_short_trend_false_neutralizes_mid_momentum(self):
+        """use_short_trend=False 시 mid_momentum도 점수에 영향 없음"""
+        legacy = PatternClassifier(use_short_trend=False)
+        base = {
+            'recent': 1.0, 'momentum': 0.5, 'weighted': 0.8,
+            'average': 0.6, 'short_trend': 0.3,
+            'temporal_consistency': 0.5,
+        }
+        score_high = legacy.calculate_pattern_score(pd.Series({**base, 'mid_momentum': 2.0}))
+        score_low = legacy.calculate_pattern_score(pd.Series({**base, 'mid_momentum': -2.0}))
+        assert score_high == pytest.approx(score_low, abs=0.01)
+
+    def test_default_weights_sum_to_one(self):
+        """기본 가중치 합산 = 1.0"""
+        c = PatternClassifier()
+        w = c.config['score_weights']
+        assert sum(w.values()) == pytest.approx(1.0, abs=0.001)
+
+    def test_mid_momentum_double_nan_fallback(self, classifier):
+        """100D, 50D 모두 NaN일 때 mid_momentum = NaN, 점수 계산 정상"""
+        data = pd.DataFrame({
+            'stock_code': ['A'],
+            '5D': [1.5], '10D': [1.3], '20D': [1.2],
+            '50D': [np.nan], '100D': [np.nan],
+            '200D': [0.3], '500D': [0.1],
+        })
+        result = classifier.calculate_sort_keys(data)
+        assert pd.isna(result['mid_momentum'].iloc[0])
+        # classify_all도 크래시 없이 동작
+        full = classifier.classify_all(data)
+        assert len(full) == 1
+        assert pd.notna(full['score'].iloc[0])
+
+
 class TestSubTypePriority:
     """TestSubType에서 분리된 복합 패턴 우선순위 테스트"""
 

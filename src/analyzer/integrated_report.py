@@ -233,7 +233,7 @@ class IntegratedReport:
         # 4. 컬럼 순서 정리
         base_cols = ['stock_code', 'stock_name', 'sector']
         pattern_cols = ['pattern', 'sub_type', 'pattern_label', 'score']
-        sort_key_cols = ['recent', 'momentum', 'weighted', 'average', 'short_trend']
+        sort_key_cols = ['recent', 'mid_momentum', 'momentum', 'weighted', 'average', 'short_trend']
         feature_cols = ['temporal_consistency']
         signal_cols = ['signal_count', 'signal_list']
         action_cols = ['entry_point', 'stop_loss']
