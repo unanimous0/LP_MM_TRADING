@@ -240,7 +240,7 @@ if stock_report is not None:
 
     _PATTERN_COLORS = {
         '급등형': '#f472b6',
-        '지속형':   '#38bdf8',
+        '지속형':   '#4ade80',
         '전환형':   '#4ade80',
         '기타':     '#64748b',
     }
@@ -252,7 +252,7 @@ if stock_report is not None:
 
     st.markdown(
         f'<div style="border-left:4px solid {pcolor}; padding:8px 16px; '
-        f'background-color:#1e293b; border-radius:4px; margin:8px 0;">'
+        f'background-color:#111111; border-radius:4px; margin:8px 0;">'
         f'<b>현재 패턴:</b> {pattern_label} &nbsp;|&nbsp; '
         f'<b>패턴 점수:</b> {score:.0f}점 &nbsp;|&nbsp; '
         f'<b>시그널:</b> {signals_text}'
@@ -351,7 +351,7 @@ with tab2:
 
             # ── 그룹 정의 (컬럼명 → 그룹 색상/배경)
             _GROUPS = [
-                ('외국인', ['외국인 순매수', '외국인 Z', '외국인 누적'],  '#38bdf8', '#0d1e2c'),
+                ('외국인', ['외국인 순매수', '외국인 Z', '외국인 누적'],  '#4ade80', '#052e16'),
                 ('기관',   ['기관 순매수',   '기관 Z',   '기관 누적'],   '#f472b6', '#1e0e1c'),
                 ('개인',   ['개인 순매수',   '개인 누적'],               '#fb923c', '#1e1408'),
             ]
@@ -371,7 +371,7 @@ with tab2:
             # ── 헤더 2행: 그룹행 + 컬럼행
             _th_date = (
                 "padding:6px 10px; text-align:center; font-weight:700; font-size:14px;"
-                "background:#1e293b; color:#94a3b8; border-bottom:1px solid #334155;"
+                "background:#111111; color:#94a3b8; border-bottom:1px solid #1a1a1a;"
                 "white-space:nowrap; vertical-align:middle;"
             )
             group_header_cells = f'<th rowspan="2" style="{_th_date}">날짜</th>'
@@ -389,12 +389,12 @@ with tab2:
             for c in tbl.columns:
                 if c == '날짜':
                     continue
-                clr, bg, is_first = _col_group.get(c, ('#e2e8f0', '#1e293b', False))
+                clr, bg, is_first = _col_group.get(c, ('#e2e8f0', '#111111', False))
                 border_left = f"border-left:2px solid {clr};" if is_first else ""
                 sub_label = c.replace('외국인 ', '').replace('기관 ', '').replace('개인 ', '')
                 sub_header_cells += (
                     f'<th style="padding:5px 10px; text-align:center; font-weight:600; font-size:13px;'
-                    f'background:#1e293b; color:#94a3b8; border-bottom:1px solid #334155;'
+                    f'background:#111111; color:#94a3b8; border-bottom:1px solid #1a1a1a;'
                     f'{border_left} white-space:nowrap;">{sub_label}</th>'
                 )
 
@@ -406,7 +406,7 @@ with tab2:
                 # 날짜 셀
                 cells += (
                     f'<td style="padding:5px 10px; text-align:center; font-size:14px;'
-                    f'color:#94a3b8; border-bottom:1px solid #1e293b; background:{base_bg};'
+                    f'color:#94a3b8; border-bottom:1px solid #111111; background:{base_bg};'
                     f'white-space:nowrap;">{row["날짜"]}</td>'
                 )
                 for c in tbl.columns:
@@ -418,7 +418,7 @@ with tab2:
                     cell_bg = base_bg  # 줄무늬만 유지 (그룹 bg는 헤더에만)
                     td_base = (
                         f"padding:5px 10px; text-align:center; font-size:14px;"
-                        f"border-bottom:1px solid #1e293b; background:{cell_bg};"
+                        f"border-bottom:1px solid #111111; background:{cell_bg};"
                         f"{border_left} white-space:nowrap;"
                     )
                     if c in _num_cols:
@@ -439,7 +439,7 @@ with tab2:
 
             html_table = f"""
 <div style="overflow-x:auto; max-height:420px; overflow-y:auto;
-            border:1px solid #334155; border-radius:6px;">
+            border:1px solid #1a1a1a; border-radius:6px;">
   <table style="width:100%; border-collapse:collapse; font-size:14px;">
     <thead style="position:sticky; top:0; z-index:10;">
       <tr>{group_header_cells}</tr>

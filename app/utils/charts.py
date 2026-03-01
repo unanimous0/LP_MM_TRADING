@@ -15,9 +15,9 @@ from plotly.subplots import make_subplots
 # ---------------------------------------------------------------------------
 # 다크 테마 상수
 # ---------------------------------------------------------------------------
-_BG_PLOT  = '#0f172a'   # slate-900
-_BG_PAPER = '#1e293b'   # slate-800
-_GRID     = '#334155'   # slate-700
+_BG_PLOT  = '#0a0a0a'   # gray-950
+_BG_PAPER = '#111111'   # gray-900
+_GRID     = '#1a1a1a'   # gray-800
 _TEXT     = '#e2e8f0'   # slate-200
 _MUTED    = '#94a3b8'   # slate-400
 
@@ -44,7 +44,7 @@ def _apply_dark(fig: go.Figure) -> go.Figure:
         font=dict(color=_TEXT, size=12),
         title_font=dict(color=_TEXT, size=14),
         legend=dict(
-            bgcolor='rgba(15,23,42,0.85)',
+            bgcolor='rgba(10,10,10,0.85)',
             bordercolor=_GRID,
             borderwidth=1,
             font=dict(color=_TEXT),
@@ -205,7 +205,7 @@ def create_zscore_heatmap(
     colorscale = [
         [0.0,  '#ef4444'],
         [0.35, '#fca5a5'],
-        [0.5,  '#334155'],
+        [0.5,  '#1a1a1a'],
         [0.65, '#86efac'],
         [1.0,  '#22c55e'],
     ]
@@ -236,7 +236,7 @@ def create_zscore_heatmap(
         zmax=3,
         text=text_values,
         texttemplate='%{text}',
-        textfont=dict(color='#0f172a', size=10),
+        textfont=dict(color='#0a0a0a', size=10),
         customdata=heatmap_customdata,
         hovertemplate=hover_tmpl,
         colorbar=dict(
@@ -259,7 +259,7 @@ def create_zscore_heatmap(
         opacity=0.85,
         text=[f'{v:.2f}' for v in sort_values],
         textposition='auto',
-        textfont=dict(color='#0f172a', size=9),
+        textfont=dict(color='#0a0a0a', size=9),
         cliponaxis=False,
         hovertemplate='%{y}<br>' + sort_label + ': %{x:.2f}<extra></extra>',
         showlegend=False,
@@ -351,7 +351,7 @@ def create_sector_zscore_heatmap(
     colorscale = [
         [0.0,  '#ef4444'],
         [0.35, '#fca5a5'],
-        [0.5,  '#334155'],
+        [0.5,  '#1a1a1a'],
         [0.65, '#86efac'],
         [1.0,  '#22c55e'],
     ]
@@ -364,7 +364,7 @@ def create_sector_zscore_heatmap(
         zmid=0, zmin=-3, zmax=3,
         text=text_values,
         texttemplate='%{text}',
-        textfont=dict(color='#0f172a', size=10),
+        textfont=dict(color='#0a0a0a', size=10),
         hovertemplate='%{y}<br>기간: %{x}<br>평균 Z-Score: %{z:.2f}σ<extra></extra>',
         colorbar=dict(
             title=dict(text='Z-Score', font=dict(color=_TEXT)),
@@ -400,7 +400,7 @@ def create_pattern_pie_chart(report_df: pd.DataFrame) -> go.Figure:
 
     color_map = {
         '급등형': '#f472b6',   # pink-400
-        '지속형':   '#38bdf8',   # sky-400
+        '지속형':   '#4ade80',   # green-400
         '전환형':   '#4ade80',   # green-400
         '기타':     '#64748b',   # slate-500
     }
@@ -420,7 +420,7 @@ def create_pattern_pie_chart(report_df: pd.DataFrame) -> go.Figure:
         paper_bgcolor=_BG_PAPER,
         font=dict(color=_TEXT),
         title_font=dict(color=_TEXT),
-        legend=dict(font=dict(color=_TEXT), bgcolor='rgba(15,23,42,0.85)'),
+        legend=dict(font=dict(color=_TEXT), bgcolor='rgba(10,10,10,0.85)'),
         height=350,
     )
     return fig
@@ -436,7 +436,7 @@ def create_score_histogram(report_df: pd.DataFrame) -> go.Figure:
     fig = go.Figure(data=go.Histogram(
         x=report_df['score'],
         nbinsx=20,
-        marker_color='#38bdf8',
+        marker_color='#4ade80',
         marker_line=dict(color=_BG_PAPER, width=0.5),
         opacity=0.85,
         hovertemplate='점수: %{x:.0f}<br>종목 수: %{y}<extra></extra>',
@@ -493,7 +493,7 @@ def create_signal_distribution_chart(report_df: pd.DataFrame) -> go.Figure:
 
 _PATTERN_COLORS = {
     '급등형': '#f472b6',   # pink-400
-    '지속형':   '#38bdf8',   # sky-400
+    '지속형':   '#4ade80',   # green-400
     '전환형':   '#4ade80',   # green-400
     '기타':     '#64748b',   # slate-500
 }
@@ -570,7 +570,7 @@ def create_sector_avg_score_chart(report_df: pd.DataFrame) -> go.Figure:
         y=y_labels,
         x=agg['avg_score'],
         orientation='h',
-        marker_color='#38bdf8',
+        marker_color='#4ade80',
         marker_line=dict(color=_BG_PAPER, width=0.5),
         customdata=np.column_stack([
             agg['avg_signals'].round(1).values,
@@ -578,7 +578,7 @@ def create_sector_avg_score_chart(report_df: pd.DataFrame) -> go.Figure:
         ]),
         text=[f'{v:.1f}' for v in agg['avg_score']],
         textposition='auto',
-        textfont=dict(color='#0f172a', size=11),
+        textfont=dict(color='#0a0a0a', size=11),
         hovertemplate=(
             '<b>%{y}</b><br>'
             '평균 점수: %{x:.1f}<br>'
@@ -647,7 +647,7 @@ def create_sector_concentration_chart(report_df: pd.DataFrame, min_stocks: int =
         ]),
         text=[f'{v:.1f}' for v in agg['sector_score']],
         textposition='auto',
-        textfont=dict(color='#0f172a', size=11),
+        textfont=dict(color='#0a0a0a', size=11),
         hovertemplate=(
             '<b>%{y}</b><br>'
             '섹터 점수: %{x:.1f}<br>'
@@ -675,12 +675,12 @@ def create_sector_treemap(report_df: pd.DataFrame, top_per_sector: int = 10) -> 
     """
 
     def _hex_color(score: float) -> str:
-        """점수(40~100)를 색상으로 변환: 딥레드 → 앰버 → 스카이 → 에메랄드"""
+        """점수(40~100)를 색상으로 변환: 딥레드 → 앰버 → 그린 → 에메랄드"""
         stops = [
             (0.00, (239,  68,  68)),   # red-500     — 낮음
             (0.30, (249, 115,  22)),   # orange-500  — 중하
             (0.52, (234, 179,   8)),   # yellow-500  — 중간
-            (0.72, ( 56, 189, 248)),   # sky-400     — 중상 (앱 primary)
+            (0.72, ( 74, 222, 128)),   # green-400   — 중상 (앱 primary)
             (1.00, ( 52, 211, 153)),   # emerald-400 — 높음
         ]
         t = max(0.0, min(1.0, (score - 40) / 60))
@@ -701,7 +701,7 @@ def create_sector_treemap(report_df: pd.DataFrame, top_per_sector: int = 10) -> 
         """배경 밝기 기반 흰색/어두운 텍스트"""
         h = hex_bg.lstrip('#')
         r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-        return '#0f172a' if (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.50 else '#f8fafc'
+        return '#0a0a0a' if (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.50 else '#f8fafc'
 
     if report_df.empty or 'sector' not in report_df.columns:
         fig = go.Figure()
@@ -724,7 +724,7 @@ def create_sector_treemap(report_df: pd.DataFrame, top_per_sector: int = 10) -> 
     ids, labels, parents, values, text_list = [], [], [], [], []
     node_colors, node_text_colors, custom, tmpl = [], [], [], []
 
-    _SEC_BG   = '#1e293b'  # slate-800 — 섹터 헤더 배경
+    _SEC_BG   = '#111111'  # gray-900 — 섹터 헤더 배경
     _SEC_TEXT = '#e2e8f0'  # slate-200 — 섹터 헤더 텍스트
 
     for sector in top_sectors:
@@ -773,7 +773,7 @@ def create_sector_treemap(report_df: pd.DataFrame, top_per_sector: int = 10) -> 
         branchvalues='remainder',
         marker=dict(
             colors=node_colors,
-            line=dict(width=2, color='#0f172a'),
+            line=dict(width=2, color='#0a0a0a'),
         ),
         texttemplate=tmpl,
         hovertemplate=(
@@ -792,8 +792,8 @@ def create_sector_treemap(report_df: pd.DataFrame, top_per_sector: int = 10) -> 
     fig.update_layout(
         height=700,
         margin=dict(t=10, l=5, r=5, b=5),
-        paper_bgcolor='#0f172a',
-        plot_bgcolor='#0f172a',
+        paper_bgcolor='#0a0a0a',
+        plot_bgcolor='#0a0a0a',
     )
 
     return fig
@@ -872,7 +872,7 @@ def create_abnormal_supply_chart(
         text=[f'{v:.1f}σ' for v in plot_df['combined_zscore'].abs()],
         textposition='inside',
         insidetextanchor='end',
-        textfont=dict(color='#0f172a', size=12, family='sans-serif'),
+        textfont=dict(color='#0a0a0a', size=12, family='sans-serif'),
         cliponaxis=False,
     ))
 
@@ -938,7 +938,7 @@ def create_supply_ranking_chart(
         text=text_labels,
         textposition='inside',
         insidetextanchor='end',
-        textfont=dict(color='#0f172a', size=12, family='sans-serif'),
+        textfont=dict(color='#0a0a0a', size=12, family='sans-serif'),
         cliponaxis=False,
     ))
 
@@ -983,7 +983,7 @@ def create_zscore_history_chart(
     fig.add_trace(go.Scatter(
         x=plot_df['trade_date'], y=plot_df['foreign_zscore'],
         name='외국인 Z-Score', mode='lines',
-        line=dict(color='#38bdf8', width=1.5),
+        line=dict(color='#4ade80', width=1.5),
         hovertemplate='%{x}<br>외국인 Z: %{y:.2f}<extra></extra>',
     ))
     fig.add_trace(go.Scatter(
@@ -1072,7 +1072,7 @@ def create_supply_amount_chart(
                          tickfont=dict(color=line_color), title_font=dict(color=line_color),
                          showgrid=False)
 
-    _add_investor(1, foreign_eok, foreign_cumsum, '#4ade80', '#f87171', '#38bdf8', '외국인')
+    _add_investor(1, foreign_eok, foreign_cumsum, '#4ade80', '#f87171', '#4ade80', '외국인')
     _add_investor(2, inst_eok,    inst_cumsum,    '#a78bfa', '#f472b6', '#c084fc', '기관')
     _add_investor(3, indiv_eok,   indiv_cumsum,   '#fbbf24', '#f87171', '#fb923c', '개인')
 
@@ -1091,7 +1091,7 @@ def create_supply_amount_chart(
 
 
 _MA_COLORS = {
-    5:   '#38bdf8',  # sky-400
+    5:   '#4ade80',  # green-400
     10:  '#22d3ee',  # cyan-400
     20:  '#94a3b8',  # slate-400
     60:  '#a78bfa',  # violet-400
@@ -1172,14 +1172,14 @@ def create_signal_ma_chart(
             fig.add_trace(go.Scatter(
                 x=golden_x, y=golden_y, name='골든크로스', mode='markers',
                 marker=dict(symbol='triangle-up', color='#4ade80', size=9,
-                            line=dict(width=1, color='#0f172a')),
+                            line=dict(width=1, color='#0a0a0a')),
                 hovertemplate=f'골든크로스 ({cross_label})<br>%{{x}}<extra></extra>',
             ))
         if dead_x:
             fig.add_trace(go.Scatter(
                 x=dead_x, y=dead_y, name='데드크로스', mode='markers',
                 marker=dict(symbol='triangle-down', color='#f87171', size=9,
-                            line=dict(width=1, color='#0f172a')),
+                            line=dict(width=1, color='#0a0a0a')),
                 hovertemplate=f'데드크로스 (MA{short_p}↓MA{long_p})<br>%{{x}}<extra></extra>',
             ))
 
@@ -1300,7 +1300,7 @@ def create_wf_period_returns_chart(wf_df: pd.DataFrame) -> go.Figure:
 # ---------------------------------------------------------------------------
 
 _COMPARE_PALETTE = [
-    '#38bdf8',  # sky-400
+    '#4ade80',  # green-400
     '#f472b6',  # pink-400
     '#fb923c',  # orange-400
     '#4ade80',  # green-400

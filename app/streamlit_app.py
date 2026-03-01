@@ -233,7 +233,7 @@ else:
 
         _PATTERN_COLORS = {
             '급등형': '#f472b6',
-            '지속형':   '#38bdf8',
+            '지속형':   '#4ade80',
             '전환형':   '#4ade80',
             '기타':     '#64748b',
         }
@@ -241,7 +241,7 @@ else:
 
         st.markdown(
             f'<div style="border-left:4px solid {pcolor}; padding:8px 16px; '
-            f'background-color:#1e293b; border-radius:4px; margin:8px 0;">'
+            f'background-color:#111111; border-radius:4px; margin:8px 0;">'
             f'<b>패턴:</b> {_esc(str(pattern_label))} &nbsp;|&nbsp; '
             f'<b>패턴점수:</b> {score:.1f} &nbsp;|&nbsp; '
             f'<b>시그널:</b> {signal_count}개 ({_esc(str(signal_list)) if signal_list else "없음"}) &nbsp;|&nbsp; '
