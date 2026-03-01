@@ -44,6 +44,11 @@ section[data-testid="stSidebar"] > div:first-child { width: 340px !important; }
 section[data-testid="stSidebar"] div.stHorizontalBlock > div.stColumn:last-child {
     display: flex; flex-direction: column; justify-content: flex-end; padding-bottom: 0.4rem;
 }
+/* 위젯 테두리 가시성 */
+div[data-baseweb="select"] > div { border-color: #333 !important; }
+div[data-baseweb="input"] input, div[data-baseweb="input"] > div { border-color: #333 !important; }
+[data-testid="stDateInput"] > div > div > div { border-color: #333 !important; }
+[data-testid="stExpander"] { border-color: #222 !important; }
 </style>
 """, unsafe_allow_html=True)
 

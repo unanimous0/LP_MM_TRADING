@@ -29,6 +29,7 @@ from utils.charts import (
 )
 
 st.set_page_config(page_title="종목 상세", page_icon="📋", layout="wide")
+st.markdown('<style>div[data-baseweb="select"]>div{border-color:#333!important}div[data-baseweb="input"] input,div[data-baseweb="input"]>div{border-color:#333!important}[data-testid="stDateInput"]>div>div>div{border-color:#333!important}[data-testid="stExpander"]{border-color:#222!important}</style>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # 사이드바
@@ -239,10 +240,10 @@ if stock_report is not None:
     signal_list   = stock_report.get('signal_list', '') or ''
 
     _PATTERN_COLORS = {
-        '급등형': '#f472b6',
-        '지속형':   '#4ade80',
-        '전환형':   '#4ade80',
-        '기타':     '#64748b',
+        '급등형': '#f472b6',   # pink-400
+        '지속형':   '#2dd4bf',   # teal-400
+        '전환형':   '#fbbf24',   # amber-400
+        '기타':     '#64748b',   # slate-500
     }
     pcolor = _PATTERN_COLORS.get(pattern, '#64748b')
 
@@ -371,7 +372,7 @@ with tab2:
             # ── 헤더 2행: 그룹행 + 컬럼행
             _th_date = (
                 "padding:6px 10px; text-align:center; font-weight:700; font-size:14px;"
-                "background:#111111; color:#94a3b8; border-bottom:1px solid #1a1a1a;"
+                "background:#111111; color:#94a3b8; border-bottom:1px solid #222222;"
                 "white-space:nowrap; vertical-align:middle;"
             )
             group_header_cells = f'<th rowspan="2" style="{_th_date}">날짜</th>'
@@ -394,7 +395,7 @@ with tab2:
                 sub_label = c.replace('외국인 ', '').replace('기관 ', '').replace('개인 ', '')
                 sub_header_cells += (
                     f'<th style="padding:5px 10px; text-align:center; font-weight:600; font-size:13px;'
-                    f'background:#111111; color:#94a3b8; border-bottom:1px solid #1a1a1a;'
+                    f'background:#111111; color:#94a3b8; border-bottom:1px solid #222222;'
                     f'{border_left} white-space:nowrap;">{sub_label}</th>'
                 )
 
@@ -439,7 +440,7 @@ with tab2:
 
             html_table = f"""
 <div style="overflow-x:auto; max-height:420px; overflow-y:auto;
-            border:1px solid #1a1a1a; border-radius:6px;">
+            border:1px solid #222222; border-radius:6px;">
   <table style="width:100%; border-collapse:collapse; font-size:14px;">
     <thead style="position:sticky; top:0; z-index:10;">
       <tr>{group_header_cells}</tr>

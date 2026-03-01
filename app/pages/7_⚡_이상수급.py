@@ -45,6 +45,11 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(
 div[data-testid="stVerticalBlockBorderWrapper"]:has(
     [style*="f87171"]
 ) { border-color: #f87171 !important; }
+/* 위젯 테두리 가시성 */
+div[data-baseweb="select"] > div { border-color: #333 !important; }
+div[data-baseweb="input"] input, div[data-baseweb="input"] > div { border-color: #333 !important; }
+[data-testid="stDateInput"] > div > div > div { border-color: #333 !important; }
+[data-testid="stExpander"] { border-color: #222 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -440,7 +445,7 @@ with tab_supply_amount:
                 # ── 헤더 2행
                 _th_date = (
                     "padding:6px 10px; text-align:center; font-weight:700; font-size:14px;"
-                    "background:#111111; color:#94a3b8; border-bottom:1px solid #1a1a1a;"
+                    "background:#111111; color:#94a3b8; border-bottom:1px solid #222222;"
                     "white-space:nowrap; vertical-align:middle;"
                 )
                 group_header_cells = f'<th rowspan="2" style="{_th_date}">날짜</th>'
@@ -463,7 +468,7 @@ with tab_supply_amount:
                     sub_label = c.replace('외국인 ', '').replace('기관 ', '').replace('개인 ', '')
                     sub_header_cells += (
                         f'<th style="padding:5px 10px; text-align:center; font-weight:600; font-size:13px;'
-                        f'background:#111111; color:#94a3b8; border-bottom:1px solid #1a1a1a;'
+                        f'background:#111111; color:#94a3b8; border-bottom:1px solid #222222;'
                         f'{border_left} white-space:nowrap;">{sub_label}</th>'
                     )
 
@@ -506,7 +511,7 @@ with tab_supply_amount:
 
                 html_table = f"""
 <div style="overflow-x:auto; max-height:420px; overflow-y:auto;
-            border:1px solid #1a1a1a; border-radius:6px;">
+            border:1px solid #222222; border-radius:6px;">
   <table style="width:100%; border-collapse:collapse; font-size:14px;">
     <thead style="position:sticky; top:0; z-index:10;">
       <tr>{group_header_cells}</tr>

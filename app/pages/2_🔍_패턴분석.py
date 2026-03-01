@@ -32,6 +32,7 @@ from utils.charts import (
 from src.analyzer.integrated_report import IntegratedReport
 
 st.set_page_config(page_title="패턴분석", page_icon="🔍", layout="wide")
+st.markdown('<style>div[data-baseweb="select"]>div{border-color:#333!important}div[data-baseweb="input"] input,div[data-baseweb="input"]>div{border-color:#333!important}[data-testid="stDateInput"]>div>div>div{border-color:#333!important}[data-testid="stExpander"]{border-color:#222!important}</style>', unsafe_allow_html=True)
 st.title("패턴 분류 & 시그널 분석")
 
 
@@ -222,7 +223,7 @@ def _build_stock_table_html(display_df, classified_df, pat_col):
 .stk-tbl { width:100%; border-collapse:collapse; font-size:14px; }
 .stk-tbl th {
     padding:8px 10px; text-align:left;
-    border-bottom:2px solid #1a1a1a; color:#94a3b8;
+    border-bottom:2px solid #222222; color:#94a3b8;
     font-weight:600; font-size:13px; position:sticky; top:0;
     background:#0a0a0a; z-index:2;
 }
@@ -233,23 +234,23 @@ def _build_stock_table_html(display_df, classified_df, pat_col):
 .hc { position:relative; cursor:default; }
 .hc .tt-pop { display:none; position:absolute; z-index:20;
     right:0; top:100%; width:620px;
-    padding:16px 20px; background:#111111; border:1px solid #374151;
+    padding:16px 20px; background:#111111; border:1px solid #2a2a2a;
     border-radius:10px; box-shadow:0 8px 32px rgba(0,0,0,.55);
     font-size:14px; line-height:1.5; color:#cbd5e1; text-align:left !important;
 }
 .hc:hover .tt-pop { display:block; }
 .tt-title { font-weight:700; font-size:15px; color:#4ade80; margin-bottom:8px;
-    padding-bottom:6px; border-bottom:1px solid #1a1a1a; }
+    padding-bottom:6px; border-bottom:1px solid #222222; }
 /* Z-Score 그리드 */
 .zg { display:flex; gap:2px; margin-bottom:10px; padding-bottom:10px;
-    border-bottom:1px solid #1a1a1a; }
+    border-bottom:1px solid #222222; }
 .zg-cell { flex:1; text-align:center; padding:4px 2px;
     background:#0a0a0a; border-radius:4px; font-size:13px; line-height:1.4; }
 .zg-period { color:#64748b; font-size:10px; }
 .zg .zp { color:#4ade80; font-weight:600; }
 .zg .zn { color:#f87171; font-weight:600; }
 .tt-section { font-weight:600; color:#e2e8f0; margin-top:10px; margin-bottom:6px;
-    border-bottom:1px solid #1a1a1a; padding-bottom:4px; font-size:13px; }
+    border-bottom:1px solid #222222; padding-bottom:4px; font-size:13px; }
 .tt-line { margin-left:4px; font-size:13px; margin-bottom:1px; }
 /* 점수 항목 2열 그리드 */
 .cc-grid { display:grid; grid-template-columns:1fr 1fr; gap:4px; }
@@ -261,7 +262,7 @@ def _build_stock_table_html(display_df, classified_df, pat_col):
 .tt-result { margin-top:8px; color:#e2e8f0; font-size:14px; }
 .tt-adj { margin:3px 0 3px 6px; font-family:monospace; font-size:13px; }
 .tt-final { margin-top:10px; font-size:16px; font-weight:700; color:#4ade80;
-    border-top:1px solid #374151; padding-top:8px; }
+    border-top:1px solid #2a2a2a; padding-top:8px; }
 .tt-dim { color:#64748b; }
 .score-bar { display:inline-block; height:6px; border-radius:3px; background:#4ade80; vertical-align:middle; margin-right:6px; }
 .v-pos { color:#4ade80; }

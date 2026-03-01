@@ -24,7 +24,7 @@ from .portfolio import Trade
 # ---------------------------------------------------------------------------
 _BG_PLOT  = '#0a0a0a'   # gray-950   (차트 내부)
 _BG_PAPER = '#111111'   # gray-900   (차트 외곽)
-_GRID     = '#1a1a1a'   # gray-800   (그리드 선)
+_GRID     = '#222222'   # gray-800   (그리드 선)
 _TEXT     = '#e2e8f0'   # slate-200  (일반 텍스트)
 _MUTED    = '#94a3b8'   # slate-400  (보조 텍스트)
 
@@ -40,18 +40,18 @@ _HTML_HEADER = """\
     body {{ font-family: 'Segoe UI', Arial, sans-serif; margin: 0;
            background: #0a0a0a; color: #e2e8f0; }}
     .header {{ background: linear-gradient(135deg, #065f46 0%, #0a0a0a 100%);
-               padding: 24px 32px; border-bottom: 1px solid #1a1a1a; }}
+               padding: 24px 32px; border-bottom: 1px solid #222222; }}
     .header h1 {{ margin: 0; font-size: 22px; color: #f1f5f9; }}
     .header p  {{ margin: 6px 0 0 0; opacity: 0.7; font-size: 13px; color: #94a3b8; }}
     .container {{ max-width: 1200px; margin: 0 auto; padding: 24px 16px; }}
     .card {{ background: #111111; margin: 16px 0; padding: 20px;
-             border-radius: 12px; border: 1px solid #1a1a1a; }}
+             border-radius: 12px; border: 1px solid #222222; }}
     .card h2 {{ margin: 0 0 12px 0; font-size: 15px; color: #e2e8f0;
                 border-left: 4px solid #4ade80; padding-left: 10px; }}
     .summary-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr));
                      gap: 12px; margin-bottom: 8px; }}
     .kpi {{ background: #0a0a0a; border-radius: 8px; padding: 14px 16px;
-            text-align: center; border: 1px solid #1a1a1a; }}
+            text-align: center; border: 1px solid #222222; }}
     .kpi .label {{ font-size: 12px; color: #64748b; margin-bottom: 4px; }}
     .kpi .value {{ font-size: 20px; font-weight: bold; }}
     .positive {{ color: #4ade80; }}

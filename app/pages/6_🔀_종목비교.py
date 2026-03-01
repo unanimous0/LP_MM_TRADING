@@ -32,6 +32,7 @@ from utils.charts import (
 )
 
 st.set_page_config(page_title="종목 비교", page_icon="🔀", layout="wide")
+st.markdown('<style>div[data-baseweb="select"]>div{border-color:#333!important}div[data-baseweb="input"] input,div[data-baseweb="input"]>div{border-color:#333!important}[data-testid="stDateInput"]>div>div>div{border-color:#333!important}[data-testid="stExpander"]{border-color:#222!important}</style>', unsafe_allow_html=True)
 st.title("종목 비교")
 st.caption("최대 5종목을 선택해 Z-Score·패턴 점수·시그널을 나란히 비교합니다.")
 

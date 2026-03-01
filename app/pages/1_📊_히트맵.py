@@ -26,6 +26,7 @@ from utils.charts import (
 )
 
 st.set_page_config(page_title="히트맵", page_icon="📊", layout="wide")
+st.markdown('<style>div[data-baseweb="select"]>div{border-color:#333!important}div[data-baseweb="input"] input,div[data-baseweb="input"]>div{border-color:#333!important}[data-testid="stDateInput"]>div>div>div{border-color:#333!important}[data-testid="stExpander"]{border-color:#222!important}</style>', unsafe_allow_html=True)
 st.title("Z-Score 수급 히트맵")
 
 # ---------------------------------------------------------------------------

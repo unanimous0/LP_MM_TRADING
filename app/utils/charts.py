@@ -17,7 +17,7 @@ from plotly.subplots import make_subplots
 # ---------------------------------------------------------------------------
 _BG_PLOT  = '#0a0a0a'   # gray-950
 _BG_PAPER = '#111111'   # gray-900
-_GRID     = '#1a1a1a'   # gray-800
+_GRID     = '#222222'   # gray-800
 _TEXT     = '#e2e8f0'   # slate-200
 _MUTED    = '#94a3b8'   # slate-400
 
@@ -205,7 +205,7 @@ def create_zscore_heatmap(
     colorscale = [
         [0.0,  '#ef4444'],
         [0.35, '#fca5a5'],
-        [0.5,  '#1a1a1a'],
+        [0.5,  '#222222'],
         [0.65, '#86efac'],
         [1.0,  '#22c55e'],
     ]
@@ -351,7 +351,7 @@ def create_sector_zscore_heatmap(
     colorscale = [
         [0.0,  '#ef4444'],
         [0.35, '#fca5a5'],
-        [0.5,  '#1a1a1a'],
+        [0.5,  '#222222'],
         [0.65, '#86efac'],
         [1.0,  '#22c55e'],
     ]
@@ -400,8 +400,8 @@ def create_pattern_pie_chart(report_df: pd.DataFrame) -> go.Figure:
 
     color_map = {
         '급등형': '#f472b6',   # pink-400
-        '지속형':   '#4ade80',   # green-400
-        '전환형':   '#4ade80',   # green-400
+        '지속형':   '#2dd4bf',   # teal-400
+        '전환형':   '#fbbf24',   # amber-400
         '기타':     '#64748b',   # slate-500
     }
     colors = [color_map.get(p, '#64748b') for p in counts['pattern']]
@@ -493,8 +493,8 @@ def create_signal_distribution_chart(report_df: pd.DataFrame) -> go.Figure:
 
 _PATTERN_COLORS = {
     '급등형': '#f472b6',   # pink-400
-    '지속형':   '#4ade80',   # green-400
-    '전환형':   '#4ade80',   # green-400
+    '지속형':   '#2dd4bf',   # teal-400
+    '전환형':   '#fbbf24',   # amber-400
     '기타':     '#64748b',   # slate-500
 }
 
@@ -1303,7 +1303,7 @@ _COMPARE_PALETTE = [
     '#4ade80',  # green-400
     '#f472b6',  # pink-400
     '#fb923c',  # orange-400
-    '#4ade80',  # green-400
+    '#2dd4bf',  # teal-400
     '#a78bfa',  # violet-400
 ]
 

@@ -19,6 +19,7 @@ import numpy as np
 from utils.charts import create_wf_period_returns_chart
 
 st.set_page_config(page_title="워크포워드", page_icon="🔄", layout="wide")
+st.markdown('<style>div[data-baseweb="select"]>div{border-color:#333!important}div[data-baseweb="input"] input,div[data-baseweb="input"]>div{border-color:#333!important}[data-testid="stDateInput"]>div>div>div{border-color:#333!important}[data-testid="stExpander"]{border-color:#222!important}</style>', unsafe_allow_html=True)
 st.title("Walk-Forward 분석 결과")
 
 # ---------------------------------------------------------------------------

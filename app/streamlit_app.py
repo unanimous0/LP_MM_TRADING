@@ -39,6 +39,33 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ---------------------------------------------------------------------------
+# 글로벌 CSS — 위젯 테두리 가시성 + 카드 구분
+# ---------------------------------------------------------------------------
+st.markdown("""<style>
+/* selectbox / multiselect 테두리 */
+div[data-baseweb="select"] > div {
+    border-color: #333 !important;
+}
+/* number_input / text_input 테두리 */
+div[data-baseweb="input"] input,
+div[data-baseweb="input"] > div {
+    border-color: #333 !important;
+}
+/* date_input 테두리 */
+[data-testid="stDateInput"] > div > div > div {
+    border-color: #333 !important;
+}
+/* slider track 가시성 */
+div[data-baseweb="slider"] div[role="slider"] {
+    background: #4ade80 !important;
+}
+/* expander 테두리 */
+[data-testid="stExpander"] {
+    border-color: #222 !important;
+}
+</style>""", unsafe_allow_html=True)
+
 st.title("Whale Supply")
 st.caption("외국인/기관 투자자 수급 기반 종목 분석 시스템")
 
@@ -232,10 +259,10 @@ else:
             signal_list = ', '.join(signal_list)
 
         _PATTERN_COLORS = {
-            '급등형': '#f472b6',
-            '지속형':   '#4ade80',
-            '전환형':   '#4ade80',
-            '기타':     '#64748b',
+            '급등형': '#f472b6',   # pink-400
+            '지속형':   '#2dd4bf',   # teal-400
+            '전환형':   '#fbbf24',   # amber-400
+            '기타':     '#64748b',   # slate-500
         }
         pcolor = _PATTERN_COLORS.get(pattern, '#64748b')
 
