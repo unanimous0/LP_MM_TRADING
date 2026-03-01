@@ -209,7 +209,7 @@ class SupplyNormalizer:
         """
 
         window = self.config['z_score_window']
-        min_points = self.config['min_data_points']
+        min_points = min(self.config['min_data_points'], max(1, window // 2))
 
         # Sff 데이터 가져오기
         df = self.calculate_sff(stock_codes=stock_codes, end_date=end_date)

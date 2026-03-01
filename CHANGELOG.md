@@ -34,7 +34,7 @@
   - 4탭 구조:
     - 📈 Z-Score 추이: 오버레이 라인 차트 (종합/외국인/기관 선택 가능)
     - 📊 멀티기간 비교: 5D~500D 그룹 바차트
-    - 🕸️ 패턴 점수 레이더: 최근수급/모멘텀/가중평균/단순평균/단기모멘텀 5각형
+    - 🕸️ 패턴 점수 레이더: 최근수급/장기이격/가중평균/단순평균/단기이격 5각형
     - 📋 핵심 지표 테이블: 패턴/점수/시그널 + 멀티기간 Z-Score 한눈에 비교
   - `create_compare_zscore_chart()`, `create_compare_multiperiod_bar()`, `create_compare_score_radar()` 신규
   - `.streamlit/pages.toml`: 종목 비교 메뉴 추가 (`:material/compare:`)
@@ -64,30 +64,30 @@ scripts/analysis/backtest_runner.py   (--no-tc, --no-short-trend CLI 플래그)
 
 ### 2026-02-26 (Phase 1: 스코어링 검증 — 토글 파라미터 구현 + 비교 백테스트)
 
-**목표**: tc + short_trend 개선 효과를 정량 검증할 수 있도록 전체 파이프라인에 토글 추가
+**목표**: tc + divergence 개선 효과를 정량 검증할 수 있도록 전체 파이프라인에 토글 추가
 
 **구현 내용**:
 
-- ✅ **`src/analyzer/pattern_classifier.py`**: `use_tc`, `use_short_trend` 토글 파라미터
-  - `_LEGACY_SCORE_WEIGHTS` 클래스 상수 추가 (`momentum: 0.25, average: 0.20, short_trend: 0.00`)
-  - `__init__` 파라미터: `use_tc=True, use_short_trend=True`
-  - `classify_pattern()`: `use_tc=False` 시 모멘텀형 tc 조건 우회
-  - `calculate_pattern_score()`: `use_short_trend=False` 시 레거시 가중치 사용, `use_tc=False` 시 tc_bonus 미적용
+- ✅ **`src/analyzer/pattern_classifier.py`**: `use_tc`, `use_divergence` 토글 파라미터
+  - `_LEGACY_SCORE_WEIGHTS` 클래스 상수 추가 (`long_divergence: 0.25, average: 0.20, short_divergence: 0.00`)
+  - `__init__` 파라미터: `use_tc=True, use_divergence=True`
+  - `classify_pattern()`: `use_tc=False` 시 급등형 tc 조건 우회
+  - `calculate_pattern_score()`: `use_divergence=False` 시 레거시 가중치 사용, `use_tc=False` 시 tc_bonus 미적용
 
 - ✅ **`src/backtesting/precomputer.py`**: `__init__`에 두 플래그 추가 → `PatternClassifier` 전달
 
-- ✅ **`src/backtesting/engine.py`**: `BacktestConfig`에 `use_tc`, `use_short_trend` 필드 추가 → Engine이 Classifier·Precomputer에 전달
+- ✅ **`src/backtesting/engine.py`**: `BacktestConfig`에 `use_tc`, `use_divergence` 필드 추가 → Engine이 Classifier·Precomputer에 전달
 
 - ✅ **`src/backtesting/optimizer.py`**: `_build_base_params()` + `optimize()` Precomputer 생성에 플래그 전달
 
 - ✅ **`app/utils/data_loader.py`**: `run_backtest()`, `run_backtest_with_progress()`, `run_optuna_optimization()` 세 함수에 파라미터 추가
 
 - ✅ **`app/pages/3_📈_백테스트.py`**: 🔒 고정 조건 섹션에 "스코어링 버전" expander
-  - `use_tc` / `use_short_trend` 체크박스 (기본: True)
+  - `use_tc` / `use_divergence` 체크박스 (기본: True)
   - OFF 시 "⚠️ 개선 이전 동작" 안내
   - 결과 배너: 현재 버전 caption 또는 이전 버전 warning
 
-- ✅ **`scripts/analysis/backtest_runner.py`**: `--no-tc`, `--no-short-trend` CLI 플래그 추가
+- ✅ **`scripts/analysis/backtest_runner.py`**: `--no-tc`, `--no-divergence` CLI 플래그 추가
 
 - ✅ **`tests/test_pattern_classifier.py`**: `TestScoringToggle` 클래스 (7개 테스트)
 
@@ -107,7 +107,7 @@ scripts/analysis/backtest_runner.py   (--no-tc, --no-short-trend CLI 플래그)
 **핵심 인사이트**:
 - **min_score=60**: 레거시가 약간 높은 총수익률/샤프, 현재가 더 높은 승률·낮은 MDD — 엇갈림
 - **min_score=70 이상**: 현재 스코어링이 총수익률·MDD·칼마 모두 우위 (칼마 1.86→2.18, +17%)
-- **결론**: tc+short_trend 개선은 **min_score ≥ 70 고품질 필터** 조합 시 효과 극대화
+- **결론**: tc+divergence 개선은 **min_score ≥ 70 고품질 필터** 조합 시 효과 극대화
   - tc 보너스(±10점)가 일관성 있는 종목만 70점 이상으로 올려줌
   - min_score=60 구간은 노이즈 종목도 함께 유입되어 효과가 희석됨
 - **현재 버전 특성**: 더 많은 거래수(분산), 더 높은 승률, 더 낮은 MDD → 위험 조정 성과 우위
@@ -121,21 +121,21 @@ min_score ≥ 70, min_signals ≥ 1
 
 **파일** (7개):
 ```
-src/analyzer/pattern_classifier.py    (use_tc/use_short_trend + _LEGACY_SCORE_WEIGHTS)
+src/analyzer/pattern_classifier.py    (use_tc/use_divergence + _LEGACY_SCORE_WEIGHTS)
 src/backtesting/precomputer.py        (플래그 __init__ + PatternClassifier 전달)
 src/backtesting/engine.py             (BacktestConfig 필드 + Engine 전달)
 src/backtesting/optimizer.py          (_build_base_params + optimize Precomputer 전달)
 app/utils/data_loader.py              (세 함수 파라미터 추가)
 app/pages/3_📈_백테스트.py            (스코어링 버전 expander + 결과 배너)
-scripts/analysis/backtest_runner.py   (--no-tc, --no-short-trend 플래그)
+scripts/analysis/backtest_runner.py   (--no-tc, --no-divergence 플래그)
 tests/test_pattern_classifier.py      (TestScoringToggle 7개 테스트)
 ```
 
 ---
 
-### 2026-02-25 (스코어링 시스템 개선 — Temporal Consistency + Short Trend)
+### 2026-02-25 (스코어링 시스템 개선 — Temporal Consistency + Divergence)
 
-**목표**: 7개 기간 간 Z-Score 순서 일관성(tc)과 단기 모멘텀 방향(short_trend)을 점수에 반영
+**목표**: 7개 기간 간 Z-Score 순서 일관성(tc)과 이격도(short_divergence/mid_divergence/long_divergence)를 점수에 반영
 
 **문제**:
 - 종목 A (5D>10D>...>500D 꾸준 상승)와 종목 B (최근만 급등, 과거 혼조)가 비슷한 점수 → 투자 신뢰도 구분 불가
@@ -143,8 +143,8 @@ tests/test_pattern_classifier.py      (TestScoringToggle 7개 테스트)
 **1차 구현** (`src/analyzer/pattern_classifier.py`):
 
 - ✅ **`_get_default_config()` 업데이트**
-  - `temporal_consistency_min` 임계값 추가: 모멘텀형 0.5
-  - `score_weights` 업데이트: `momentum` 0.25→0.20, `average` 0.20→0.10, `short_trend` 0.15 신규 (합계 1.00 유지)
+  - `temporal_consistency_min` 임계값 추가: 급등형 0.5
+  - `score_weights` 업데이트: `long_divergence` 0.25→0.20, `average` 0.20→0.10, `short_divergence` 0.15 신규 (합계 1.00 유지)
 
 - ✅ **`_compute_temporal_consistency()` 신규 static 메서드**
   - 6개 인접 쌍 (5D≥10D, 10D≥20D, ..., 200D≥500D) 순서 일치 비율 반환 (0~1)
@@ -153,19 +153,19 @@ tests/test_pattern_classifier.py      (TestScoringToggle 7개 테스트)
 
 - ✅ **`classify_all()` 수정 — 계산 순서 핵심**
   - `temporal_consistency` — tanh **이전** 계산 (tanh 후 0≥0 항상 True → tc=1.0 오류 방지)
-  - `short_trend = 5D - 20D` — tanh **이후** 계산 (sort key와 스케일 일치)
-  - 원본 Z-Score 복원 후 `short_trend` **재계산** (출력 표시값 일관성)
+  - `short_divergence = 5D - 20D` — tanh **이후** 계산 (sort key와 스케일 일치)
+  - 원본 Z-Score 복원 후 `short_divergence` **재계산** (출력 표시값 일관성)
 
-- ✅ **`classify_pattern()` 수정** — 모멘텀형 tc≥0.5 미달 시 기타 분류
+- ✅ **`classify_pattern()` 수정** — 급등형 tc≥0.5 미달 시 기타 분류
 
 - ✅ **`calculate_pattern_score()` 수정**
-  - short_trend 5번째 컴포넌트 포함 (가중치 0.15)
+  - short_divergence 5번째 컴포넌트 포함 (가중치 0.15)
   - tc 보너스 ±10점: `tc_bonus = (tc - 0.5) × 20`
-  - **지속형 패턴 인식**: 이상적 지속형은 5D<20D(장기>단기) → short_trend 가중치=0(average로 재분배), tc_bonus 없음
+  - **지속형 패턴 인식**: 이상적 지속형은 5D<20D(장기>단기) → short_divergence 가중치=0(average로 재분배), tc_bonus 없음
   - `valid` 필터: `w > 0` 조건 추가 → zero-weight 컴포넌트 제외 (valid_total_w=0 방지)
 
-- ✅ **출력 컬럼**: `sort_key_cols`에 `short_trend`, `feature_cols`에 `temporal_consistency`
-- ✅ **UI 노출**: `2_🔍_패턴분석.py` 정렬 옵션 + 컬럼 표시에 `short_trend`, `temporal_consistency` 추가
+- ✅ **출력 컬럼**: `sort_key_cols`에 `short_divergence`, `feature_cols`에 `temporal_consistency`
+- ✅ **UI 노출**: `2_🔍_패턴분석.py` 정렬 옵션 + 컬럼 표시에 `short_divergence`, `temporal_consistency` 추가
 
 **2차 수정 — 엣지 케이스 & 코드 리뷰**:
 
@@ -182,20 +182,20 @@ tests/test_pattern_classifier.py      (TestScoringToggle 7개 테스트)
 
 **파일** (7개):
 ```
-src/analyzer/pattern_classifier.py    (tc + short_trend 구현 + 지속형 패턴인식 + sff_5d_avg)
+src/analyzer/pattern_classifier.py    (tc + divergence 구현 + 지속형 패턴인식 + sff_5d_avg)
 src/backtesting/precomputer.py        (_sff_5d_avg 메타컬럼 추가)
 src/visualizer/performance_optimizer.py (sff_5d_avg 계산 + _sff_5d_avg 메타컬럼)
 app/utils/charts.py                   (히트맵 정렬 _sff_5d_avg 통일)
-app/pages/2_🔍_패턴분석.py            (short_trend/temporal_consistency 정렬 + 컬럼 노출)
-tests/test_pattern_classifier.py      (신규 11개: tc/short_trend/지속형/sff_5d_avg 검증)
+app/pages/2_🔍_패턴분석.py            (short_divergence/temporal_consistency 정렬 + 컬럼 노출)
+tests/test_pattern_classifier.py      (신규 11개: tc/short_divergence/지속형/sff_5d_avg 검증)
 tests/test_performance_optimizer.py   (_sff_5d_avg 메타컬럼 존재 확인)
 ```
 
 **점수 변화**:
-- 꾸준한 상승 (5D>10D>...>500D) + short_trend>0: +10~15점 상승
+- 꾸준한 상승 (5D>10D>...>500D) + short_divergence>0: +10~15점 상승
 - 최근만 급등, 과거 혼조: ±5점 (혼조에 따라 다름)
-- tc 미달(모멘텀형 <0.5) 종목: 기타로 재분류
-- 지속형: tc 조건 없음 (tc=0.0이 장기매집 정상 패턴), short_trend 불이익 없음
+- tc 미달(급등형 <0.5) 종목: 기타로 재분류
+- 지속형: tc 조건 없음 (tc=0.0이 장기매집 정상 패턴), short_divergence 불이익 없음
 
 **테스트**: 269개 (100% 통과) — 기존 258 + 신규 11
 
@@ -373,7 +373,7 @@ app/pages/5_📋_종목상세.py          (z_score_window 기본값 60→50)
 - ✅ **히트맵.py**: period_cols 필터에 `_` prefix 제외
 
 **검증 결과** (338개 종목 분석):
-- 현대모비스: momentum +2.03 → 0.00, 패턴 모멘텀형 → 기타, 순위 #1 → #221
+- 현대모비스: momentum +2.03 → 0.00, 패턴 급등형 → 기타, 순위 #1 → #221
 - 매도 종목 76개(22.5%)의 양수 Z-Score 오분류 모두 해결
 - 모멘텀 정렬 상위: 매도 종목 → 진정한 매수 종목 (KB금융, 넥슨게임즈 등)
 - 진정한 전환 종목: 57개 중 44개(77%) 보존 (confidence > 0.3)
@@ -443,7 +443,7 @@ scripts/analysis/heatmap_generator.py   (주석 수정 8개→7개)
   - 각 셀별 패턴/점수/시그널 수 표시 (hovertemplate 확장)
 
 - ✅ **C. 필터 사이드바** (`1_📊_히트맵.py`)
-  - 패턴 필터 (전체/모멘텀형/지속형/전환형/기타)
+  - 패턴 필터 (전체/급등형/지속형/전환형/기타)
   - 최소 점수 슬라이더 (0~100)
   - 최소 시그널 수 슬라이더 (0~3)
   - 필터 적용: zscore_matrix + report_df 동시 필터링
@@ -1539,7 +1539,7 @@ tests/backtesting/
 - ✅ **PatternClassifier 확장** (`src/analyzer/pattern_classifier.py`)
   - direction='long'/'short' 파라미터 추가
   - 숏일 때 Z-Score 부호 반전 → 패턴 분류
-  - 패턴 이름 통일 (모멘텀형/지속형/전환형, 롱/숏 동일)
+  - 패턴 이름 통일 (급등형/지속형/전환형, 롱/숏 동일)
 
 - ✅ **Portfolio 숏 전략** (`src/backtesting/portfolio.py`)
   - Trade/Position에 direction 필드 추가

@@ -165,7 +165,7 @@ for code, lbl in zip(selected_codes, labels):
     # 레이더 차트 행
     rd_row = {'label': lbl}
     if c_row is not None:
-        for k in ['recent', 'short_trend', 'mid_momentum', 'momentum', 'weighted', 'average']:
+        for k in ['recent', 'short_divergence', 'mid_divergence', 'long_divergence', 'weighted', 'average']:
             rd_row[k] = float(c_row.get(k, 0) or 0)
     radar_rows.append(rd_row)
 
@@ -208,7 +208,7 @@ with tab_mp:
 with tab_radar:
     fig_radar = create_compare_score_radar(radar_rows)
     st.plotly_chart(fig_radar, width="stretch", theme=None)
-    st.caption("최근수급/단기모멘텀/중기모멘텀/모멘텀/가중평균/단순평균 — 패턴 점수 구성 비교")
+    st.caption("최근수급/단기이격/중기이격/장기이격/가중평균/단순평균 — 패턴 점수 구성 비교")
 
 # ---- 탭 4: 핵심 지표 테이블 ----
 with tab_table:

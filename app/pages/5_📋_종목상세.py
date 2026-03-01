@@ -239,7 +239,7 @@ if stock_report is not None:
     signal_list   = stock_report.get('signal_list', '') or ''
 
     _PATTERN_COLORS = {
-        '모멘텀형': '#f472b6',
+        '급등형': '#f472b6',
         '지속형':   '#38bdf8',
         '전환형':   '#4ade80',
         '기타':     '#64748b',

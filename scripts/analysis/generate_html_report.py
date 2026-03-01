@@ -150,7 +150,7 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
     for idx, row in df_final.iterrows():
         signal_list = row['signal_list'] if pd.notna(row['signal_list']) else '-'
         pattern_color = {
-            '모멘텀형': 'bg-red-100 text-red-800',
+            '급등형': 'bg-red-100 text-red-800',
             '지속형': 'bg-blue-100 text-blue-800',
             '전환형': 'bg-yellow-100 text-yellow-800'
         }.get(row['pattern'], 'bg-gray-100 text-gray-800')
@@ -227,8 +227,8 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
                 <div class="text-3xl font-bold text-gray-900">{total_stocks}</div>
             </div>
             <div class="bg-white rounded-lg shadow p-6">
-                <div class="text-sm text-gray-500 mb-1">모멘텀형</div>
-                <div class="text-3xl font-bold text-red-600">{pattern_stats[pattern_stats['pattern']=='모멘텀형']['count'].values[0] if len(pattern_stats[pattern_stats['pattern']=='모멘텀형']) > 0 else 0}</div>
+                <div class="text-sm text-gray-500 mb-1">급등형</div>
+                <div class="text-3xl font-bold text-red-600">{pattern_stats[pattern_stats['pattern']=='급등형']['count'].values[0] if len(pattern_stats[pattern_stats['pattern']=='급등형']) > 0 else 0}</div>
             </div>
             <div class="bg-white rounded-lg shadow p-6">
                 <div class="text-sm text-gray-500 mb-1">지속형</div>
@@ -409,7 +409,7 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
 
         // 패턴 색상 매핑
         const patternColors = {{
-            '모멘텀형': '#EF4444',
+            '급등형': '#EF4444',
             '지속형': '#3B82F6',
             '전환형': '#F59E0B'
         }};

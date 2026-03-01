@@ -96,6 +96,7 @@ _prog = st.progress(0, text="분석 준비 중... 0%")
 zscore_matrix, classified_df, signals_df, report_df = run_analysis_pipeline_with_progress(
     progress_bar=_prog,
     institution_weight=institution_weight,
+    end_date=end_date_str,
 )
 
 if report_df.empty:

@@ -120,9 +120,9 @@ periods = {
 
 | 모드 | 공식 | 의미 | 용도 |
 |------|------|------|------|
-| **Recent** | (1W+1M)/2 | 현재 강도 | 지금 매수세 강한 종목 |
-| **Momentum** | 1W-2Y | 수급 개선도 | 과거→현재 전환점 포착 |
-| **Weighted** | 가중 평균<br>(3, 2.5, 2, 1.5, 1, 0.5) | 중장기 트렌드 | 일관된 매집 종목 |
+| **Recent** | (5D+20D)/2 | 현재 강도 | 지금 매수세 강한 종목 |
+| **Long Divergence** | 5D-200D | 장기 이격도 | 과거→현재 전환점 포착 |
+| **Weighted** | 가중 평균<br>(3.5, 3.0, 2.5, 2.0, 1.5, 1.0, 0.5) | 중장기 트렌드 | 일관된 매집 종목 |
 | **Average** | 단순 평균 | 전체 일관성 | 장기 안정성 |
 
 ### 구현
@@ -188,7 +188,7 @@ stock_code    1W     1M     3M     6M     1Y     2Y  _sort_key
 **4개 CSV 파일**:
 ```
 output/heatmap_semi_recent.csv      # Recent 모드
-output/heatmap_semi_momentum.csv    # Momentum 모드
+output/heatmap_semi_long_divergence.csv  # Long Divergence 모드
 output/heatmap_semi_weighted.csv    # Weighted 모드
 output/heatmap_semi_average.csv     # Average 모드
 ```
@@ -259,7 +259,7 @@ Stage 1~2 결과를 통합하여 **3개 바구니 자동 분류** + **시그널 
 **파일**: `src/analyzer/pattern_classifier.py`
 
 **기능**:
-- 4가지 정렬 키 계산 (Recent, Momentum, Weighted, Average)
+- 4가지 정렬 키 계산 (Recent, Long Divergence, Weighted, Average)
 - 추가 특성 추출 (변동성, 지속성, 가속도)
 - 3개 바구니 자동 분류
 - 패턴 강도 점수 (0~100)
@@ -271,14 +271,14 @@ from src.analyzer.pattern_classifier import PatternClassifier
 classifier = PatternClassifier()
 classified_df = classifier.classify_all(zscore_matrix)
 
-# 결과: stock_code, pattern, score, recent, momentum, weighted, average
+# 결과: stock_code, pattern, score, recent, long_divergence, weighted, average
 print(classified_df[['stock_code', 'pattern', 'score']].head())
 ```
 
 **패턴 분류 규칙**:
-1. **모멘텀형**: Momentum > 1.0 AND Recent > 0.5
+1. **급등형**: Long Divergence > 1.0 AND Recent > 0.5
 2. **지속형**: Weighted > 0.8 AND Persistence > 0.7
-3. **전환형**: Weighted > 0.5 AND Momentum < 0
+3. **전환형**: Weighted > 0.5 AND Long Divergence < 0
 
 > **투자 전략**: ANALYSIS_GUIDE.md의 "4. 패턴 분류 체계" 참조
 
@@ -333,7 +333,7 @@ report_df = report_gen.generate_report(classified_df, signals_df)
 # 필터링
 filtered = report_gen.filter_report(
     report_df,
-    pattern='모멘텀형',
+    pattern='급등형',
     min_score=70,
     min_signal_count=2,
     top_n=10
@@ -349,10 +349,10 @@ report_gen.export_to_csv(filtered, 'output/regime_report.csv')
 **출력 형식**:
 ```
 ========================================
-[1] 005930 삼성전자 (모멘텀형, 점수: 85)
+[1] 005930 삼성전자 (급등형, 점수: 85)
 ========================================
 섹터: 반도체 및 관련장비
-정렬 키: Recent=0.91, Momentum=1.70, Weighted=0.52, Average=0.32
+정렬 키: Recent=0.91, Long Divergence=1.70, Weighted=0.52, Average=0.32
 시그널: MA크로스, 가속도 1.8배 (2개)
 진입: 현재가 진입 가능 (단기 추격 매수, 모멘텀 확인 후 진입)
 손절: -5% 손절
@@ -368,8 +368,8 @@ report_gen.export_to_csv(filtered, 'output/regime_report.csv')
 # 기본 실행 (전체 종목, 모든 패턴)
 python scripts/analysis/regime_scanner.py
 
-# 모멘텀형 종목만, 점수 70점 이상
-python scripts/analysis/regime_scanner.py --pattern 모멘텀형 --min-score 70
+# 급등형 종목만, 점수 70점 이상
+python scripts/analysis/regime_scanner.py --pattern 급등형 --min-score 70
 
 # 지속형 + 시그널 2개 이상, 상위 10개
 python scripts/analysis/regime_scanner.py --pattern 지속형 --min-signals 2 --top 10
@@ -406,14 +406,14 @@ import pandas as pd
 
 # 4개 CSV 로드
 df_recent = pd.read_csv('output/heatmap_semi_recent.csv')
-df_momentum = pd.read_csv('output/heatmap_semi_momentum.csv')
+df_long_div = pd.read_csv('output/heatmap_semi_long_divergence.csv')
 df_weighted = pd.read_csv('output/heatmap_semi_weighted.csv')
 df_average = pd.read_csv('output/heatmap_semi_average.csv')
 
 # 통합 DataFrame
 data = {
     'recent': df_recent.set_index('stock_code')['_sort_key'],
-    'momentum': df_momentum.set_index('stock_code')['_sort_key'],
+    'long_divergence': df_long_div.set_index('stock_code')['_sort_key'],
     'weighted': df_weighted.set_index('stock_code')['_sort_key'],
     'average': df_average.set_index('stock_code')['_sort_key']
 }
@@ -447,7 +447,7 @@ zscore_matrix = optimizer.calculate_multi_period_zscores(DEFAULT_CONFIG['periods
 
 #### A. Stage 2 출력에서 직접 사용
 1. **Recent**: (1W+1M)/2 - 현재 강도
-2. **Momentum**: 1W-2Y - 수급 개선도
+2. **Long Divergence**: 5D-200D - 장기 이격도
 3. **Weighted**: 가중 평균 - 중장기 트렌드
 4. **Average**: 단순 평균 - 전체 일관성
 
@@ -475,18 +475,18 @@ def classify_pattern(row):
     3개 바구니 자동 분류
 
     Returns:
-        str: '지속형', '모멘텀형', '전환형'
+        str: '지속형', '급등형', '전환형'
     """
-    # Pattern 1: 모멘텀 돌파형
-    if row['momentum'] > 1.0 and row['recent'] > 0.5:
-        return '모멘텀형'
+    # Pattern 1: 급등 돌파형
+    if row['long_divergence'] > 1.0 and row['recent'] > 0.5:
+        return '급등형'
 
     # Pattern 2: 지속 매집형
     if row['weighted'] > 0.8 and row['persistence'] > 0.7:
         return '지속형'
 
     # Pattern 3: 조정 반등형
-    if row['weighted'] > 0.5 and row['momentum'] < 0:
+    if row['weighted'] > 0.5 and row['long_divergence'] < 0:
         return '전환형'
 
     return '기타'
@@ -536,7 +536,7 @@ optimizer.calculate_multi_period_zscores(periods)
 [Stage 2] OptimizedMultiPeriodCalculator
     ├── 6개 기간 확장 (1W~2Y)
     ├── 벡터화 Z-Score 계산 (1.5초)
-    ├── 4가지 정렬 키 생성 (Recent, Momentum, Weighted, Average)
+    ├── 4가지 정렬 키 생성 (Recent, Long Divergence, Weighted, Average)
     └── 출력: DataFrame (8개 컬럼) + 4개 CSV
         └── stock_code, 1W, 1M, 3M, 6M, 1Y, 2Y, _sort_key
     ↓
@@ -549,7 +549,7 @@ optimizer.calculate_multi_period_zscores(periods)
     │   ├── 패턴 분류 규칙 적용
     │   └── MA 골든크로스, 동조율 추가
     └── 출력: DataFrame
-        ├── pattern: '지속형', '모멘텀형', '전환형'
+        ├── pattern: '지속형', '급등형', '전환형'
         ├── score: 0~100 (패턴 강도)
         └── signals: ['MA크로스', '가속도', '동조율'] (리스트)
 ```
@@ -569,14 +569,14 @@ optimizer.calculate_multi_period_zscores(periods)
 
 ## 실전 활용 예시
 
-### 케이스 1: 모멘텀 돌파형 발견
+### 케이스 1: 급등 돌파형 발견
 
 **종목**: 232140 (와이씨)
 
 **4가지 정렬 키**:
 ```
 recent: 0.906 (3위)   ← 현재 강도 높음
-momentum: 1.696 (1위) ← 수급 개선도 최고!
+long_divergence: 1.696 (1위) ← 장기 이격도 최고!
 weighted: 0.519 (중간) ← 장기 트렌드 보통
 average: 0.315 (중간)  ← 전체 일관성 보통
 ```
@@ -604,7 +604,7 @@ average: 0.315 (중간)  ← 전체 일관성 보통
 **4가지 정렬 키**:
 ```
 recent: 0.880 (6위)    ← 현재 강도 중간
-momentum: -1.103 (하위) ← 수급 개선도 낮음 (최근 약화)
+long_divergence: -1.103 (하위) ← 장기 이격도 낮음 (최근 약화)
 weighted: 1.113 (1위)  ← 장기 트렌드 최고!
 average: 1.288 (1위)   ← 전체 일관성 최고!
 ```
@@ -643,7 +643,7 @@ average: 1.288 (1위)   ← 전체 일관성 최고!
 {
     'stock_code': '232140',
     'stock_name': '와이씨',
-    'pattern': '모멘텀형',
+    'pattern': '급등형',
     'score': 85,
     'signals': ['MA크로스', '가속도 1.8배', '동조율 72%'],
     'entry_point': '현재가 진입 가능',

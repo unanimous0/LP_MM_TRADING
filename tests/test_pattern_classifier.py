@@ -66,7 +66,7 @@ class TestPatternClassifier:
 
         # Check new columns added
         assert 'recent' in result.columns
-        assert 'momentum' in result.columns
+        assert 'long_divergence' in result.columns
         assert 'weighted' in result.columns
         assert 'average' in result.columns
 
@@ -78,32 +78,32 @@ class TestPatternClassifier:
             check_names=False
         )
 
-        # Check momentum = 5D - 200D (500D는 참고용, 모멘텀 계산에서 제외)
-        expected_momentum = result['5D'] - result['200D']
+        # Check long_divergence = 5D - 200D (500D는 참고용, 장기이격 계산에서 제외)
+        expected_long_divergence = result['5D'] - result['200D']
         pd.testing.assert_series_equal(
-            result['momentum'],
-            expected_momentum,
+            result['long_divergence'],
+            expected_long_divergence,
             check_names=False
         )
 
-    def test_classify_pattern_momentum_breakout(self, classifier):
-        """Test momentum breakout pattern classification"""
+    def test_classify_pattern_surge_breakout(self, classifier):
+        """Test surge breakout pattern classification"""
         row = pd.Series({
             'recent': 1.0,
-            'momentum': 1.5,
+            'long_divergence': 1.5,
             'weighted': 0.5,
             'persistence': 0.5,
             'temporal_consistency': 0.6,  # 기준 0.5 충족
         })
 
         pattern = classifier.classify_pattern(row)
-        assert pattern == '모멘텀형'
+        assert pattern == '급등형'
 
     def test_classify_pattern_sustained_accumulation(self, classifier):
         """Test sustained accumulation pattern classification"""
         row = pd.Series({
             'recent': 0.7,
-            'momentum': 0.3,
+            'long_divergence': 0.3,
             'weighted': 0.9,
             'persistence': 0.8,
             'temporal_consistency': 0.7,  # 기준 0.6 충족
@@ -116,7 +116,7 @@ class TestPatternClassifier:
         """Test pullback bounce pattern classification"""
         row = pd.Series({
             'recent': 0.4,
-            'momentum': -0.5,
+            'long_divergence': -0.5,
             'weighted': 0.7,
             'persistence': 0.6
         })
@@ -128,7 +128,7 @@ class TestPatternClassifier:
         """Test other pattern classification"""
         row = pd.Series({
             'recent': 0.2,
-            'momentum': 0.1,
+            'long_divergence': 0.1,
             'weighted': 0.3,
             'persistence': 0.4
         })
@@ -140,7 +140,7 @@ class TestPatternClassifier:
         """Test pattern score calculation"""
         row = pd.Series({
             'recent': 1.0,
-            'momentum': 1.5,
+            'long_divergence': 1.5,
             'weighted': 0.8,
             'average': 0.6
         })
@@ -162,17 +162,17 @@ class TestPatternClassifier:
         assert 'pattern' in result.columns
         assert 'score' in result.columns
         assert 'recent' in result.columns
-        assert 'momentum' in result.columns
+        assert 'long_divergence' in result.columns
         assert 'weighted' in result.columns
         assert 'average' in result.columns
-        assert 'short_trend' in result.columns
+        assert 'short_divergence' in result.columns
         assert 'temporal_consistency' in result.columns
 
         # Check row count
         assert len(result) == len(sample_zscore_matrix)
 
         # Check pattern values
-        valid_patterns = ['모멘텀형', '지속형', '전환형', '기타']
+        valid_patterns = ['급등형', '지속형', '전환형', '기타']
         assert result['pattern'].isin(valid_patterns).all()
 
         # Check score range
@@ -229,7 +229,7 @@ class TestPatternClassifier:
         assert isinstance(top_picks, dict)
 
         # Check patterns
-        expected_patterns = ['모멘텀형', '지속형', '전환형']
+        expected_patterns = ['급등형', '지속형', '전환형']
         assert all(pattern in top_picks for pattern in expected_patterns)
 
         # Check top N limit
@@ -270,24 +270,26 @@ class TestPatternClassifier:
         """Test custom configuration"""
         custom_config = {
             'pattern_thresholds': {
-                'momentum_breakout': {
-                    'momentum_min': 2.0,
+                'surge': {
+                    'long_divergence_min': 2.0,
                     'recent_min': 1.0,
                 },
-                'sustained_accumulation': {
+                'sustained': {
                     'weighted_min': 1.0,
                     'persistence_min': 0.8,
                 },
-                'pullback_bounce': {
+                'reversal': {
                     'weighted_min': 0.7,
-                    'momentum_max': -0.5,
+                    'long_divergence_max': -0.5,
                 }
             },
             'score_weights': {
                 'recent': 0.3,
-                'momentum': 0.3,
+                'long_divergence': 0.3,
                 'weighted': 0.2,
                 'average': 0.2,
+                'short_divergence': 0.0,
+                'mid_divergence': 0.0,
             },
             'feature_config': {
                 'volatility_periods': ['5D', '10D', '20D', '50D', '100D', '200D', '500D'],
@@ -298,7 +300,7 @@ class TestPatternClassifier:
         classifier = PatternClassifier(config=custom_config)
 
         # Check config applied
-        assert classifier.config['pattern_thresholds']['momentum_breakout']['momentum_min'] == 2.0
+        assert classifier.config['pattern_thresholds']['surge']['long_divergence_min'] == 2.0
         assert classifier.config['score_weights']['recent'] == 0.3
 
     def test_classify_all_short_direction(self, classifier):
@@ -324,11 +326,11 @@ class TestPatternClassifier:
         assert 'pattern' in result.columns
         assert 'score' in result.columns
 
-        # Short일 때도 패턴 이름은 동일 (모멘텀형/지속형/전환형/기타)
-        assert result['pattern'].isin(['모멘텀형', '지속형', '전환형', '기타']).all()
+        # Short일 때도 패턴 이름은 동일 (급등형/지속형/전환형/기타)
+        assert result['pattern'].isin(['급등형', '지속형', '전환형', '기타']).all()
 
     def test_classify_all_long_vs_short_same_pattern_names(self, classifier):
-        """Test that long and short use same pattern names (모멘텀형/지속형/전환형)"""
+        """Test that long and short use same pattern names (급등형/지속형/전환형)"""
         # Same absolute values, opposite signs
         long_data = {
             'stock_code': ['005930'],
@@ -436,14 +438,14 @@ class TestPatternClassifier:
         # 유효 쌍: (5D,10D) ✓, (100D,200D) ✓, (200D,500D) ✓ → 3/3 = 1.0
         assert tc.iloc[0] == pytest.approx(1.0)
 
-    def test_short_trend_in_output(self, classifier, sample_zscore_matrix):
-        """classify_all 결과의 short_trend = 출력 5D - 출력 20D (원본 Z-Score 기준)"""
+    def test_short_divergence_in_output(self, classifier, sample_zscore_matrix):
+        """classify_all 결과의 short_divergence = 출력 5D - 출력 20D (원본 Z-Score 기준)"""
         result = classifier.classify_all(sample_zscore_matrix)
-        assert 'short_trend' in result.columns
-        # 출력 5D/20D는 원본 Z-Score 복원값 → short_trend도 원본 기준이어야 함 (Fix #3)
+        assert 'short_divergence' in result.columns
+        # 출력 5D/20D는 원본 Z-Score 복원값 → short_divergence도 원본 기준이어야 함 (Fix #3)
         expected_st = result['5D'] - result['20D']
         pd.testing.assert_series_equal(
-            result['short_trend'].reset_index(drop=True),
+            result['short_divergence'].reset_index(drop=True),
             expected_st.reset_index(drop=True),
             check_names=False,
         )
@@ -455,27 +457,27 @@ class TestPatternClassifier:
         assert (result['temporal_consistency'] >= 0.0).all()
         assert (result['temporal_consistency'] <= 1.0).all()
 
-    def test_momentum_pattern_blocks_low_tc(self, classifier):
-        """tc 미달(0.3 < 0.5) 종목은 모멘텀형 → 기타로 분류"""
+    def test_surge_pattern_blocks_low_tc(self, classifier):
+        """tc 미달(0.3 < 0.5) 종목은 급등형 → 기타로 분류"""
         row = pd.Series({
             'recent': 1.0,
-            'momentum': 1.5,
+            'long_divergence': 1.5,
             'weighted': 0.4,
             'persistence': 0.4,
             'temporal_consistency': 0.3,  # 기준 0.5 미달
         })
         pattern = classifier.classify_pattern(row)
-        # 모멘텀형 tc 기준(0.5) 미달이므로 기타
-        assert pattern != '모멘텀형'
+        # 급등형 tc 기준(0.5) 미달이므로 기타
+        assert pattern != '급등형'
 
     def test_score_increases_with_consistency(self, classifier):
         """tc=1.0이 tc=0.0보다 점수가 10점 이상 높음 (비-지속형 패턴)"""
         base = {
             'recent': 1.0,
-            'momentum': 0.5,
+            'long_divergence': 0.5,
             'weighted': 0.8,
             'average': 0.6,
-            'short_trend': 0.3,
+            'short_divergence': 0.3,
             # 'pattern' 없음 → '' → tc_bonus 적용됨
         }
         row_high_tc = pd.Series({**base, 'temporal_consistency': 1.0})
@@ -491,7 +493,7 @@ class TestPatternClassifier:
         """지속형은 tc 조건이 없으므로 tc=0.1도 지속형으로 분류됨"""
         row = pd.Series({
             'recent': 0.7,
-            'momentum': 0.3,
+            'long_divergence': 0.3,
             'weighted': 0.9,
             'persistence': 0.8,
             'temporal_consistency': 0.1,  # 낮은 tc → 지속형은 0.0 이상이면 통과
@@ -499,33 +501,33 @@ class TestPatternClassifier:
         pattern = classifier.classify_pattern(row)
         assert pattern == '지속형'
 
-    def test_sustained_score_no_short_trend_penalty(self, classifier):
-        """지속형은 short_trend 음수여도 점수 패널티 없음 (가중치 0 처리)"""
+    def test_sustained_score_no_short_divergence_penalty(self, classifier):
+        """지속형은 short_divergence 음수여도 점수 패널티 없음 (가중치 0 처리)"""
         base = {
             'recent': 0.7,
-            'momentum': 0.3,
+            'long_divergence': 0.3,
             'weighted': 0.9,
             'average': 0.6,
             'temporal_consistency': 0.2,
             'pattern': '지속형',
         }
-        row_neg_st = pd.Series({**base, 'short_trend': -1.0})  # 음수: 지속형에서 정상
-        row_pos_st = pd.Series({**base, 'short_trend':  1.0})  # 양수: 단기 모멘텀 있음
+        row_neg_st = pd.Series({**base, 'short_divergence': -1.0})  # 음수: 지속형에서 정상
+        row_pos_st = pd.Series({**base, 'short_divergence':  1.0})  # 양수: 단기이격 있음
 
         score_neg = classifier.calculate_pattern_score(row_neg_st)
         score_pos = classifier.calculate_pattern_score(row_pos_st)
 
-        # 지속형은 short_trend 가중치 = 0 → 음수/양수 상관없이 동일 점수
+        # 지속형은 short_divergence 가중치 = 0 → 음수/양수 상관없이 동일 점수
         assert score_neg == pytest.approx(score_pos, abs=0.01)
 
     def test_sustained_no_tc_bonus(self, classifier):
         """지속형은 tc 보너스 없음 — tc=1.0 vs tc=0.0 점수 동일"""
         base = {
             'recent': 0.7,
-            'momentum': 0.3,
+            'long_divergence': 0.3,
             'weighted': 0.9,
             'average': 0.6,
-            'short_trend': -0.5,
+            'short_divergence': -0.5,
             'pattern': '지속형',
         }
         row_high_tc = pd.Series({**base, 'temporal_consistency': 1.0})
@@ -539,11 +541,11 @@ class TestPatternClassifier:
 
 
 class TestScoringToggle:
-    """use_tc / use_short_trend 토글 파라미터 검증 (스코어링 개선 before/after 비교용)"""
+    """use_tc / use_divergence 토글 파라미터 검증 (스코어링 개선 before/after 비교용)"""
 
     @pytest.fixture
     def classifier_default(self):
-        """기본값 (use_tc=True, use_short_trend=True) — 현재 스코어링"""
+        """기본값 (use_tc=True, use_divergence=True) — 현재 스코어링"""
         return PatternClassifier()
 
     @pytest.fixture
@@ -553,44 +555,44 @@ class TestScoringToggle:
 
     @pytest.fixture
     def classifier_no_st(self):
-        """use_short_trend=False — 레거시 가중치 사용"""
-        return PatternClassifier(use_short_trend=False)
+        """use_divergence=False — 레거시 가중치 사용"""
+        return PatternClassifier(use_divergence=False)
 
     @pytest.fixture
     def classifier_legacy(self):
-        """use_tc=False, use_short_trend=False — 스코어링 개선 이전 완전 재현"""
-        return PatternClassifier(use_tc=False, use_short_trend=False)
+        """use_tc=False, use_divergence=False — 스코어링 개선 이전 완전 재현"""
+        return PatternClassifier(use_tc=False, use_divergence=False)
 
-    def test_use_tc_false_bypasses_momentum_tc_condition(self, classifier_no_tc):
-        """use_tc=False이면 tc<0.5여도 모멘텀형으로 분류됨"""
+    def test_use_tc_false_bypasses_surge_tc_condition(self, classifier_no_tc):
+        """use_tc=False이면 tc<0.5여도 급등형으로 분류됨"""
         row = pd.Series({
             'recent': 1.0,
-            'momentum': 1.5,
+            'long_divergence': 1.5,
             'weighted': 0.4,
             'persistence': 0.4,
             'temporal_consistency': 0.2,  # 기준 0.5 미달이지만 use_tc=False
         })
-        assert classifier_no_tc.classify_pattern(row) == '모멘텀형'
+        assert classifier_no_tc.classify_pattern(row) == '급등형'
 
     def test_use_tc_true_still_blocks_low_tc(self, classifier_default):
-        """기본값(use_tc=True)에서는 tc<0.5면 모멘텀형 탈락 — 기존 동작 유지"""
+        """기본값(use_tc=True)에서는 tc<0.5면 급등형 탈락 — 기존 동작 유지"""
         row = pd.Series({
             'recent': 1.0,
-            'momentum': 1.5,
+            'long_divergence': 1.5,
             'weighted': 0.4,
             'persistence': 0.4,
             'temporal_consistency': 0.2,
         })
-        assert classifier_default.classify_pattern(row) != '모멘텀형'
+        assert classifier_default.classify_pattern(row) != '급등형'
 
     def test_use_tc_false_no_tc_bonus_in_score(self, classifier_no_tc):
         """use_tc=False이면 tc_bonus(±10점)가 적용되지 않음"""
         base = {
             'recent': 1.0,
-            'momentum': 0.5,
+            'long_divergence': 0.5,
             'weighted': 0.8,
             'average': 0.6,
-            'short_trend': 0.3,
+            'short_divergence': 0.3,
         }
         score_high_tc = classifier_no_tc.calculate_pattern_score(
             pd.Series({**base, 'temporal_consistency': 1.0})
@@ -601,43 +603,43 @@ class TestScoringToggle:
         # tc_bonus 없으면 두 점수 동일
         assert score_high_tc == pytest.approx(score_low_tc, abs=0.01)
 
-    def test_use_short_trend_false_uses_legacy_weights(
+    def test_use_divergence_false_uses_legacy_weights(
         self, classifier_default, classifier_no_st
     ):
-        """use_short_trend=False이면 short_trend가 점수에 영향을 주지 않음"""
+        """use_divergence=False이면 short_divergence가 점수에 영향을 주지 않음"""
         base = {
             'recent': 1.0,
-            'momentum': 0.5,
+            'long_divergence': 0.5,
             'weighted': 0.8,
             'average': 0.6,
             'temporal_consistency': 0.5,
         }
-        # short_trend 값만 다른 두 행
+        # short_divergence 값만 다른 두 행
         score_pos = classifier_no_st.calculate_pattern_score(
-            pd.Series({**base, 'short_trend': 2.0})
+            pd.Series({**base, 'short_divergence': 2.0})
         )
         score_neg = classifier_no_st.calculate_pattern_score(
-            pd.Series({**base, 'short_trend': -2.0})
+            pd.Series({**base, 'short_divergence': -2.0})
         )
-        # 레거시 가중치에서 short_trend=0.00 → 두 점수 동일
+        # 레거시 가중치에서 short_divergence=0.00 → 두 점수 동일
         assert score_pos == pytest.approx(score_neg, abs=0.01)
 
-    def test_use_short_trend_true_affects_score(self, classifier_default):
-        """기본값(use_short_trend=True)에서는 short_trend가 점수에 영향"""
+    def test_use_divergence_true_affects_score(self, classifier_default):
+        """기본값(use_divergence=True)에서는 short_divergence가 점수에 영향"""
         base = {
             'recent': 1.0,
-            'momentum': 0.5,
+            'long_divergence': 0.5,
             'weighted': 0.8,
             'average': 0.6,
             'temporal_consistency': 0.5,
         }
         score_pos = classifier_default.calculate_pattern_score(
-            pd.Series({**base, 'short_trend': 2.0})
+            pd.Series({**base, 'short_divergence': 2.0})
         )
         score_neg = classifier_default.calculate_pattern_score(
-            pd.Series({**base, 'short_trend': -2.0})
+            pd.Series({**base, 'short_divergence': -2.0})
         )
-        # short_trend=0.15 가중치 → 두 점수 달라야 함
+        # short_divergence=0.15 가중치 → 두 점수 달라야 함
         assert score_pos != pytest.approx(score_neg, abs=0.1)
 
     def test_legacy_classifier_weights_sum_to_one(self, classifier_legacy):
@@ -646,22 +648,22 @@ class TestScoringToggle:
         total = sum(weights.values())
         assert total == pytest.approx(1.0, abs=1e-9)
 
-    def test_default_and_legacy_score_differ_for_high_short_trend(
+    def test_default_and_legacy_score_differ_for_high_short_divergence(
         self, classifier_default, classifier_legacy
     ):
         """동일 데이터에서 현재 vs 이전 스코어링 결과가 다름 (검증 비교 가능 확인)"""
         row = pd.Series({
             'recent': 1.2,
-            'momentum': 0.8,
+            'long_divergence': 0.8,
             'weighted': 0.9,
             'average': 0.7,
-            'short_trend': 1.5,   # 강한 단기 모멘텀 (현재만 반영)
+            'short_divergence': 1.5,   # 강한 단기이격 (현재만 반영)
             'temporal_consistency': 0.8,  # 높은 tc (현재만 반영)
-            'pattern': '모멘텀형',
+            'pattern': '급등형',
         })
         score_current = classifier_default.calculate_pattern_score(row)
         score_legacy = classifier_legacy.calculate_pattern_score(row)
-        # 현재 버전이 레거시보다 높아야 함 (tc_bonus + short_trend 가중치 효과)
+        # 현재 버전이 레거시보다 높아야 함 (tc_bonus + short_divergence 가중치 효과)
         assert score_current > score_legacy
 
 
@@ -672,25 +674,25 @@ class TestSubType:
     def classifier(self):
         return PatternClassifier()
 
-    def test_sub_type_momentum_long_base(self, classifier):
-        """① 모멘텀형 + 200D>0.3 AND 100D>0.3 → sub_type='장기기반'"""
+    def test_sub_type_surge_long_base(self, classifier):
+        """① 급등형 + 200D>0.3 AND 100D>0.3 → sub_type='장기기반'"""
         row = pd.Series({
             '5D': 2.0, '10D': 1.5, '20D': 1.0, '50D': 0.8,
             '100D': 0.5, '200D': 0.5, '500D': 0.2,
-            'recent': 1.5, 'momentum': 1.8, 'weighted': 1.0,
-            'average': 0.8, 'short_trend': 1.0, 'persistence': 0.8,
+            'recent': 1.5, 'long_divergence': 1.8, 'weighted': 1.0,
+            'average': 0.8, 'short_divergence': 1.0, 'persistence': 0.8,
             'temporal_consistency': 0.8,
         })
-        result = PatternClassifier._classify_sub_type('모멘텀형', row, classifier.config)
+        result = PatternClassifier._classify_sub_type('급등형', row, classifier.config)
         assert result == '장기기반'
 
     def test_sub_type_sustained_breakout(self, classifier):
-        """② 지속형 + 5D>1.0 AND short_trend>0.5 → sub_type='단기돌파'"""
+        """② 지속형 + 5D>1.0 AND short_divergence>0.5 → sub_type='단기돌파'"""
         row = pd.Series({
             '5D': 1.5, '10D': 1.0, '20D': 0.5, '50D': 0.8,
             '100D': 0.9, '200D': 1.0, '500D': 0.8,
-            'recent': 1.0, 'momentum': 0.7, 'weighted': 0.9,
-            'average': 0.8, 'short_trend': 1.0, 'persistence': 0.8,
+            'recent': 1.0, 'long_divergence': 0.7, 'weighted': 0.9,
+            'average': 0.8, 'short_divergence': 1.0, 'persistence': 0.8,
             'temporal_consistency': 0.2,
         })
         result = PatternClassifier._classify_sub_type('지속형', row, classifier.config)
@@ -701,8 +703,8 @@ class TestSubType:
         row = pd.Series({
             '5D': 1.5, '10D': 0.5, '20D': -0.2, '50D': -0.3,
             '100D': -0.5, '200D': -0.2, '500D': 0.1,
-            'recent': 0.65, 'momentum': -0.5, 'weighted': 0.6,
-            'average': 0.1, 'short_trend': 1.7, 'persistence': 0.5,
+            'recent': 0.65, 'long_divergence': -0.5, 'weighted': 0.6,
+            'average': 0.1, 'short_divergence': 1.7, 'persistence': 0.5,
         })
         result = PatternClassifier._classify_sub_type('전환형', row, classifier.config)
         assert result == 'V자반등'
@@ -712,49 +714,49 @@ class TestSubType:
         row = pd.Series({
             '5D': 0.8, '10D': 0.9, '20D': 0.7, '50D': 0.8,
             '100D': 0.9, '200D': 0.8, '500D': 0.7,
-            'recent': 0.75, 'momentum': 0.1, 'weighted': 0.85,
-            'average': 0.8, 'short_trend': 0.1, 'persistence': 1.0,
+            'recent': 0.75, 'long_divergence': 0.1, 'weighted': 0.85,
+            'average': 0.8, 'short_divergence': 0.1, 'persistence': 1.0,
             'temporal_consistency': 0.3,
         })
         result = PatternClassifier._classify_sub_type('지속형', row, classifier.config)
         assert result == '전면수급'
 
     def test_sub_type_sustained_weakening(self, classifier):
-        """⑤ 지속형 + short_trend<-0.3 AND 5D<20D → sub_type='모멘텀약화'
+        """⑤ 지속형 + short_divergence<-0.3 AND 5D<20D → sub_type='수급약화'
         주의: 전면수급 조건(모든 Z>0 + std<0.5) 불충족하도록 std>0.5 설정
         """
         row = pd.Series({
             '5D': 0.3, '10D': 0.5, '20D': 0.8, '50D': 1.0,
             '100D': 1.5, '200D': 2.0, '500D': 1.0,  # std > 0.5 (전면수급 불충족)
-            'recent': 0.55, 'momentum': -0.7, 'weighted': 0.9,
-            'average': 0.8, 'short_trend': -0.5, 'persistence': 1.0,
+            'recent': 0.55, 'long_divergence': -0.7, 'weighted': 0.9,
+            'average': 0.8, 'short_divergence': -0.5, 'persistence': 1.0,
             'temporal_consistency': 0.0,
         })
         result = PatternClassifier._classify_sub_type('지속형', row, classifier.config)
-        assert result == '모멘텀약화'
+        assert result == '수급약화'
 
-    def test_sub_type_momentum_decel(self, classifier):
-        """⑥ 모멘텀형 + short_trend<-0.3 → sub_type='감속'"""
+    def test_sub_type_surge_decel(self, classifier):
+        """⑥ 급등형 + short_divergence<-0.3 → sub_type='감속'"""
         row = pd.Series({
             '5D': 1.0, '10D': 1.5, '20D': 1.8, '50D': 0.5,
             '100D': 0.3, '200D': 0.2, '500D': 0.1,
-            'recent': 1.4, 'momentum': 0.9, 'weighted': 0.7,
-            'average': 0.6, 'short_trend': -0.8, 'persistence': 0.7,
+            'recent': 1.4, 'long_divergence': 0.9, 'weighted': 0.7,
+            'average': 0.6, 'short_divergence': -0.8, 'persistence': 0.7,
             'temporal_consistency': 0.6,
         })
-        result = PatternClassifier._classify_sub_type('모멘텀형', row, classifier.config)
+        result = PatternClassifier._classify_sub_type('급등형', row, classifier.config)
         assert result == '감속'
 
-    def test_sub_type_momentum_dead_cat(self, classifier):
-        """⑦ 모멘텀형 + 200D<-0.3 → sub_type='단기반등' (위험 먼저 체크)"""
+    def test_sub_type_surge_dead_cat(self, classifier):
+        """⑦ 급등형 + 200D<-0.3 → sub_type='단기반등' (위험 먼저 체크)"""
         row = pd.Series({
             '5D': 2.0, '10D': 1.5, '20D': 1.0, '50D': 0.5,
             '100D': -0.2, '200D': -0.5, '500D': -0.3,
-            'recent': 1.5, 'momentum': 2.3, 'weighted': 0.5,
-            'average': 0.4, 'short_trend': 1.0, 'persistence': 0.5,
+            'recent': 1.5, 'long_divergence': 2.3, 'weighted': 0.5,
+            'average': 0.4, 'short_divergence': 1.0, 'persistence': 0.5,
             'temporal_consistency': 0.6,
         })
-        result = PatternClassifier._classify_sub_type('모멘텀형', row, classifier.config)
+        result = PatternClassifier._classify_sub_type('급등형', row, classifier.config)
         assert result == '단기반등'
 
     def test_sub_type_none_for_other_pattern(self, classifier):
@@ -787,13 +789,13 @@ class TestSubType:
 
     def test_sub_type_score_bonus_applied(self, classifier):
         """sub_type 점수 보정이 적용됨 (장기기반 +5, 단기반등 -8)"""
-        # 장기기반 데이터 (모멘텀형 + 200D>0.3 + 100D>0.3)
+        # 장기기반 데이터 (급등형 + 200D>0.3 + 100D>0.3)
         data_good = {
             'stock_code': ['A'],
             '5D': [2.0], '10D': [1.5], '20D': [1.0], '50D': [0.8],
             '100D': [0.5], '200D': [0.5], '500D': [0.2],
         }
-        # 단기반등 데이터 (모멘텀형 + 200D<-0.3)
+        # 단기반등 데이터 (급등형 + 200D<-0.3)
         data_bad = {
             'stock_code': ['B'],
             '5D': [2.0], '10D': [1.5], '20D': [1.0], '50D': [0.5],
@@ -838,22 +840,22 @@ class TestSubType:
         sub = result.iloc[0]['sub_type']
         # sub_type이 None이 아니면 유효한 값이어야 함
         valid_sub_types = {'장기기반', '단기돌파', 'V자반등', '전면수급',
-                          '모멘텀약화', '감속', '단기반등', None}
+                          '수급약화', '감속', '단기반등', None}
         assert sub in valid_sub_types or pd.isna(sub)
 
     def test_sub_type_with_scoring_toggles(self, classifier):
-        """use_tc=False, use_short_trend=False에서도 sub_type 정상 분류"""
+        """use_tc=False, use_divergence=False에서도 sub_type 정상 분류"""
         data = {
             'stock_code': ['A'],
             '5D': [2.0], '10D': [1.5], '20D': [1.0], '50D': [0.8],
             '100D': [0.5], '200D': [0.5], '500D': [0.2],
         }
-        # 기본 (tc+short_trend ON)
-        clf_default = PatternClassifier(use_tc=True, use_short_trend=True)
+        # 기본 (tc+short_divergence ON)
+        clf_default = PatternClassifier(use_tc=True, use_divergence=True)
         r_default = clf_default.classify_all(pd.DataFrame(data))
 
-        # 레거시 (tc+short_trend OFF)
-        clf_legacy = PatternClassifier(use_tc=False, use_short_trend=False)
+        # 레거시 (tc+short_divergence OFF)
+        clf_legacy = PatternClassifier(use_tc=False, use_divergence=False)
         r_legacy = clf_legacy.classify_all(pd.DataFrame(data))
 
         # 두 경우 모두 sub_type/pattern_label 컬럼 존재
@@ -861,11 +863,11 @@ class TestSubType:
         assert 'sub_type' in r_legacy.columns
         assert 'pattern_label' in r_legacy.columns
 
-        # sub_type 값 자체는 동일해야 함 (tc/short_trend는 점수에만 영향, 분류 조건 무관)
+        # sub_type 값 자체는 동일해야 함 (tc/short_divergence는 점수에만 영향, 분류 조건 무관)
         assert r_default.iloc[0]['sub_type'] == r_legacy.iloc[0]['sub_type']
 
-class TestMidMomentum:
-    """mid_momentum (5D-100D) 중기 모멘텀 테스트"""
+class TestMidDivergence:
+    """mid_divergence (5D-100D) 중기이격 테스트"""
 
     @pytest.fixture
     def classifier(self):
@@ -884,57 +886,57 @@ class TestMidMomentum:
             '500D': [0.1, 1.0],
         })
 
-    def test_calculate_sort_keys_includes_mid_momentum(self, classifier, sample_zscore_matrix):
-        """calculate_sort_keys() 결과에 mid_momentum 컬럼 존재, 값 = 5D - 100D"""
+    def test_calculate_sort_keys_includes_mid_divergence(self, classifier, sample_zscore_matrix):
+        """calculate_sort_keys() 결과에 mid_divergence 컬럼 존재, 값 = 5D - 100D"""
         result = classifier.calculate_sort_keys(sample_zscore_matrix)
-        assert 'mid_momentum' in result.columns
+        assert 'mid_divergence' in result.columns
         expected = result['5D'] - result['100D']
         pd.testing.assert_series_equal(
-            result['mid_momentum'], expected, check_names=False,
+            result['mid_divergence'], expected, check_names=False,
         )
 
-    def test_mid_momentum_in_classify_all_output(self, classifier, sample_zscore_matrix):
-        """classify_all 결과에 mid_momentum 컬럼 존재"""
+    def test_mid_divergence_in_classify_all_output(self, classifier, sample_zscore_matrix):
+        """classify_all 결과에 mid_divergence 컬럼 존재"""
         result = classifier.classify_all(sample_zscore_matrix)
-        assert 'mid_momentum' in result.columns
+        assert 'mid_divergence' in result.columns
 
-    def test_mid_momentum_affects_score(self, classifier):
-        """mid_momentum 값 변화 시 비-지속형 패턴 점수가 달라짐"""
+    def test_mid_divergence_affects_score(self, classifier):
+        """mid_divergence 값 변화 시 비-지속형 패턴 점수가 달라짐"""
         base = {
-            'recent': 1.0, 'momentum': 0.5, 'weighted': 0.8,
-            'average': 0.6, 'short_trend': 0.3,
+            'recent': 1.0, 'long_divergence': 0.5, 'weighted': 0.8,
+            'average': 0.6, 'short_divergence': 0.3,
             'temporal_consistency': 0.5,
         }
         score_high = classifier.calculate_pattern_score(
-            pd.Series({**base, 'mid_momentum': 2.0})
+            pd.Series({**base, 'mid_divergence': 2.0})
         )
         score_low = classifier.calculate_pattern_score(
-            pd.Series({**base, 'mid_momentum': -2.0})
+            pd.Series({**base, 'mid_divergence': -2.0})
         )
         assert score_high != pytest.approx(score_low, abs=0.1)
 
-    def test_sustained_score_no_mid_momentum_penalty(self, classifier):
-        """지속형은 mid_momentum 가중치 0 → 음수/양수 점수 동일"""
+    def test_sustained_score_no_mid_divergence_penalty(self, classifier):
+        """지속형은 mid_divergence 가중치 0 → 음수/양수 점수 동일"""
         base = {
-            'recent': 0.7, 'momentum': 0.3, 'weighted': 0.9,
-            'average': 0.6, 'short_trend': -0.5,
+            'recent': 0.7, 'long_divergence': 0.3, 'weighted': 0.9,
+            'average': 0.6, 'short_divergence': -0.5,
             'temporal_consistency': 0.2, 'pattern': '지속형',
         }
         score_pos = classifier.calculate_pattern_score(
-            pd.Series({**base, 'mid_momentum': 2.0})
+            pd.Series({**base, 'mid_divergence': 2.0})
         )
         score_neg = classifier.calculate_pattern_score(
-            pd.Series({**base, 'mid_momentum': -2.0})
+            pd.Series({**base, 'mid_divergence': -2.0})
         )
         assert score_pos == pytest.approx(score_neg, abs=0.01)
 
-    def test_legacy_weights_include_mid_momentum_zero(self):
-        """레거시 가중치에 mid_momentum=0.00 포함"""
+    def test_legacy_weights_include_mid_divergence_zero(self):
+        """레거시 가중치에 mid_divergence=0.00 포함"""
         w = PatternClassifier._LEGACY_SCORE_WEIGHTS
-        assert 'mid_momentum' in w
-        assert w['mid_momentum'] == 0.0
+        assert 'mid_divergence' in w
+        assert w['mid_divergence'] == 0.0
 
-    def test_mid_momentum_fallback_to_50d(self, classifier):
+    def test_mid_divergence_fallback_to_50d(self, classifier):
         """100D가 NaN일 때 50D로 폴백"""
         data = pd.DataFrame({
             'stock_code': ['A'],
@@ -943,28 +945,28 @@ class TestMidMomentum:
             '200D': [0.3], '500D': [0.1],
         })
         result = classifier.calculate_sort_keys(data)
-        # 100D가 NaN이므로 50D(0.8) 폴백: mid_momentum = 1.5 - 0.8 = 0.7
-        assert result['mid_momentum'].iloc[0] == pytest.approx(0.7, abs=0.01)
+        # 100D가 NaN이므로 50D(0.8) 폴백: mid_divergence = 1.5 - 0.8 = 0.7
+        assert result['mid_divergence'].iloc[0] == pytest.approx(0.7, abs=0.01)
 
 
-    def test_mid_momentum_in_classify_all_matches_original(self, classifier, sample_zscore_matrix):
-        """classify_all 출력의 mid_momentum == 복원된 5D - 100D (50D 폴백 포함)"""
+    def test_mid_divergence_in_classify_all_matches_original(self, classifier, sample_zscore_matrix):
+        """classify_all 출력의 mid_divergence == 복원된 5D - 100D (50D 폴백 포함)"""
         result = classifier.classify_all(sample_zscore_matrix)
         for _, row in result.iterrows():
             expected_mid = row['100D'] if pd.notna(row.get('100D')) else row.get('50D', np.nan)
             if pd.notna(expected_mid):
-                assert row['mid_momentum'] == pytest.approx(row['5D'] - expected_mid, abs=0.01)
+                assert row['mid_divergence'] == pytest.approx(row['5D'] - expected_mid, abs=0.01)
 
-    def test_use_short_trend_false_neutralizes_mid_momentum(self):
-        """use_short_trend=False 시 mid_momentum도 점수에 영향 없음"""
-        legacy = PatternClassifier(use_short_trend=False)
+    def test_use_divergence_false_neutralizes_mid_divergence(self):
+        """use_divergence=False 시 mid_divergence도 점수에 영향 없음"""
+        legacy = PatternClassifier(use_divergence=False)
         base = {
-            'recent': 1.0, 'momentum': 0.5, 'weighted': 0.8,
-            'average': 0.6, 'short_trend': 0.3,
+            'recent': 1.0, 'long_divergence': 0.5, 'weighted': 0.8,
+            'average': 0.6, 'short_divergence': 0.3,
             'temporal_consistency': 0.5,
         }
-        score_high = legacy.calculate_pattern_score(pd.Series({**base, 'mid_momentum': 2.0}))
-        score_low = legacy.calculate_pattern_score(pd.Series({**base, 'mid_momentum': -2.0}))
+        score_high = legacy.calculate_pattern_score(pd.Series({**base, 'mid_divergence': 2.0}))
+        score_low = legacy.calculate_pattern_score(pd.Series({**base, 'mid_divergence': -2.0}))
         assert score_high == pytest.approx(score_low, abs=0.01)
 
     def test_default_weights_sum_to_one(self):
@@ -973,8 +975,8 @@ class TestMidMomentum:
         w = c.config['score_weights']
         assert sum(w.values()) == pytest.approx(1.0, abs=0.001)
 
-    def test_mid_momentum_double_nan_fallback(self, classifier):
-        """100D, 50D 모두 NaN일 때 mid_momentum = NaN, 점수 계산 정상"""
+    def test_mid_divergence_double_nan_fallback(self, classifier):
+        """100D, 50D 모두 NaN일 때 mid_divergence = NaN, 점수 계산 정상"""
         data = pd.DataFrame({
             'stock_code': ['A'],
             '5D': [1.5], '10D': [1.3], '20D': [1.2],
@@ -982,7 +984,7 @@ class TestMidMomentum:
             '200D': [0.3], '500D': [0.1],
         })
         result = classifier.calculate_sort_keys(data)
-        assert pd.isna(result['mid_momentum'].iloc[0])
+        assert pd.isna(result['mid_divergence'].iloc[0])
         # classify_all도 크래시 없이 동작
         full = classifier.classify_all(data)
         assert len(full) == 1
@@ -999,13 +1001,13 @@ class TestSubTypePriority:
     def test_sub_type_priority_sustained_breakout_over_uniform(self, classifier):
         """지속형에서 단기돌파 + 전면수급 동시 충족 시 단기돌파 우선"""
         row = pd.Series({
-            # 단기돌파 조건: 5D>1.0 AND short_trend>0.5
+            # 단기돌파 조건: 5D>1.0 AND short_divergence>0.5
             '5D': 1.5, '10D': 0.9, '20D': 0.8, '50D': 0.7,
             '100D': 0.6, '200D': 0.5, '500D': 0.4,
-            'short_trend': 0.7,
+            'short_divergence': 0.7,
             # 전면수급 조건: all>0 (충족), std < 0.5
             # std([1.5,0.9,0.8,0.7,0.6,0.5]) ≈ 0.33 < 0.5 (충족)
-            'recent': 1.15, 'momentum': 1.1, 'weighted': 0.8,
+            'recent': 1.15, 'long_divergence': 1.1, 'weighted': 0.8,
             'average': 0.77, 'persistence': 0.8,
             'temporal_consistency': 0.8,
         })

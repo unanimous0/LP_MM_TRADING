@@ -300,18 +300,18 @@ with st.sidebar.expander("스코어링 버전", expanded=False):
         value=True,
         key="w_use_tc",
         help="tc 기준: 5D≥10D≥…≥500D 순서 일관성 (0~1)\n"
-             "ON: 모멘텀형 진입조건(tc≥0.5) + 점수 보너스 ±10점 적용\n"
+             "ON: 급등형 진입조건(tc≥0.5) + 점수 보너스 ±10점 적용\n"
              "OFF: 조건 무시, 보너스 없음 (개선 이전 동작)",
     )
-    use_short_trend = st.checkbox(
-        "Short Trend (5D − 20D)",
+    use_divergence = st.checkbox(
+        "Divergence (단기이격/중기이격)",
         value=True,
-        key="w_use_short_trend",
-        help="단기 모멘텀 방향을 점수에 반영 (가중치 0.15)\n"
-             "ON: 현재 가중치 (momentum 0.20 / average 0.10 / short_trend 0.15)\n"
-             "OFF: 레거시 가중치 (momentum 0.25 / average 0.20 / short_trend 0.00)",
+        key="w_use_divergence",
+        help="단기/중기 이격도를 점수에 반영 (가중치 0.10+0.10)\n"
+             "ON: 현재 가중치 (long_divergence 0.15 / average 0.10 / short_divergence 0.10 / mid_divergence 0.10)\n"
+             "OFF: 레거시 가중치 (long_divergence 0.20 / average 0.20 / short_divergence 0.00 / mid_divergence 0.00)",
     )
-    if not use_tc or not use_short_trend:
+    if not use_tc or not use_divergence:
         st.info("⚠️ 일부 OFF — 스코어링 개선 이전 동작으로 실행됩니다.")
 
 with st.sidebar.expander("거래 비용", expanded=False):
@@ -344,13 +344,13 @@ if run_clicked:
         slippage_rate=slippage_rate,
         borrowing_rate=borrowing_rate,
         use_tc=use_tc,
-        use_short_trend=use_short_trend,
+        use_divergence=use_divergence,
     )
     st.session_state['bt_use_split'] = use_split
     st.session_state['bt_opt_period'] = (opt_start_date.strftime("%Y-%m-%d"), opt_end_date.strftime("%Y-%m-%d"))
     st.session_state['bt_val_period'] = (val_start_date.strftime("%Y-%m-%d"), val_end_date.strftime("%Y-%m-%d"))
     st.session_state['bt_use_tc'] = use_tc
-    st.session_state['bt_use_short_trend'] = use_short_trend
+    st.session_state['bt_use_divergence'] = use_divergence
 
 # ---------------------------------------------------------------------------
 # Optuna 최적화 실행
@@ -392,7 +392,7 @@ if opt_clicked:
         slippage_rate=slippage_rate,
         borrowing_rate=borrowing_rate,
         use_tc=use_tc,
-        use_short_trend=use_short_trend,
+        use_divergence=use_divergence,
     )
     _opt_progress_bar.empty()
     _opt_status.empty()
@@ -428,14 +428,14 @@ if opt_clicked:
             slippage_rate=slippage_rate,
             borrowing_rate=borrowing_rate,
             use_tc=use_tc,
-            use_short_trend=use_short_trend,
+            use_divergence=use_divergence,
         )
         _bt_progress_bar.empty()
         st.session_state['bt_use_split'] = use_split
         st.session_state['bt_opt_period'] = (opt_start_date.strftime("%Y-%m-%d"), opt_end_date.strftime("%Y-%m-%d"))
         st.session_state['bt_val_period'] = (val_start_date.strftime("%Y-%m-%d"), val_end_date.strftime("%Y-%m-%d"))
         st.session_state['bt_use_tc'] = use_tc
-        st.session_state['bt_use_short_trend'] = use_short_trend
+        st.session_state['bt_use_divergence'] = use_divergence
         st.rerun()
     else:
         st.error("최적화 실패: 완료된 Trial이 없습니다. Trial 수를 늘리거나 기간을 조정해보세요.")
@@ -564,15 +564,15 @@ elif _val_p:
 
 # 스코어링 버전 배너
 _bt_use_tc = st.session_state.get('bt_use_tc', True)
-_bt_use_short_trend = st.session_state.get('bt_use_short_trend', True)
-if _bt_use_tc and _bt_use_short_trend:
-    st.caption("📐 스코어링: **현재 버전** (Temporal Consistency + Short Trend 적용)")
+_bt_use_divergence = st.session_state.get('bt_use_divergence', True)
+if _bt_use_tc and _bt_use_divergence:
+    st.caption("📐 스코어링: **현재 버전** (Temporal Consistency + Divergence 적용)")
 else:
     _off_items = []
     if not _bt_use_tc:
         _off_items.append("Temporal Consistency OFF")
-    if not _bt_use_short_trend:
-        _off_items.append("Short Trend OFF")
+    if not _bt_use_divergence:
+        _off_items.append("Divergence OFF")
     st.warning(f"📐 스코어링: **이전 버전** ({', '.join(_off_items)}) — 개선 효과 비교용")
 
 # ---------------------------------------------------------------------------

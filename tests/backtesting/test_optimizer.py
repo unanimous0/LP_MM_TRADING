@@ -105,7 +105,7 @@ class TestOptunaOptimizer:
         """optimize() 반환 구조 (params, metric, total_complete, total_pruned)"""
         optimizer = self._make_optimizer()
 
-        mock_trades = [MagicMock(return_pct=5.0, hold_days=3, pattern='모멘텀형',
+        mock_trades = [MagicMock(return_pct=5.0, hold_days=3, pattern='급등형',
                                   signal_count=2, direction='long')]
         mock_daily = pd.DataFrame({
             'date': ['2024-06-15'], 'value': [10_500_000],
@@ -182,7 +182,7 @@ class TestOptunaOptimizer:
                 'profit_factor': 1.0, 'total_trades': 3,
             }
 
-        mock_trades = [MagicMock(return_pct=2.0, hold_days=3, pattern='모멘텀형',
+        mock_trades = [MagicMock(return_pct=2.0, hold_days=3, pattern='급등형',
                                   signal_count=1, direction='long')]
         mock_daily = pd.DataFrame({
             'date': ['2024-06-15'], 'value': [10_200_000],
@@ -251,7 +251,7 @@ class TestOptunaOptimizer:
         """optimize() 1회 호출 시 Precomputer가 1회만 실행되는지 확인"""
         optimizer = self._make_optimizer()
 
-        mock_trades = [MagicMock(return_pct=1.0, hold_days=2, pattern='모멘텀형',
+        mock_trades = [MagicMock(return_pct=1.0, hold_days=2, pattern='급등형',
                                   signal_count=2, direction='long')]
         mock_daily = pd.DataFrame({
             'date': ['2024-06-15'], 'value': [10_100_000],

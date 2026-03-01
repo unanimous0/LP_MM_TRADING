@@ -38,7 +38,7 @@ class BacktestConfig:
                  institution_weight: float = 0.3,  # 기관 가중치 (0.0=외국인만, 0.3=기본, 0.5=기관 강조)
                  force_exit_on_end: bool = False,  # 백테스트 종료 시 강제 청산 여부
                  use_tc: bool = True,              # Temporal Consistency 적용 여부
-                 use_short_trend: bool = True,     # Short Trend 점수 반영 여부
+                 use_divergence: bool = True,      # Short Divergence 점수 반영 여부
                  tax_rate: float = 0.0020,  # 증권거래세 (매도 시, 0.20%)
                  commission_rate: float = 0.00015,  # 수수료 (매수/매도, 0.015%)
                  slippage_rate: float = 0.001,  # 슬리피지 (매수/매도, 0.1%)
@@ -55,13 +55,13 @@ class BacktestConfig:
             stop_loss: 손절 비율 (예: -0.075 = -7.5%, 순수 가격 변화율)
             max_hold_days: 시간 손절 (N일 보유 후 강제 청산, 999 = 무제한)
             reverse_signal_threshold: 반대 수급 손절 점수 (Long→매도 60점 이상, Short→매수 60점 이상)
-            allowed_patterns: 허용 패턴 리스트 (예: ['모멘텀형', '지속형'])
+            allowed_patterns: 허용 패턴 리스트 (예: ['급등형', '지속형'])
             strategy: 전략 방향 ('long': 순매수, 'short': 순매도, 'both': 롱+숏)
             institution_weight: 기관 가중치 (0.0=외국인만, 0.3=기본, 0.5=기관 강조)
             force_exit_on_end: 백테스트 종료일에 강제 청산 여부 (기본: False)
             use_tc: Temporal Consistency 적용 여부 (기본: True)
-                False이면 모멘텀형 tc 조건 무시 + tc_bonus 미적용 (스코어링 개선 이전)
-            use_short_trend: Short Trend 점수 반영 여부 (기본: True)
+                False이면 급등형 tc 조건 무시 + tc_bonus 미적용 (스코어링 개선 이전)
+            use_divergence: Short Divergence 점수 반영 여부 (기본: True)
                 False이면 레거시 가중치 사용 (스코어링 개선 이전)
             tax_rate: 증권거래세 (매도 시, 기본 0.20%)
             commission_rate: 수수료 (매수/매도, 기본 0.015%)
@@ -81,7 +81,7 @@ class BacktestConfig:
         self.institution_weight = institution_weight
         self.force_exit_on_end = force_exit_on_end
         self.use_tc = use_tc
-        self.use_short_trend = use_short_trend
+        self.use_divergence = use_divergence
         self.tax_rate = tax_rate
         self.commission_rate = commission_rate
         self.slippage_rate = slippage_rate
@@ -116,7 +116,7 @@ class BacktestEngine:
         )
         self.classifier = PatternClassifier(
             use_tc=self.config.use_tc,
-            use_short_trend=self.config.use_short_trend,
+            use_divergence=self.config.use_divergence,
         )
         self.signal_detector = SignalDetector(conn, institution_weight=self.config.institution_weight)
 
@@ -236,7 +236,7 @@ class BacktestEngine:
         Returns:
             pd.DataFrame: 패턴 분류 + 시그널 통합 결과
                 - stock_code, stock_name
-                - 5D~500D, recent, momentum, weighted, average
+                - 5D~500D, recent, long_divergence, weighted, average
                 - pattern, score, direction
                 - ma_cross, acceleration, sync_rate, signal_count
         """
@@ -335,7 +335,14 @@ class BacktestEngine:
             else:
                 return_pct = (position.entry_price / current_price - 1)
 
-            hold_days = position.hold_days(current_date)
+            # 거래일 기준 보유일수 계산 (주말/공휴일 제외)
+            entry_idx = self._trading_date_index.get(position.entry_date)
+            current_idx = self._trading_date_index.get(current_date)
+            if entry_idx is not None and current_idx is not None:
+                hold_trading_days = current_idx - entry_idx
+            else:
+                hold_trading_days = position.hold_days(current_date)  # 폴백: 캘린더일
+
             exit_reason = None
 
             # 1. 목표 수익률 달성 (당일 청산)
@@ -346,8 +353,8 @@ class BacktestEngine:
             elif return_pct <= self.config.stop_loss:
                 exit_reason = 'stop_loss'
 
-            # 3. 시간 손절 (당일 청산)
-            elif hold_days >= self.config.max_hold_days:
+            # 3. 시간 손절 (거래일 기준, 당일 청산)
+            elif hold_trading_days >= self.config.max_hold_days:
                 exit_reason = 'time'
 
             # 청산 실행 (당일 종가)
@@ -531,7 +538,7 @@ class BacktestEngine:
                 self.conn,
                 institution_weight=self.config.institution_weight,
                 use_tc=self.config.use_tc,
-                use_short_trend=self.config.use_short_trend,
+                use_divergence=self.config.use_divergence,
             )
             self._precomputed = pc.precompute(end_date, verbose=verbose)
 
@@ -549,6 +556,9 @@ class BacktestEngine:
 
         if not trading_dates:
             raise ValueError(f"거래일이 없습니다: {start_date} ~ {end_date}")
+
+        # 거래일 인덱스 매핑 (hold_days 거래일 기준 계산용)
+        self._trading_date_index = {d: i for i, d in enumerate(trading_dates)}
 
         # 롤링 윈도우 시뮬레이션
         total_days = len(trading_dates)

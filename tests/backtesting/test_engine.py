@@ -37,12 +37,12 @@ class TestBacktestConfig:
             target_return=0.20,
             stop_loss=-0.10,
             max_hold_days=20,
-            allowed_patterns=['모멘텀형', '지속형']
+            allowed_patterns=['급등형', '지속형']
         )
 
         assert config.initial_capital == 5_000_000
         assert config.max_positions == 5
-        assert config.allowed_patterns == ['모멘텀형', '지속형']
+        assert config.allowed_patterns == ['급등형', '지속형']
 
 
 class TestBacktestEngine:
@@ -134,7 +134,7 @@ class TestBacktestEngine:
         signals = pd.DataFrame({
             'stock_code': ['005930', '000660', '035420', '051910', '005380'],
             'stock_name': ['삼성전자', 'SK하이닉스', 'NAVER', 'LG화학', '현대차'],
-            'pattern': ['모멘텀형', '지속형', '전환형', '모멘텀형', '기타'],
+            'pattern': ['급등형', '지속형', '전환형', '급등형', '기타'],
             'score': [85, 75, 65, 55, 45],
             'signal_count': [2, 2, 1, 1, 0],
         })
@@ -151,11 +151,11 @@ class TestBacktestEngine:
         assert candidates.iloc[0]['stock_code'] == '005930'  # 점수 높은 순
 
         # 패턴 필터링
-        engine.config.allowed_patterns = ['모멘텀형']
+        engine.config.allowed_patterns = ['급등형']
         candidates2 = engine._select_entry_candidates(signals)
-        # 모멘텀형: 005930(final=95), 051910(final=60) → 2개
+        # 급등형: 005930(final=95), 051910(final=60) → 2개
         assert len(candidates2) == 2
-        assert candidates2.iloc[0]['pattern'] == '모멘텀형'
+        assert candidates2.iloc[0]['pattern'] == '급등형'
 
     @pytest.mark.slow
     def test_run_short_backtest(self, engine):
@@ -284,8 +284,8 @@ class TestShortStrategy:
             assert 'direction' in signals.columns
             assert (signals['direction'] == 'short').all()
 
-            # 패턴 이름은 동일 (모멘텀형/지속형/전환형/기타)
-            assert signals['pattern'].isin(['모멘텀형', '지속형', '전환형', '기타']).all()
+            # 패턴 이름은 동일 (급등형/지속형/전환형/기타)
+            assert signals['pattern'].isin(['급등형', '지속형', '전환형', '기타']).all()
 
             # Short는 weighted < 0 (순매도)
             if 'weighted' in signals.columns:

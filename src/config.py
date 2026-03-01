@@ -44,7 +44,7 @@ DEFAULT_CONFIG = {
 
         # Y축 정렬 기준
         # 'recent': 최근 기간(5D 또는 5D+20D) 우선 (추천!)
-        # 'momentum': 수급 모멘텀(5D - 200D) - 전환점 포착
+        # 'long_divergence': 장기 이격도(5D - 200D) - 전환점 포착
         # 'weighted': 가중 평균 (최근 높은 가중치)
         # 'average': 단순 평균 (deprecated, 과거에 강했던 종목 우선)
         'sort_by': 'recent',
@@ -307,7 +307,7 @@ def _validate_config(config: Dict[str, Any]) -> None:
 
     # 7. 정렬 기준 검증
     sort_by = config['visualization'].get('sort_by')
-    valid_sort_modes = ['recent', 'momentum', 'weighted', 'average']
+    valid_sort_modes = ['recent', 'long_divergence', 'weighted', 'average']
     if sort_by and sort_by not in valid_sort_modes:
         raise ValueError(
             f"Invalid sort_by: '{sort_by}'. "

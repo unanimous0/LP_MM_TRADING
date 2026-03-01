@@ -21,11 +21,11 @@ class TestPerformanceMetrics:
         return [
             # 승리 거래 (3건)
             Trade('005930', '삼성전자', '2024-01-02', 70000, '2024-01-10', 77000,
-                  100, '모멘텀형', 85, 2, 10.0, 8, 'target', 35000),
+                  100, '급등형', 85, 2, 10.0, 8, 'target', 35000),
             Trade('000660', 'SK하이닉스', '2024-01-05', 100000, '2024-01-15', 115000,
                   50, '지속형', 80, 1, 15.0, 10, 'target', 25000),
             Trade('035420', 'NAVER', '2024-01-10', 200000, '2024-01-20', 210000,
-                  25, '모멘텀형', 75, 3, 5.0, 10, 'target', 15000),
+                  25, '급등형', 75, 3, 5.0, 10, 'target', 15000),
 
             # 손실 거래 (2건)
             Trade('005380', '현대차', '2024-01-12', 150000, '2024-01-18', 142500,
@@ -171,8 +171,8 @@ class TestPerformanceMetrics:
         for col in required_cols:
             assert col in result.columns
 
-        # 모멘텀형: 2건 (승 2, 패 0) → 승률 100%, 평균 7.5%
-        momentum = result[result['pattern'] == '모멘텀형']
+        # 급등형: 2건 (승 2, 패 0) → 승률 100%, 평균 7.5%
+        momentum = result[result['pattern'] == '급등형']
         if not momentum.empty:
             assert momentum.iloc[0]['trades'] == 2
             assert momentum.iloc[0]['win_rate'] == 100.0

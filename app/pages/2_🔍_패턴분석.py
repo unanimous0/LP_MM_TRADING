@@ -50,24 +50,24 @@ def _build_tooltip_html(row, zscore_row=None):
     pat_label = row.get('pattern_label', pattern)
 
     recent = float(row.get('recent', 0))
-    mid_momentum = float(row.get('mid_momentum', 0))
-    momentum = float(row.get('momentum', 0))
+    mid_divergence = float(row.get('mid_divergence', 0))
+    long_divergence = float(row.get('long_divergence', 0))
     weighted = float(row.get('weighted', 0))
     average = float(row.get('average', 0))
-    short_trend = float(row.get('short_trend', 0))
+    short_divergence = float(row.get('short_divergence', 0))
     persistence = float(row.get('persistence', 0))
 
     is_sustained = (pattern == '지속형')
 
     if is_sustained:
-        weights = {'recent': 0.25, 'short_trend': 0.00, 'mid_momentum': 0.00,
-                   'momentum': 0.15, 'weighted': 0.30, 'average': 0.30}
+        weights = {'recent': 0.25, 'short_divergence': 0.00, 'mid_divergence': 0.00,
+                   'long_divergence': 0.15, 'weighted': 0.30, 'average': 0.30}
     else:
-        weights = {'recent': 0.25, 'short_trend': 0.10, 'mid_momentum': 0.10,
-                   'momentum': 0.15, 'weighted': 0.30, 'average': 0.10}
+        weights = {'recent': 0.25, 'short_divergence': 0.10, 'mid_divergence': 0.10,
+                   'long_divergence': 0.15, 'weighted': 0.30, 'average': 0.10}
 
-    comps = {'recent': recent, 'mid_momentum': mid_momentum, 'momentum': momentum,
-             'weighted': weighted, 'average': average, 'short_trend': short_trend}
+    comps = {'recent': recent, 'mid_divergence': mid_divergence, 'long_divergence': long_divergence,
+             'weighted': weighted, 'average': average, 'short_divergence': short_divergence}
 
     weighted_sum = sum(comps[k] * weights[k] for k in weights if weights[k] > 0)
     base_score = float(np.clip(((weighted_sum + 3) / 6) * 100, 0, 100))
@@ -78,7 +78,7 @@ def _build_tooltip_html(row, zscore_row=None):
 
     sub_bonus_map = {
         '장기기반': +5, '단기돌파': +5, 'V자반등': +3, '전면수급': +3,
-        '모멘텀약화': -5, '감속': -5, '단기반등': -8,
+        '수급약화': -5, '감속': -5, '단기반등': -8,
     }
     sub_bonus = sub_bonus_map.get(sub_type, 0)
 
@@ -110,9 +110,9 @@ def _build_tooltip_html(row, zscore_row=None):
 
     # ── 패턴 근거 ──
     h.append('<div class="tt-section">패턴 분류 근거</div>')
-    if pattern == '모멘텀형':
+    if pattern == '급등형':
         h.append(
-            f'<div class="tt-line">모멘텀(<b>{momentum:+.2f}</b>)&gt;1.0 '
+            f'<div class="tt-line">장기이격(<b>{long_divergence:+.2f}</b>)&gt;1.0 '
             f'&amp; 최근수급(<b>{recent:+.2f}</b>)&gt;0.5 '
             f'&amp; tc(<b>{tc:.2f}</b>)≥0.5</div>')
     elif pattern == '지속형':
@@ -122,9 +122,9 @@ def _build_tooltip_html(row, zscore_row=None):
     elif pattern == '전환형':
         h.append(
             f'<div class="tt-line">가중평균(<b>{weighted:+.2f}</b>)&gt;0.5 '
-            f'&amp; 모멘텀(<b>{momentum:+.2f}</b>)&lt;0</div>')
+            f'&amp; 장기이격(<b>{long_divergence:+.2f}</b>)&lt;0</div>')
     else:
-        h.append('<div class="tt-line">모멘텀·지속·전환 조건 미충족 → 기타</div>')
+        h.append('<div class="tt-line">급등·지속·전환 조건 미충족 → 기타</div>')
 
     if sub_type:
         h.append(f'<div class="tt-line">복합: <b>{_esc(sub_type)}</b> ({sub_bonus:+d}점)</div>')
@@ -144,7 +144,7 @@ def _build_tooltip_html(row, zscore_row=None):
         formula = ''
         if key == 'recent' and z5d is not None and z20d is not None:
             formula = f'(5D {z5d:+.2f} + 20D {z20d:+.2f}) / 2'
-        elif key == 'momentum' and z5d is not None:
+        elif key == 'long_divergence' and z5d is not None:
             for lp, lv in [('200D', z200d), ('100D', z100d), ('50D', z50d), ('20D', z20d)]:
                 if lv is not None:
                     formula = f'5D {z5d:+.2f} − {lp} {lv:+.2f}'
@@ -153,9 +153,9 @@ def _build_tooltip_html(row, zscore_row=None):
             formula = '가중 평균 (최근 높은 비중)'
         elif key == 'average' and zvals:
             formula = f'{len(zvals)}개 기간 단순 평균'
-        elif key == 'mid_momentum' and z5d is not None and z100d is not None:
+        elif key == 'mid_divergence' and z5d is not None and z100d is not None:
             formula = f'5D {z5d:+.2f} − 100D {z100d:+.2f}'
-        elif key == 'short_trend' and z5d is not None and z20d is not None:
+        elif key == 'short_divergence' and z5d is not None and z20d is not None:
             formula = f'5D {z5d:+.2f} − 20D {z20d:+.2f}'
 
         if w > 0:
@@ -165,7 +165,7 @@ def _build_tooltip_html(row, zscore_row=None):
                 f'{fml}'
                 f'<div class="cc-v"><b>{v:+.2f}</b> → {v*w:+.3f}</div></div>'
             )
-        elif key in ('short_trend', 'mid_momentum') and is_sustained:
+        elif key in ('short_divergence', 'mid_divergence') and is_sustained:
             return (
                 f'<div class="cc"><div class="cc-h">{label} <span class="tt-dim">×0 (지속형 제외)</span></div>'
                 f'<div class="cc-v">{v:+.2f}</div></div>'
@@ -174,9 +174,9 @@ def _build_tooltip_html(row, zscore_row=None):
 
     cards = []
     for key, label, w in [('recent', '최근수급', 0.25),
-                           ('short_trend', '단기모멘텀', weights['short_trend']),
-                           ('mid_momentum', '중기모멘텀', weights['mid_momentum']),
-                           ('momentum', '모멘텀', weights['momentum']),
+                           ('short_divergence', '단기이격', weights['short_divergence']),
+                           ('mid_divergence', '중기이격', weights['mid_divergence']),
+                           ('long_divergence', '장기이격', weights['long_divergence']),
                            ('weighted', '가중평균', 0.30),
                            ('average', '단순평균', weights['average'])]:
         c = _comp_card(label, key, w)
@@ -510,16 +510,16 @@ Z-Score 패턴의 형태에 따라 3가지 기본 패턴 + 7가지 복합 패턴
 
 | 패턴 | 조건 | 의미 | 투자 전략 |
 |------|------|------|----------|
-| **모멘텀형** | 모멘텀 > 1.0, 최근수급 > 0.5, tc ≥ 0.5 | 단기 수급이 장기 대비 급격히 강함 | 추격 매수, 단기 트레이딩 |
+| **급등형** | 장기이격 > 1.0, 최근수급 > 0.5, tc ≥ 0.5 | 단기 수급이 장기 대비 급격히 강함 | 추격 매수, 단기 트레이딩 |
 | **지속형** | 가중평균 > 0.8, 지속성 > 0.7 | 다수 기간에 걸쳐 일관된 매집 | 조정 시 분할 매수, 중장기 보유 |
-| **전환형** | 가중평균 > 0.5, 모멘텀 < 0 | 장기 매집은 있으나 최근 수급 약화 | 저점 매수 대기, 반등 시그널 확인 후 진입 |
+| **전환형** | 가중평균 > 0.5, 장기이격 < 0 | 장기 매집은 있으나 최근 수급 약화 | 저점 매수 대기, 반등 시그널 확인 후 진입 |
 | **기타** | 위 조건 모두 미충족 | 뚜렷한 수급 패턴 없음 | 관망 또는 다른 지표 참고 |
 
 **핵심 지표 설명**:
 - **최근수급** = (5D + 20D) / 2: 최근 단기 수급 강도
-- **단기모멘텀** = 5D - 20D: 1주 vs 1달 단기 방향
-- **중기모멘텀** = 5D - 100D: 1주 vs 5개월 중기 수급 개선도
-- **모멘텀** = 5D - max(200D, 100D, 50D, 20D): 단기와 장기의 차이. 양수가 클수록 최근 수급 폭발
+- **단기이격** = 5D - 20D: 1주 vs 1달 단기 방향
+- **중기이격** = 5D - 100D: 1주 vs 5개월 중기 수급 개선도
+- **장기이격** = 5D - max(200D, 100D, 50D, 20D): 단기와 장기의 차이. 양수가 클수록 최근 수급 폭발
 - **가중평균**: 7개 기간 Z-Score의 가중 평균 (최근 기간에 높은 비중)
 - **지속성**: 양수 Z-Score 기간의 비율 (0~1). 0.7이면 7개 중 5개 이상이 양수
 - **tc (Temporal Consistency)**: 인접 기간이 순서대로인 비율 (5D≥10D≥...≥500D). 1.0이면 완벽한 순서
@@ -530,21 +530,21 @@ Z-Score 패턴의 형태에 따라 3가지 기본 패턴 + 7가지 복합 패턴
 
 기본 패턴 위에 추가 한정자를 부여하여 같은 패턴 내에서도 품질 차이를 구분합니다.
 
-**모멘텀형 세부**:
+**급등형 세부**:
 
 | 복합 패턴 | 조건 | 점수 보정 | 해석 |
 |----------|------|----------|------|
 | **장기기반** | 200D > 0.3 AND 100D > 0.3 | **+5점** | 장기간 매집 위에 단기 폭발 — 가장 신뢰도 높음 |
-| **감속** | 단기모멘텀 < -0.3 | **-5점** | 모멘텀은 있으나 최근 속도 감소 중 |
+| **감속** | 단기이격 < -0.3 | **-5점** | 급등세 있으나 최근 속도 감소 중 |
 | **단기반등** | 200D < -0.3 OR 100D < -0.3 | **-8점** | 장기 매도세 속 일시적 반등 — 함정 가능성 |
 
 **지속형 세부**:
 
 | 복합 패턴 | 조건 | 점수 보정 | 해석 |
 |----------|------|----------|------|
-| **단기돌파** | 5D > 1.0 AND 단기모멘텀 > 0.5 | **+5점** | 장기 매집 중 단기 수급 돌파 — 진입 타이밍 |
+| **단기돌파** | 5D > 1.0 AND 단기이격 > 0.5 | **+5점** | 장기 매집 중 단기 수급 돌파 — 진입 타이밍 |
 | **전면수급** | 전 기간 Z > 0 AND 변동성 < 0.5 | **+3점** | 모든 기간에서 꾸준한 매수 — 안정적 |
-| **모멘텀약화** | 단기모멘텀 < -0.3 AND 5D < 20D | **-5점** | 매집은 지속되나 최근 수급 둔화 |
+| **수급약화** | 단기이격 < -0.3 AND 5D < 20D | **-5점** | 매집은 지속되나 최근 수급 둔화 |
 
 **전환형 세부**:
 
@@ -560,9 +560,9 @@ Z-Score 패턴의 형태에 따라 3가지 기본 패턴 + 7가지 복합 패턴
 기본점수 = ((가중합산Z + 3) / 6) × 100     ← Z∈[-3,3] → 점수∈[0,100]
 
 가중합산Z = 최근수급 × 0.25
-          + 단기모멘텀 × 0.10 (지속형: 0)
-          + 중기모멘텀 × 0.10 (지속형: 0)
-          + 모멘텀 × 0.15
+          + 단기이격 × 0.10 (지속형: 0)
+          + 중기이격 × 0.10 (지속형: 0)
+          + 장기이격 × 0.15
           + 가중평균 × 0.30
           + 단순평균 × 0.10 (지속형: 0.30)
 

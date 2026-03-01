@@ -41,7 +41,7 @@ class IntegratedReport:
         return {
             # 진입 포인트 규칙
             'entry_rules': {
-                '모멘텀형': {
+                '급등형': {
                     'condition': '현재가 진입 가능',
                     'description': '급상승 중, 단기 추격 매수'
                 },
@@ -61,7 +61,7 @@ class IntegratedReport:
 
             # 손절 규칙
             'stop_loss_rules': {
-                '모멘텀형': -5,    # -5% 손절
+                '급등형': -5,    # -5% 손절
                 '지속형': -10,   # -10% 손절
                 '전환형': -7,    # -7% 손절
                 '기타': -5           # -5% 손절
@@ -131,8 +131,8 @@ class IntegratedReport:
 
         # 시그널 1개 = 패턴별 전략 + 시그널 참고
         if signal_count == 1:
-            if pattern == '모멘텀형':
-                entry_point = '현재가 진입 가능 (단기 모멘텀 + 시그널 1개)'
+            if pattern == '급등형':
+                entry_point = '현재가 진입 가능 (단기이격 + 시그널 1개)'
                 stop_loss = '-5% 손절'
             elif pattern == '지속형':
                 entry_point = '현재가 또는 소폭 조정 시 진입 (시그널 1개 발생)'
@@ -178,7 +178,7 @@ class IntegratedReport:
                 - sector: 섹터
                 - pattern: 패턴명
                 - score: 패턴 강도 점수 (0~100)
-                - recent, momentum, weighted, average: 4가지 정렬 키
+                - recent, long_divergence, weighted, average: 4가지 정렬 키
                 - signal_count: 시그널 개수
                 - signal_list: 시그널 리스트
                 - entry_point: 진입 포인트
@@ -233,7 +233,7 @@ class IntegratedReport:
         # 4. 컬럼 순서 정리
         base_cols = ['stock_code', 'stock_name', 'sector']
         pattern_cols = ['pattern', 'sub_type', 'pattern_label', 'score']
-        sort_key_cols = ['recent', 'mid_momentum', 'momentum', 'weighted', 'average', 'short_trend']
+        sort_key_cols = ['recent', 'mid_divergence', 'long_divergence', 'weighted', 'average', 'short_divergence']
         feature_cols = ['temporal_consistency']
         signal_cols = ['signal_count', 'signal_list']
         action_cols = ['entry_point', 'stop_loss']
@@ -270,10 +270,10 @@ class IntegratedReport:
             pd.DataFrame: 필터링된 리포트
 
         Example:
-            >>> # 모멘텀형 + 점수 70점 이상 + 시그널 2개 이상, 상위 10개
+            >>> # 급등형 + 점수 70점 이상 + 시그널 2개 이상, 상위 10개
             >>> df_filtered = report.filter_report(
             ...     report_df,
-            ...     pattern='모멘텀형',
+            ...     pattern='급등형',
             ...     min_score=70,
             ...     min_signal_count=2,
             ...     top_n=10
@@ -359,10 +359,10 @@ class IntegratedReport:
             >>> report.print_summary_card(report_df, top_n=5)
 
             ========================================
-            [1] 232140 와이씨 (모멘텀형, 점수: 85)
+            [1] 232140 와이씨 (급등형, 점수: 85)
             ========================================
             섹터: 전기전자
-            정렬 키: Recent=0.91, Momentum=1.70, Weighted=0.52, Average=0.32
+            정렬 키: Recent=0.91, Long Divergence=1.70, Weighted=0.52, Average=0.32
             시그널: MA크로스, 가속도 1.8배 (2개)
             진입: 현재가 진입 가능 (급상승 중, 단기 추격 매수)
             손절: -5% 손절
@@ -383,8 +383,8 @@ class IntegratedReport:
                 print(f"섹터: {row['sector']}")
 
             # 정렬 키
-            if all(k in row for k in ['recent', 'momentum', 'weighted', 'average']):
-                print(f"정렬 키: Recent={row['recent']:.2f}, Momentum={row['momentum']:.2f}, "
+            if all(k in row for k in ['recent', 'long_divergence', 'weighted', 'average']):
+                print(f"정렬 키: Recent={row['recent']:.2f}, Long Divergence={row['long_divergence']:.2f}, "
                       f"Weighted={row['weighted']:.2f}, Average={row['average']:.2f}")
 
             # 시그널
@@ -423,7 +423,7 @@ class IntegratedReport:
             # 핵심 컬럼만 선택
             core_cols = ['stock_code', 'stock_name', 'sector',
                         'pattern', 'sub_type', 'pattern_label', 'score',
-                        'recent', 'momentum', 'weighted', 'average', 'short_trend',
+                        'recent', 'long_divergence', 'weighted', 'average', 'short_divergence',
                         'temporal_consistency',
                         'signal_count', 'entry_point', 'stop_loss']
 
@@ -450,16 +450,16 @@ class IntegratedReport:
         Returns:
             dict: 패턴별 관심 종목
                 {
-                    '모멘텀형': DataFrame (고점수 + 강시그널),
+                    '급등형': DataFrame (고점수 + 강시그널),
                     '지속형': DataFrame,
                     '전환형': DataFrame
                 }
 
         Example:
             >>> watchlist = report.get_watchlist(report_df, min_score=75, min_signal_count=2)
-            >>> print(watchlist['모멘텀형'][['stock_name', 'score', 'signal_count']])
+            >>> print(watchlist['급등형'][['stock_name', 'score', 'signal_count']])
         """
-        patterns = ['모멘텀형', '지속형', '전환형']
+        patterns = ['급등형', '지속형', '전환형']
         watchlist = {}
 
         for pattern in patterns:

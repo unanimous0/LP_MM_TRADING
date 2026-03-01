@@ -10,8 +10,8 @@ Usage:
     # 기본 실행 (전체 종목, 모든 패턴)
     python scripts/analysis/regime_scanner.py
 
-    # 모멘텀형 종목만, 점수 70점 이상
-    python scripts/analysis/regime_scanner.py --pattern 모멘텀형 --min-score 70
+    # 급등형 종목만, 점수 70점 이상
+    python scripts/analysis/regime_scanner.py --pattern 급등형 --min-score 70
 
     # 시그널 2개 이상, 상위 10개
     python scripts/analysis/regime_scanner.py --min-signals 2 --top 10
@@ -47,8 +47,8 @@ def main():
   # 기본 실행 (전체 종목, 모든 패턴)
   python scripts/analysis/regime_scanner.py
 
-  # 모멘텀형 종목만, 점수 70점 이상
-  python scripts/analysis/regime_scanner.py --pattern 모멘텀형 --min-score 70
+  # 급등형 종목만, 점수 70점 이상
+  python scripts/analysis/regime_scanner.py --pattern 급등형 --min-score 70
 
   # 지속형 + 시그널 2개 이상, 상위 10개
   python scripts/analysis/regime_scanner.py --pattern 지속형 --min-signals 2 --top 10
@@ -69,7 +69,7 @@ def main():
     # ============================================================================
     parser.add_argument(
         '--pattern',
-        choices=['모멘텀형', '지속형', '전환형', '기타'],
+        choices=['급등형', '지속형', '전환형', '기타'],
         help='특정 패턴만 (기본: 전체)'
     )
 

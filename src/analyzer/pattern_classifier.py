@@ -2,8 +2,8 @@
 Pattern-based classification module
 
 Implements Stage 3 pattern classification:
-- 3개 바구니 자동 분류 (모멘텀형, 지속형, 전환형)
-- 6가지 정렬 키 통합 (Recent, MidMomentum, Momentum, Weighted, Average, ShortTrend)
+- 3개 바구니 자동 분류 (급등형, 지속형, 전환형)
+- 6가지 정렬 키 통합 (Recent, MidDivergence, LongDivergence, Weighted, Average, ShortDivergence)
 - 추가 특성 추출 (변동성, 지속성, 가속도, 시간 순서 일관성)
 - 패턴 강도 점수 계산 (0~100)
 
@@ -16,10 +16,10 @@ Implements Stage 3 pattern classification:
     1. Z-Score 부호 반전 (short 방향)
     2. temporal_consistency 계산 (tanh 이전 필수 — tanh 후 0>=0 오류 방지)
     3. tanh 방향 확신도 적용
-    4. short_trend, mid_momentum 계산 (tanh 이후 — sort key와 스케일 일치)
+    4. 이격도(short/mid_divergence) 계산 (tanh 이후 — sort key와 스케일 일치)
     5. 정렬키/특성/패턴/점수 계산
     6. 원본 Z-Score 복원
-    7. short_trend, mid_momentum 재계산 (복원된 Z-Score 기준 — 출력 표시용)
+    7. 이격도(short/mid_divergence) 재계산 (복원된 Z-Score 기준 — 출력 표시용)
 """
 
 import pandas as pd
@@ -30,20 +30,20 @@ from typing import Optional, Dict, List, Tuple
 class PatternClassifier:
     """수급 패턴 분류 클래스"""
 
-    # 스코어링 개선(tc + short_trend) 이전 가중치 — use_short_trend=False 시 사용
-    # 변경 이력: momentum 0.25→0.20, average 0.20→0.10, short_trend 0.15 신규
+    # 스코어링 개선(tc + 이격도) 이전 가중치 — use_divergence=False 시 사용
+    # 변경 이력: long_divergence 0.25→0.20, average 0.20→0.10, short_divergence 0.15 신규
     _LEGACY_SCORE_WEIGHTS = {
-        'recent':      0.25,
-        'momentum':    0.25,   # short_trend 추가 이전 값
-        'weighted':    0.30,
-        'average':     0.20,   # short_trend 추가 이전 값
-        'short_trend': 0.00,
-        'mid_momentum': 0.00,  # 레거시에서는 미사용
+        'recent':           0.25,
+        'long_divergence':  0.25,   # short_divergence 추가 이전 값
+        'weighted':         0.30,
+        'average':          0.20,   # short_divergence 추가 이전 값
+        'short_divergence': 0.00,
+        'mid_divergence':   0.00,   # 레거시에서는 미사용
     }
 
     def __init__(self, config: Optional[dict] = None,
                  use_tc: bool = True,
-                 use_short_trend: bool = True):
+                 use_divergence: bool = True):
         """
         Args:
             config: 패턴 분류 설정
@@ -52,13 +52,13 @@ class PatternClassifier:
             use_tc: Temporal Consistency 적용 여부
                 True(기본): tc 임계값 조건 + tc_bonus ±10점 적용
                 False: tc 조건 무시 (스코어링 개선 이전 동작)
-            use_short_trend: Short Trend / Mid Momentum 점수 반영 여부
-                True(기본): 현재 가중치 (short_trend=0.10, mid_momentum=0.10) 사용
-                False: 레거시 가중치 사용 (short_trend=0.00, mid_momentum=0.00, 스코어링 개선 이전 동작)
+            use_divergence: 이격도(short/mid) 점수 반영 여부
+                True(기본): 현재 가중치 (short_divergence=0.10, mid_divergence=0.10) 사용
+                False: 레거시 가중치 사용 (short_divergence=0.00, mid_divergence=0.00, 이격도 도입 이전 동작)
         """
         self.config = config or self._get_default_config()
         self.use_tc = use_tc
-        self.use_short_trend = use_short_trend
+        self.use_divergence = use_divergence
 
     @staticmethod
     def _get_default_config() -> dict:
@@ -66,9 +66,9 @@ class PatternClassifier:
         return {
             # 패턴 분류 임계값
             'pattern_thresholds': {
-                # 모멘텀형: 단기 모멘텀 매우 강함
-                'momentum': {
-                    'momentum_min': 1.0,      # 5D-200D > 1.0
+                # 급등형: 장기이격 매우 강함
+                'surge': {
+                    'long_divergence_min': 1.0,      # 5D-200D > 1.0
                     'recent_min': 0.5,        # (5D+20D)/2 > 0.5
                     'temporal_consistency_min': 0.5,  # 6쌍 중 ≥3쌍 순서 일치
                 },
@@ -83,16 +83,16 @@ class PatternClassifier:
                 # 전환형: 추세 약화, 반대 방향 전환 대기
                 'reversal': {
                     'weighted_min': 0.5,      # 가중 평균 > 0.5
-                    'momentum_max': 0,        # 5D-200D < 0 (최근 약화)
+                    'long_divergence_max': 0,  # 5D-200D < 0 (최근 약화)
                 }
             },
 
             # 점수 계산 가중치 (합계 = 1.00)
             'score_weights': {
                 'recent': 0.25,        # 현재 강도 (유지)
-                'short_trend': 0.10,   # 단기 모멘텀 방향 (5D-20D, 0.15→0.10 mid_momentum이 중기 역할 분담)
-                'mid_momentum': 0.10,  # 중기 모멘텀 (5D-100D, 신규)
-                'momentum': 0.15,      # 장기 개선도 (0.20→0.15, mid_momentum과 정보 중복 경감)
+                'short_divergence': 0.10,   # 단기이격 (5D-20D, 0.15→0.10 mid_divergence이 중기 역할 분담)
+                'mid_divergence': 0.10,    # 중기이격 (5D-100D)
+                'long_divergence': 0.15,   # 장기이격 (5D-200D, 0.20→0.15 mid_divergence과 정보 중복 경감)
                 'weighted': 0.30,      # 중장기 트렌드 (유지)
                 'average': 0.10,       # 전체 일관성 (유지)
             },
@@ -108,12 +108,12 @@ class PatternClassifier:
                 'long_base_200d': 0.3,          # ① 장기기반: 200D 최소값
                 'long_base_100d': 0.3,          # ① 장기기반: 100D 최소값
                 'breakout_5d': 1.0,             # ② 단기돌파: 5D 최소값
-                'breakout_short_trend': 0.5,    # ② 단기돌파: short_trend 최소값
+                'breakout_short_divergence': 0.5,    # ② 단기돌파: short_divergence 최소값
                 'v_bounce_5d': 1.0,             # ③ V자반등: 5D 최소값
                 'v_bounce_recent': 0.5,         # ③ V자반등: recent 최소값
                 'uniform_std_max': 0.5,         # ④ 전면수급: 5D~200D std 최대값
-                'weakening_short_trend': -0.3,  # ⑤ 모멘텀약화: short_trend 최대값
-                'decel_short_trend': -0.3,      # ⑥ 감속: short_trend 최대값
+                'weakening_short_divergence': -0.3,  # ⑤ 수급약화: short_divergence 최대값
+                'decel_short_divergence': -0.3,      # ⑥ 감속: short_divergence 최대값
                 'dead_cat_long_z': -0.3,        # ⑦ 단기반등: 200D/100D 최대값
             },
 
@@ -123,7 +123,7 @@ class PatternClassifier:
                 '단기돌파': 5,
                 'V자반등': 3,
                 '전면수급': 3,
-                '모멘텀약화': -5,
+                '수급약화': -5,
                 '감속': -5,
                 '단기반등': -8,
             },
@@ -179,8 +179,8 @@ class PatternClassifier:
         Returns:
             pd.DataFrame: 5가지 정렬 키 추가
                 - recent: (5D+20D)/2 - 현재 강도
-                - mid_momentum: 5D-100D - 중기 수급 개선도
-                - momentum: 5D-200D - 장기 수급 개선도
+                - mid_divergence: 5D-100D - 중기이격
+                - long_divergence: 5D-200D - 장기이격
                 - weighted: 가중 평균 - 중장기 트렌드
                 - average: 단순 평균 - 전체 일관성
         """
@@ -194,19 +194,19 @@ class PatternClassifier:
         # 1. Recent: (5D+20D)/2
         df['recent'] = (df['5D'] + df['20D']) / 2
 
-        # 2. Momentum: 5D - 가장 긴 유효 기간 (200D→100D→50D→20D 순서 폴백)
-        # 500D는 참고용 — 모멘텀 계산에서 제외 (장기 기준 = 200D/100D)
+        # 2. Long Divergence: 5D - 가장 긴 유효 기간 (200D→100D→50D→20D 순서 폴백)
+        # 500D는 참고용 — 이격도 계산에서 제외 (장기 기준 = 200D/100D)
         # 백테스트 초기처럼 DB 데이터 부족 시 긴 기간이 NaN일 수 있으므로 폴백 적용
         _longest = (df['200D']
                     .fillna(df['100D'])
                     .fillna(df['50D'])
                     .fillna(df['20D']))
-        df['momentum'] = df['5D'] - _longest
+        df['long_divergence'] = df['5D'] - _longest
 
-        # 2.5. Mid Momentum: 5D - 100D (중기 수급 개선도)
+        # 2.5. Mid Divergence: 5D - 100D (중기이격)
         # 100D가 NaN이면 50D로 폴백 (데이터 부족 시)
         _mid = df['100D'].fillna(df['50D'])
-        df['mid_momentum'] = df['5D'] - _mid
+        df['mid_divergence'] = df['5D'] - _mid
 
         # 3. Weighted: NaN-robust 가중 평균 (데이터 없는 기간 자동 제외)
         # 백테스트 초기에 200D/500D가 NaN이어도 사용 가능한 기간으로 계산
@@ -225,21 +225,21 @@ class PatternClassifier:
         패턴 분류 규칙 적용
 
         Args:
-            row: 종목별 데이터 행 (recent, momentum, weighted, persistence 포함)
+            row: 종목별 데이터 행 (recent, long_divergence, weighted, persistence 포함)
 
         Returns:
-            str: 패턴명 ('모멘텀형', '지속형', '전환형', '기타')
+            str: 패턴명 ('급등형', '지속형', '전환형', '기타')
 
         Rules:
-            1. 모멘텀형: momentum > 1.0 AND recent > 0.5
-               → 단기 모멘텀 매우 강함 (추격 매수)
+            1. 급등형: long_divergence > 1.0 AND recent > 0.5
+               → 장기이격 매우 강함 (추격 매수)
                → 매수: 급상승 중, 단기 추격 전략
 
             2. 지속형: weighted > 0.8 AND persistence > 0.7
                → 장기간 일관된 추세 (조정 후 진입)
                → 매수: 장기 매집, 5~10% 조정 시 분할 매수
 
-            3. 전환형: weighted > 0.5 AND momentum < 0
+            3. 전환형: weighted > 0.5 AND long_divergence < 0
                → 추세 약화, 반대 방향 전환 대기
                → 매수: 고점에서 조정 중, 저점 매수 대기 (반등 시그널 확인)
                → 매도(미래): 저점에서 반등 중, 고점 매도 대기 (조정 시그널 확인)
@@ -250,15 +250,15 @@ class PatternClassifier:
         tc = row.get('temporal_consistency', 0.5)
         tc = tc if pd.notna(tc) else 0.5
 
-        # Pattern 1: 모멘텀형
+        # Pattern 1: 급등형
         # use_tc=False이면 tc 임계값 조건을 무시 (스코어링 개선 이전 동작)
-        tc_ok_momentum = (not self.use_tc) or (
-            tc >= thresholds['momentum'].get('temporal_consistency_min', 0.0)
+        tc_ok_surge = (not self.use_tc) or (
+            tc >= thresholds['surge'].get('temporal_consistency_min', 0.0)
         )
-        if (row['momentum'] > thresholds['momentum']['momentum_min'] and
-            row['recent'] > thresholds['momentum']['recent_min'] and
-            tc_ok_momentum):
-            return '모멘텀형'
+        if (row['long_divergence'] > thresholds['surge']['long_divergence_min'] and
+            row['recent'] > thresholds['surge']['recent_min'] and
+            tc_ok_surge):
+            return '급등형'
 
         # Pattern 2: 지속형
         # 지속형은 tc_min=0.0 (항상 통과) → use_tc 토글 무관
@@ -269,7 +269,7 @@ class PatternClassifier:
 
         # Pattern 3: 전환형
         if (row['weighted'] > thresholds['reversal']['weighted_min'] and
-            row['momentum'] < thresholds['reversal']['momentum_max']):
+            row['long_divergence'] < thresholds['reversal']['long_divergence_max']):
             return '전환형'
 
         # Pattern 4: 기타
@@ -280,7 +280,7 @@ class PatternClassifier:
         패턴 강도 점수 계산 (0~100)
 
         Args:
-            row: 종목별 데이터 행 (recent, momentum, weighted, average, short_trend,
+            row: 종목별 데이터 행 (recent, long_divergence, weighted, average, short_divergence,
                  temporal_consistency, pattern 포함)
 
         Returns:
@@ -289,29 +289,29 @@ class PatternClassifier:
         Formula:
             Score = Σ(정렬키 × 패턴별 가중치) × 정규화 계수
             - Z-Score 범위 [-3, 3]을 [0, 100]으로 변환
-            - 지속형은 short_trend 제외 (가중치 0, average로 흡수)
+            - 지속형은 short_divergence 제외 (가중치 0, average로 흡수)
             - 지속형은 tc_bonus 없음 (tc=0.0이 정상 패턴이므로 페널티 부적절)
-            - 모멘텀형/전환형/기타: tc_bonus ±10점 적용
+            - 급등형/전환형/기타: tc_bonus ±10점 적용
 
         Pattern-aware weights:
-            지속형: short_trend 가중치=0 (average로 재분배)
+            지속형: short_divergence 가중치=0 (average로 재분배)
             기타 패턴: 설정값 그대로 사용
         """
-        # use_short_trend=False → 레거시 가중치 (short_trend 도입 이전)
-        # use_short_trend=True  → 현재 가중치 (short_trend=0.15 포함)
-        weights = self.config['score_weights'] if self.use_short_trend else self._LEGACY_SCORE_WEIGHTS
+        # use_divergence=False → 레거시 가중치 (이격도 도입 이전)
+        # use_divergence=True  → 현재 가중치 (이격도 포함)
+        weights = self.config['score_weights'] if self.use_divergence else self._LEGACY_SCORE_WEIGHTS
 
         # 패턴별 가중치 조정
         # 지속형: 이상적 패턴이 5D<10D<...<500D (장기>단기)이므로
-        #   short_trend(=5D-20D)/mid_momentum(=5D-100D)가 음수가 정상 → 패널티 방지를 위해 가중치 0으로 설정
+        #   short_divergence(=5D-20D)/mid_divergence(=5D-100D)가 음수가 정상 → 패널티 방지를 위해 가중치 0으로 설정
         #   해제된 가중치는 average로 재분배하여 total_w=1.0 유지
         pattern = row.get('pattern', '')
         if pattern == '지속형':
-            st_w = weights.get('short_trend', 0)
-            mm_w = weights.get('mid_momentum', 0)
+            st_w = weights.get('short_divergence', 0)
+            mm_w = weights.get('mid_divergence', 0)
             effective_weights = dict(weights)
-            effective_weights['short_trend'] = 0.0
-            effective_weights['mid_momentum'] = 0.0
+            effective_weights['short_divergence'] = 0.0
+            effective_weights['mid_divergence'] = 0.0
             effective_weights['average'] = weights.get('average', 0) + st_w + mm_w
         else:
             effective_weights = weights
@@ -319,11 +319,11 @@ class PatternClassifier:
         # NaN-robust 가중 합계 계산 (데이터 부족 기간 대응)
         components = [
             (row['recent'],                          effective_weights['recent']),
-            (row.get('mid_momentum', np.nan),        effective_weights.get('mid_momentum', 0)),
-            (row['momentum'],                        effective_weights['momentum']),
+            (row.get('mid_divergence', np.nan),        effective_weights.get('mid_divergence', 0)),
+            (row['long_divergence'],                  effective_weights['long_divergence']),
             (row['weighted'],                        effective_weights['weighted']),
             (row['average'],                         effective_weights['average']),
-            (row.get('short_trend', np.nan),         effective_weights.get('short_trend', 0)),
+            (row.get('short_divergence', np.nan),         effective_weights.get('short_divergence', 0)),
         ]
         valid = [(v, w) for v, w in components if pd.notna(v) and w > 0]
         if not valid:
@@ -341,7 +341,7 @@ class PatternClassifier:
 
         # Temporal consistency 보너스: ±10점 (지속형 제외, use_tc=True일 때만)
         # 지속형은 tc=0.0(장기>단기)이 이상적이므로 tc 보너스 부적절
-        # 모멘텀형/전환형/기타: tc=1.0 → +10점, tc=0.5 → 0점, tc=0.0 → -10점
+        # 급등형/전환형/기타: tc=1.0 → +10점, tc=0.5 → 0점, tc=0.0 → -10점
         # use_tc=False이면 보너스 미적용 (스코어링 개선 이전 동작)
         if self.use_tc and pattern != '지속형':
             tc = row.get('temporal_consistency', 0.5)
@@ -390,11 +390,11 @@ class PatternClassifier:
         """
         복합 패턴 sub_type 판정
 
-        기본 패턴(모멘텀형/지속형/전환형) 위에 추가 한정자를 부여한다.
+        기본 패턴(급등형/지속형/전환형) 위에 추가 한정자를 부여한다.
         위험 패턴을 먼저 체크 (단기반등 → 감속 → 장기기반 순서).
 
         Args:
-            pattern: 기본 패턴 문자열 ('모멘텀형', '지속형', '전환형', '기타')
+            pattern: 기본 패턴 문자열 ('급등형', '지속형', '전환형', '기타')
             row: Z-Score/feature 행 (5D~500D + sort keys + features)
             config: sub_type_thresholds 포함 설정 딕셔너리
 
@@ -409,7 +409,7 @@ class PatternClassifier:
             v = row.get(key, default)
             return v if pd.notna(v) else default
 
-        if pattern == '모멘텀형':
+        if pattern == '급등형':
             # ⑦ 단기반등 (위험 먼저): 장기 매도 속 단기 반등 함정
             z200 = _get('200D', 0.0)
             z100 = _get('100D', 0.0)
@@ -417,8 +417,8 @@ class PatternClassifier:
                 return '단기반등'
 
             # ⑥ 감속: 모멘텀 피크아웃
-            st = _get('short_trend', 0.0)
-            if st < th.get('decel_short_trend', -0.3):
+            st = _get('short_divergence', 0.0)
+            if st < th.get('decel_short_divergence', -0.3):
                 return '감속'
 
             # ① 장기기반: 장기매집 위에 단기폭발
@@ -430,8 +430,8 @@ class PatternClassifier:
         elif pattern == '지속형':
             # ② 단기돌파: 매집→돌파 시작
             z5 = _get('5D', 0.0)
-            st = _get('short_trend', 0.0)
-            if z5 > th.get('breakout_5d', 1.0) and st > th.get('breakout_short_trend', 0.5):
+            st = _get('short_divergence', 0.0)
+            if z5 > th.get('breakout_5d', 1.0) and st > th.get('breakout_short_divergence', 0.5):
                 return '단기돌파'
 
             # ④ 전면수급: 5D~200D 모두 양수 & 표준편차 낮음
@@ -442,10 +442,10 @@ class PatternClassifier:
                 if np.std(valid_vals) < th.get('uniform_std_max', 0.5):
                     return '전면수급'
 
-            # ⑤ 모멘텀약화: 매집세 약화 중
+            # ⑤ 수급약화: 매집세 약화 중
             z20 = _get('20D', 0.0)
-            if st < th.get('weakening_short_trend', -0.3) and z5 < z20:
-                return '모멘텀약화'
+            if st < th.get('weakening_short_divergence', -0.3) and z5 < z20:
+                return '수급약화'
 
             return None
 
@@ -528,20 +528,20 @@ class PatternClassifier:
             pd.DataFrame: 패턴 분류 결과
                 - stock_code: 종목코드
                 - 5D~500D: 7개 기간 Z-Score (원본 값, 출력용)
-                - recent, mid_momentum, momentum, weighted, average, short_trend: 6가지 정렬 키
+                - recent, mid_divergence, long_divergence, weighted, average, short_divergence: 6가지 정렬 키
                 - volatility, persistence, sl_ratio, temporal_consistency: 추가 특성
-                - pattern: 패턴명 (모멘텀형/지속형/전환형/기타)
+                - pattern: 패턴명 (급등형/지속형/전환형/기타)
                 - score: 패턴 강도 점수 (0~100)
                 - direction: 'long' 또는 'short'
 
         Note:
             - direction='long': 양수 Z-Score 분석 (순매수)
             - direction='short': 음수 Z-Score 분석 (순매도)
-            - 패턴 이름은 방향과 무관하게 동일 (모멘텀형/지속형/전환형)
+            - 패턴 이름은 방향과 무관하게 동일 (급등형/지속형/전환형)
             - short일 때 Z-Score 부호 반전하여 분석
             - temporal_consistency: tanh 이전 계산 (0>=0 오류 방지)
-            - short_trend, mid_momentum: tanh 이후 계산 (sort key와 스케일 일치)
-            - 출력 short_trend, mid_momentum: 원본 Z-Score 복원 후 재계산 (표시 일관성)
+            - short_divergence, mid_divergence: tanh 이후 계산 (sort key와 스케일 일치)
+            - 출력 short_divergence, mid_divergence: 원본 Z-Score 복원 후 재계산 (표시 일관성)
 
         Example:
             >>> classifier = PatternClassifier()
@@ -575,19 +575,19 @@ class PatternClassifier:
         # confidence = tanh(today_sff / rolling_std)로 실제 수급 방향을 반영
         df = self._apply_direction_confidence(df, direction)
 
-        # [short_trend, mid_momentum] — tanh 적용 후에 계산 (중요!)
-        # recent/momentum/weighted/average와 동일한 post-tanh 스케일을 사용해야
+        # [short_divergence, mid_divergence] — tanh 적용 후에 계산 (중요!)
+        # recent/long_divergence/weighted/average와 동일한 post-tanh 스케일을 사용해야
         # 점수 계산 시 가중치가 의도한 비율로 반영됨 (pre-tanh 값은 스케일이 다름)
         if '5D' in df.columns and '20D' in df.columns:
-            df['short_trend'] = df['5D'] - df['20D']
+            df['short_divergence'] = df['5D'] - df['20D']
         else:
-            df['short_trend'] = np.nan
+            df['short_divergence'] = np.nan
 
-        # mid_momentum: 5D - 100D (중기 수급 개선도)
+        # mid_divergence: 5D - 100D (중기 수급 개선도)
         if '5D' in df.columns and '100D' in df.columns:
-            df['mid_momentum'] = df['5D'] - df['100D']
+            df['mid_divergence'] = df['5D'] - df['100D']
         else:
-            df['mid_momentum'] = np.nan
+            df['mid_divergence'] = np.nan
 
         # 1. 5가지 정렬 키 계산
         df = self.calculate_sort_keys(df)
@@ -630,20 +630,20 @@ class PatternClassifier:
         for col, original in original_zscores.items():
             df[col] = original
 
-        # 출력용 short_trend/mid_momentum 재계산: 복원된 원본 Z-Score 기준 (표시 일관성, Fix #3)
+        # 출력용 short_divergence/mid_divergence 재계산: 복원된 원본 Z-Score 기준 (표시 일관성, Fix #3)
         # 분류/점수는 이미 post-tanh 값으로 계산 완료 → 이 재계산은 출력 컬럼 전용
         if '5D' in df.columns and '20D' in df.columns:
-            df['short_trend'] = df['5D'] - df['20D']
+            df['short_divergence'] = df['5D'] - df['20D']
         if '5D' in df.columns:
             _mid_out = df.get('100D', pd.Series(np.nan, index=df.index))
             if '50D' in df.columns:
                 _mid_out = _mid_out.fillna(df['50D'])
-            df['mid_momentum'] = df['5D'] - _mid_out
+            df['mid_divergence'] = df['5D'] - _mid_out
 
         # 6. 컬럼 순서 정리
         base_cols = ['stock_code']
         period_cols = ['5D', '10D', '20D', '50D', '100D', '200D', '500D']
-        sort_key_cols = ['recent', 'mid_momentum', 'momentum', 'weighted', 'average', 'short_trend']
+        sort_key_cols = ['recent', 'mid_divergence', 'long_divergence', 'weighted', 'average', 'short_divergence']
         feature_cols = ['volatility', 'persistence', 'sl_ratio', 'temporal_consistency']
         result_cols = ['pattern', 'sub_type', 'pattern_label', 'score', 'direction']
 
@@ -664,7 +664,7 @@ class PatternClassifier:
 
         Returns:
             dict: 패턴별 종목 수
-                {'모멘텀형': 12, '지속형': 45, '전환형': 33, '기타': 255}
+                {'급등형': 12, '지속형': 45, '전환형': 33, '기타': 255}
         """
         return classified_df['pattern'].value_counts().to_dict()
 
@@ -678,7 +678,7 @@ class PatternClassifier:
 
         Args:
             classified_df: classify_all() 결과
-            pattern: 패턴명 ('모멘텀형', '지속형', '전환형', '기타')
+            pattern: 패턴명 ('급등형', '지속형', '전환형', '기타')
             min_score: 최소 점수 (0~100)
             top_n: 상위 N개만 반환 (None이면 전체)
 
@@ -686,9 +686,9 @@ class PatternClassifier:
             pd.DataFrame: 필터링된 결과 (점수 내림차순 정렬)
 
         Example:
-            >>> # 모멘텀형 중 점수 70점 이상, 상위 10개
-            >>> df_momentum = classifier.filter_by_pattern(
-            ...     classified_df, '모멘텀형', min_score=70, top_n=10
+            >>> # 급등형 중 점수 70점 이상, 상위 10개
+            >>> df_surge = classifier.filter_by_pattern(
+            ...     classified_df, '급등형', min_score=70, top_n=10
             ... )
         """
         # 패턴 필터링
@@ -719,16 +719,16 @@ class PatternClassifier:
         Returns:
             dict: 패턴별 베스트 픽
                 {
-                    '모멘텀형': DataFrame (top 10),
+                    '급등형': DataFrame (top 10),
                     '지속형': DataFrame (top 10),
                     '전환형': DataFrame (top 10)
                 }
 
         Example:
             >>> top_picks = classifier.get_top_picks(classified_df, top_n_per_pattern=10)
-            >>> print(top_picks['모멘텀형'][['stock_code', 'score']])
+            >>> print(top_picks['급등형'][['stock_code', 'score']])
         """
-        patterns = ['모멘텀형', '지속형', '전환형']
+        patterns = ['급등형', '지속형', '전환형']
         result = {}
 
         for pattern in patterns:

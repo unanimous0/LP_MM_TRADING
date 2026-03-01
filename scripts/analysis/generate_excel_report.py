@@ -149,8 +149,8 @@ def create_glossary_sheet(writer, signal_bonus: int):
 
         # 패턴 분류 (가로 3열 배치)
         ['■ 패턴 분류 (3가지 유형)', '', '', '', ''],
-        ['', '🔥 모멘텀형', '📈 지속형', '🔄 전환형', ''],
-        ['특징', '단기 모멘텀이 매우 강한 종목', '장기간 일관된 상승 추세 종목', '과거 강했으나 최근 약화 → 전환 대기', ''],
+        ['', '🔥 급등형', '📈 지속형', '🔄 전환형', ''],
+        ['특징', '단기 수급이 급등하는 종목', '장기간 일관된 상승 추세 종목', '과거 강했으나 최근 약화 → 전환 대기', ''],
         ['조건', '5D-200D > 1.0 AND (5D+20D)/2 > 0.5', '가중평균 > 0.8 AND 양수 기간 > 70%', '가중평균 > 0.5 AND 5D-200D < 0', ''],
         ['투자 스타일', '단기 트레이딩, 돌파 매매', '중장기 추세 추종, 포지션 트레이딩', '저가 매수 기회 포착, 역추세 매매', ''],
         ['위험도', '높음 (변동성 큼, 손절 엄격 필요)', '중간 (안정적 상승, 장기 보유 가능)', '높음 (추세 전환 실패 가능성, 신중 진입)', ''],
@@ -306,11 +306,11 @@ def create_excel_report(csv_path: str, output_path: str, signal_bonus: int = 5):
         # ========================================
         df_score = df.nlargest(30, 'score')[[
             'stock_code', 'stock_name', 'sector', 'pattern',
-            'score', 'signal_count', 'recent', 'momentum', 'weighted', 'average'
+            'score', 'signal_count', 'recent', 'long_divergence', 'weighted', 'average'
         ]].copy()
 
         df_score.columns = ['종목코드', '종목명', '섹터', '패턴',
-                           '점수', '시그널', 'Recent', 'Momentum', 'Weighted', 'Average']
+                           '점수', '시그널', 'Recent', 'Long Divergence', 'Weighted', 'Average']
         df_score.insert(0, '순위', range(1, len(df_score) + 1))
 
         df_score.to_excel(writer, sheet_name='2.점수순위', index=False)
@@ -336,7 +336,7 @@ def create_excel_report(csv_path: str, output_path: str, signal_bonus: int = 5):
         # ========================================
         # 시트 4: 패턴별 순위
         # ========================================
-        patterns = ['모멘텀형', '지속형', '전환형']
+        patterns = ['급등형', '지속형', '전환형']
         df_patterns_list = []
 
         for pattern in patterns:
@@ -470,7 +470,7 @@ def create_excel_report(csv_path: str, output_path: str, signal_bonus: int = 5):
             'pattern': '패턴',
             'score': '점수',
             'recent': 'Recent',
-            'momentum': 'Momentum',
+            'long_divergence': 'Long Divergence',
             'weighted': 'Weighted',
             'average': 'Average',
             'signal_count': '시그널',

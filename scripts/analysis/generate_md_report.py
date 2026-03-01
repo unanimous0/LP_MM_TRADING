@@ -84,7 +84,7 @@ def generate_markdown_content(df, signal_bonus):
 | 항목 | 값 |
 |------|-----|
 | 전체 종목 수 | {len(df):,}개 |
-| 모멘텀형 | {len(df[df['pattern']=='모멘텀형']):,}개 |
+| 급등형 | {len(df[df['pattern']=='급등형']):,}개 |
 | 지속형 | {len(df[df['pattern']=='지속형']):,}개 |
 | 전환형 | {len(df[df['pattern']=='전환형']):,}개 |
 | 평균 종합점수 | {df['combined_score'].mean():.1f}점 |
@@ -101,7 +101,7 @@ def generate_markdown_content(df, signal_bonus):
 """
 
     for idx, (_, row) in enumerate(df_final.iterrows(), 1):
-        pattern_emoji = {'모멘텀형': '🔥', '지속형': '📈', '전환형': '🔄'}.get(row['pattern'], '❓')
+        pattern_emoji = {'급등형': '🔥', '지속형': '📈', '전환형': '🔄'}.get(row['pattern'], '❓')
         signal_list = row['signal_list'] if pd.notna(row['signal_list']) else '-'
 
         md += f"| {idx} | `{row['stock_code']}` | **{row['stock_name']}** | {row['sector']} | {pattern_emoji} {row['pattern']} | {row['score']:.1f} | {int(row['signal_count'])} | **{row['combined_score']:.1f}** | {signal_list} |\n"
@@ -116,14 +116,14 @@ def generate_markdown_content(df, signal_bonus):
 """
 
     for _, row in pattern_stats.iterrows():
-        pattern_emoji = {'모멘텀형': '🔥', '지속형': '📈', '전환형': '🔄'}.get(row['pattern'], '❓')
+        pattern_emoji = {'급등형': '🔥', '지속형': '📈', '전환형': '🔄'}.get(row['pattern'], '❓')
         md += f"| {pattern_emoji} {row['pattern']} | {int(row['stock_code']):,}개 | {row['combined_score']:.1f}점 | {row['signal_count']:.2f}개 |\n"
 
     md += f"""
 ### 패턴별 특징
 
-#### 🔥 모멘텀형 (Momentum Pattern)
-- **특징**: 단기 모멘텀이 매우 강한 종목 (1주일 전환점 포착)
+#### 🔥 급등형 (Surge Pattern)
+- **특징**: 단기 수급이 급등하는 종목 (1주일 전환점 포착)
 - **조건**: 5D-200D > 1.0 AND (5D+20D)/2 > 0.5
 - **투자 스타일**: 단기 트레이딩, 돌파 매매
 - **위험도**: ⚠️ 높음 (변동성 큼, 손절 엄격 필요)
@@ -165,7 +165,7 @@ def generate_markdown_content(df, signal_bonus):
         md += "|--------|:----:|---------:|-----------|\n"
 
         for _, stock in sector_stocks.iterrows():
-            pattern_emoji = {'모멘텀형': '🔥', '지속형': '📈', '전환형': '🔄'}.get(stock['pattern'], '❓')
+            pattern_emoji = {'급등형': '🔥', '지속형': '📈', '전환형': '🔄'}.get(stock['pattern'], '❓')
             signal_list = stock['signal_list'] if pd.notna(stock['signal_list']) else '-'
             md += f"| **{stock['stock_name']}** | {pattern_emoji} {stock['pattern']} | {stock['combined_score']:.1f} | {signal_list} |\n"
 
@@ -204,7 +204,7 @@ Z-Score = (현재값 - 60일 평균) / 60일 표준편차
 | 메트릭 | 계산식 | 의미 | 활용 |
 |--------|--------|------|------|
 | **Recent** | (5D + 20D) / 2 | 최근 5~20일 수급 강도의 평균 | 현재 진행형 매수세 파악 |
-| **Momentum** | 5D - 200D | 단기(5일) vs 장기(200일) 수급 격차 | 전환점 포착, 수급 개선도 |
+| **Long Divergence** | 5D - 200D | 단기(5일) vs 장기(200일) 수급 격차 | 전환점 포착, 수급 개선도 |
 | **Weighted** | 5D×3.5 + 10D×3.0 + ... | 최근에 높은 가중치를 부여한 트렌드 | 중장기 추세 방향 판단 |
 | **Average** | (5D + 10D + ... + 500D) / 7 | 전체 기간의 단순 평균 | 일관된 수급 파악 |
 

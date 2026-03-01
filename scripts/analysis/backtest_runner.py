@@ -11,7 +11,7 @@ Usage:
     python scripts/analysis/backtest_runner.py --start 2024-01-02 --end 2026-01-20
 
     # 특정 패턴만
-    python scripts/analysis/backtest_runner.py --pattern 모멘텀형
+    python scripts/analysis/backtest_runner.py --pattern 급등형
 
     # 차트 생성 (화면 표시)
     python scripts/analysis/backtest_runner.py --plot
@@ -172,7 +172,7 @@ def run_walk_forward(args):
         max_hold_days=args.max_days,
         force_exit_on_end=False,
         use_tc=not args.no_tc,
-        use_short_trend=not args.no_short_trend,
+        use_divergence=not args.no_divergence,
     )
     analyzer = WalkForwardAnalyzer(
         db_path=str(project_root / DB_PATH),
@@ -200,7 +200,7 @@ def run_optimization(args):
         max_hold_days=args.max_days,
         force_exit_on_end=False,
         use_tc=not args.no_tc,
-        use_short_trend=not args.no_short_trend,
+        use_divergence=not args.no_divergence,
     )
 
     optimizer = OptunaOptimizer(
@@ -239,8 +239,8 @@ def main():
   # 전체 기간
   python scripts/analysis/backtest_runner.py --start 2024-01-02 --end 2026-01-20
 
-  # 모멘텀형 종목만
-  python scripts/analysis/backtest_runner.py --pattern 모멘텀형
+  # 급등형 종목만
+  python scripts/analysis/backtest_runner.py --pattern 급등형
 
   # 숏 전략 (순매도)
   python scripts/analysis/backtest_runner.py --strategy short
@@ -296,7 +296,7 @@ def main():
     parser.add_argument('--max-positions', type=int, default=5, help='최대 동시 보유 종목 수')
 
     # 패턴 필터링
-    parser.add_argument('--pattern', choices=['모멘텀형', '지속형', '전환형', '기타'],
+    parser.add_argument('--pattern', choices=['급등형', '지속형', '전환형', '기타'],
                         help='특정 패턴만 (기본: 전체)')
 
     # 전략 방향
@@ -306,8 +306,8 @@ def main():
     # 스코어링 버전 (2026-02-25 개선 항목 개별 토글)
     parser.add_argument('--no-tc', action='store_true',
                         help='Temporal Consistency 비활성화 (use_tc=False)')
-    parser.add_argument('--no-short-trend', action='store_true',
-                        help='Short Trend 비활성화 (use_short_trend=False)')
+    parser.add_argument('--no-divergence', action='store_true',
+                        help='Divergence 비활성화 (use_divergence=False)')
 
     # 출력 설정
     parser.add_argument('--save-csv', help='거래 내역 CSV 저장 경로')
@@ -373,7 +373,7 @@ def main():
         strategy=args.strategy,
         force_exit_on_end=False,
         use_tc=not args.no_tc,
-        use_short_trend=not args.no_short_trend,
+        use_divergence=not args.no_divergence,
     )
 
     # 데이터베이스 연결

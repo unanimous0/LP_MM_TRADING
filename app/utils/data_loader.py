@@ -357,7 +357,7 @@ def run_backtest(
     slippage_rate: float = 0.001,
     borrowing_rate: float = 0.03,
     use_tc: bool = True,
-    use_short_trend: bool = True,
+    use_divergence: bool = True,
 ) -> Dict:
     """
     백테스트 실행 (캐싱)
@@ -386,7 +386,7 @@ def run_backtest(
         institution_weight=institution_weight,
         force_exit_on_end=True,
         use_tc=use_tc,
-        use_short_trend=use_short_trend,
+        use_divergence=use_divergence,
         tax_rate=tax_rate,
         commission_rate=commission_rate,
         slippage_rate=slippage_rate,
@@ -411,7 +411,15 @@ def run_backtest(
             'target_return': config.target_return,
             'stop_loss': config.stop_loss,
             'max_hold_days': config.max_hold_days,
+            'reverse_signal_threshold': config.reverse_signal_threshold,
             'strategy': config.strategy,
+            'institution_weight': config.institution_weight,
+            'use_tc': config.use_tc,
+            'use_divergence': config.use_divergence,
+            'tax_rate': config.tax_rate,
+            'commission_rate': config.commission_rate,
+            'slippage_rate': config.slippage_rate,
+            'borrowing_rate': config.borrowing_rate,
         },
         'initial_capital': config.initial_capital,
     }
@@ -454,7 +462,7 @@ def run_backtest_with_progress(
     slippage_rate: float = 0.001,
     borrowing_rate: float = 0.03,
     use_tc: bool = True,
-    use_short_trend: bool = True,
+    use_divergence: bool = True,
 ) -> Dict:
     """백테스트 실행 (캐시 없음, progress_callback 지원)"""
     conn = get_db_connection()
@@ -472,7 +480,7 @@ def run_backtest_with_progress(
         institution_weight=institution_weight,
         force_exit_on_end=True,
         use_tc=use_tc,
-        use_short_trend=use_short_trend,
+        use_divergence=use_divergence,
         tax_rate=tax_rate,
         commission_rate=commission_rate,
         slippage_rate=slippage_rate,
@@ -496,7 +504,15 @@ def run_backtest_with_progress(
             'target_return': config.target_return,
             'stop_loss': config.stop_loss,
             'max_hold_days': config.max_hold_days,
+            'reverse_signal_threshold': config.reverse_signal_threshold,
             'strategy': config.strategy,
+            'institution_weight': config.institution_weight,
+            'use_tc': config.use_tc,
+            'use_divergence': config.use_divergence,
+            'tax_rate': config.tax_rate,
+            'commission_rate': config.commission_rate,
+            'slippage_rate': config.slippage_rate,
+            'borrowing_rate': config.borrowing_rate,
         },
         'initial_capital': config.initial_capital,
     }
@@ -547,7 +563,7 @@ def run_optuna_optimization(
     slippage_rate: float = 0.001,
     borrowing_rate: float = 0.03,
     use_tc: bool = True,
-    use_short_trend: bool = True,
+    use_divergence: bool = True,
 ) -> Optional[Dict]:
     """
     Optuna Persistent Bayesian Optimization 실행
@@ -577,7 +593,7 @@ def run_optuna_optimization(
         institution_weight=institution_weight,
         force_exit_on_end=True,
         use_tc=use_tc,
-        use_short_trend=use_short_trend,
+        use_divergence=use_divergence,
         tax_rate=tax_rate,
         commission_rate=commission_rate,
         slippage_rate=slippage_rate,

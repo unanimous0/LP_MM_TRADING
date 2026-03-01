@@ -21,7 +21,7 @@ class TestTrade:
             exit_date='2024-01-10',
             exit_price=77000,
             shares=100,
-            pattern='모멘텀형',
+            pattern='급등형',
             score=85.5,
             signal_count=2,
             return_pct=10.0,
@@ -45,7 +45,7 @@ class TestTrade:
             exit_date='2024-01-10',
             exit_price=77000,
             shares=100,
-            pattern='모멘텀형',
+            pattern='급등형',
             score=85.5,
             signal_count=2,
             return_pct=10.0,
@@ -70,7 +70,7 @@ class TestPosition:
             entry_date='2024-01-02',
             entry_price=70000,
             shares=100,
-            pattern='모멘텀형',
+            pattern='급등형',
             score=85.5,
             signal_count=2,
             entry_costs=8000,
@@ -89,7 +89,7 @@ class TestPosition:
             entry_date='2024-01-02',
             entry_price=70000,
             shares=100,
-            pattern='모멘텀형',
+            pattern='급등형',
             score=85.5,
             signal_count=2,
             entry_costs=8000,
@@ -107,7 +107,7 @@ class TestPosition:
             entry_date='2024-01-02',
             entry_price=70000,
             shares=100,
-            pattern='모멘텀형',
+            pattern='급등형',
             score=85.5,
             signal_count=2,
             entry_costs=8000,
@@ -188,7 +188,7 @@ class TestPortfolio:
             stock_name='삼성전자',
             entry_date='2024-01-02',
             entry_price=70000,
-            pattern='모멘텀형',
+            pattern='급등형',
             score=85.5,
             signal_count=2
         )
@@ -208,7 +208,7 @@ class TestPortfolio:
             stock_name='삼성전자',
             entry_date='2024-01-02',
             entry_price=70000,
-            pattern='모멘텀형',
+            pattern='급등형',
             score=85.5,
             signal_count=2
         )
@@ -220,7 +220,7 @@ class TestPortfolio:
             stock_name='삼성전자',
             entry_date='2024-01-03',
             entry_price=72000,
-            pattern='모멘텀형',
+            pattern='급등형',
             score=80.0,
             signal_count=1
         )
@@ -232,7 +232,7 @@ class TestPortfolio:
         portfolio = Portfolio(initial_capital=10_000_000, max_positions=2)
 
         # 2개 진입
-        portfolio.enter_position('005930', '삼성전자', '2024-01-02', 70000, '모멘텀형', 85.5, 2)
+        portfolio.enter_position('005930', '삼성전자', '2024-01-02', 70000, '급등형', 85.5, 2)
         portfolio.enter_position('000660', 'SK하이닉스', '2024-01-02', 100000, '지속형', 80.0, 1)
 
         assert portfolio.is_full
@@ -246,7 +246,7 @@ class TestPortfolio:
         portfolio = Portfolio(initial_capital=10_000_000, max_positions=2)
 
         # 진입
-        portfolio.enter_position('005930', '삼성전자', '2024-01-02', 70000, '모멘텀형', 85.5, 2)
+        portfolio.enter_position('005930', '삼성전자', '2024-01-02', 70000, '급등형', 85.5, 2)
         initial_cash = portfolio.cash
 
         # 청산
@@ -270,7 +270,7 @@ class TestPortfolio:
         portfolio = Portfolio(initial_capital=10_000_000, max_positions=2)
 
         # 2개 진입
-        portfolio.enter_position('005930', '삼성전자', '2024-01-02', 70000, '모멘텀형', 85.5, 2)
+        portfolio.enter_position('005930', '삼성전자', '2024-01-02', 70000, '급등형', 85.5, 2)
         portfolio.enter_position('000660', 'SK하이닉스', '2024-01-02', 100000, '지속형', 80.0, 1)
 
         # 현재 가격
@@ -289,7 +289,7 @@ class TestPortfolio:
         """포트폴리오 통계 테스트"""
         portfolio = Portfolio(initial_capital=10_000_000, max_positions=2)
 
-        portfolio.enter_position('005930', '삼성전자', '2024-01-02', 70000, '모멘텀형', 85.5, 2)
+        portfolio.enter_position('005930', '삼성전자', '2024-01-02', 70000, '급등형', 85.5, 2)
         portfolio.exit_position('005930', '2024-01-10', 77000, 'target')
 
         stats = portfolio.get_statistics()
@@ -311,7 +311,7 @@ class TestShortPosition:
             entry_date='2024-01-02',
             entry_price=80000,  # 고가에 공매도
             shares=100,
-            pattern='모멘텀형',
+            pattern='급등형',
             score=85.5,
             signal_count=2,
             entry_costs=10000,
@@ -329,7 +329,7 @@ class TestShortPosition:
             entry_date='2024-01-02',
             entry_price=80000,  # 진입가
             shares=100,
-            pattern='모멘텀형',
+            pattern='급등형',
             score=85.5,
             signal_count=2,
             entry_costs=10000,
@@ -352,7 +352,7 @@ class TestShortPosition:
             entry_date='2024-01-02',
             entry_price=80000,
             shares=100,
-            pattern='모멘텀형',
+            pattern='급등형',
             score=85.5,
             signal_count=2,
             entry_costs=10000,
@@ -383,7 +383,7 @@ class TestShortPosition:
             exit_date='2024-01-10',
             exit_price=70000,
             shares=100,
-            pattern='모멘텀형',
+            pattern='급등형',
             score=85.5,
             signal_count=2,
             return_pct=12.5,
@@ -423,7 +423,7 @@ class TestShortPosition:
             stock_name='삼성전자',
             entry_date='2024-01-02',
             entry_price=80000,
-            pattern='모멘텀형',
+            pattern='급등형',
             score=85.5,
             signal_count=2,
             direction='short'
@@ -440,7 +440,7 @@ class TestShortPosition:
 
         # 진입 (80,000원에 공매도)
         portfolio.enter_position('005930', '삼성전자', '2024-01-02', 80000,
-                                '모멘텀형', 85.5, 2, direction='short')
+                                '급등형', 85.5, 2, direction='short')
         cash_after_entry = portfolio.cash
 
         # 청산 (70,000원에 매수 → 수익)
@@ -457,7 +457,7 @@ class TestShortPosition:
 
         # 진입 (80,000원에 공매도)
         portfolio.enter_position('005930', '삼성전자', '2024-01-02', 80000,
-                                '모멘텀형', 85.5, 2, direction='short')
+                                '급등형', 85.5, 2, direction='short')
         cash_after_entry = portfolio.cash
 
         # 청산 (90,000원에 매수 → 손실)

@@ -94,8 +94,15 @@ class Position:
         return self.entry_price * self.shares
 
     def current_value(self, current_price: float) -> float:
-        """현재 평가 금액"""
-        return current_price * self.shares
+        """현재 평가 금액 (방향별)
+
+        - Long: 현재가 × 수량
+        - Short: 담보금 + 미실현 손익 = (2 × 진입가 - 현재가) × 수량
+        """
+        if self.direction == 'long':
+            return current_price * self.shares
+        else:  # short
+            return (2 * self.entry_price - current_price) * self.shares
 
     def unrealized_return(self, current_price: float) -> float:
         """

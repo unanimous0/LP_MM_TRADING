@@ -32,7 +32,7 @@ from src.backtesting.portfolio import Trade
 def _make_trade(stock_code='005930', stock_name='삼성전자',
                 entry_date='2024-01-02', exit_date='2024-01-15',
                 entry_price=70000, exit_price=73500,
-                return_pct=5.0, pattern='모멘텀형',
+                return_pct=5.0, pattern='급등형',
                 signal_count=2, direction='long',
                 exit_reason='target'):
     return Trade(
@@ -76,7 +76,7 @@ def _make_daily_values(start='2024-01-02', end='2024-01-31',
 @pytest.fixture
 def sample_trades():
     return [
-        _make_trade(return_pct=5.0, pattern='모멘텀형', exit_date='2024-01-15'),
+        _make_trade(return_pct=5.0, pattern='급등형', exit_date='2024-01-15'),
         _make_trade(stock_code='000660', stock_name='SK하이닉스',
                     return_pct=-3.0, pattern='지속형',
                     entry_date='2024-01-05', exit_date='2024-01-20',

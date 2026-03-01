@@ -91,7 +91,7 @@ class OptunaOptimizer:
             'institution_weight': c.institution_weight,
             'force_exit_on_end': c.force_exit_on_end,
             'use_tc': c.use_tc,
-            'use_short_trend': c.use_short_trend,
+            'use_divergence': c.use_divergence,
             'tax_rate': c.tax_rate,
             'commission_rate': c.commission_rate,
             'slippage_rate': c.slippage_rate,
@@ -333,7 +333,7 @@ class OptunaOptimizer:
                 conn_pre,
                 institution_weight=self.base_config.institution_weight,
                 use_tc=self.base_config.use_tc,
-                use_short_trend=self.base_config.use_short_trend,
+                use_divergence=self.base_config.use_divergence,
             )
             shared_precomputed = pc.precompute(
                 self.end_date, start_date=self.start_date, verbose=verbose

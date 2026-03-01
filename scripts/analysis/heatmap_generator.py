@@ -126,11 +126,12 @@ def main():
 
     parser.add_argument(
         '--sort-by',
-        choices=['recent', 'momentum', 'weighted', 'average'],
+        choices=['recent', 'long_divergence', 'mid_divergence', 'weighted', 'average'],
         default='recent',
         help='''Y축 정렬 기준:
   recent: 최근 기간(5D+20D) 우선 (기본, 추천!)
-  momentum: 수급 모멘텀(5D-200D) - 전환점 포착
+  long_divergence: 장기이격(5D-200D) - 전환점 포착
+  mid_divergence: 중기이격(5D-100D)
   weighted: 가중 평균 (최근 높은 가중치)
   average: 단순 평균 (deprecated)'''
     )

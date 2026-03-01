@@ -270,7 +270,7 @@ class PerformanceMetrics:
                 columns: ['pattern', 'trades', 'win_rate', 'avg_return', 'avg_hold_days']
                 예:
                     pattern  trades  win_rate  avg_return  avg_hold_days
-                    모멘텀형     45      62.1        12.3            8.2
+                    급등형     45      62.1        12.3            8.2
                     지속형       72      54.8        18.7           21.3
                     전환형       35      47.6         9.1           14.1
         """
@@ -462,7 +462,7 @@ class PerformanceMetrics:
 
         # 베타 계산
         covariance = np.cov(strategy_returns.values, bench_returns.values)[0, 1]
-        benchmark_variance = np.var(bench_returns.values)
+        benchmark_variance = np.var(bench_returns.values, ddof=1)
 
         if benchmark_variance == 0:
             return None

@@ -232,7 +232,7 @@ else:
             signal_list = ', '.join(signal_list)
 
         _PATTERN_COLORS = {
-            '모멘텀형': '#f472b6',
+            '급등형': '#f472b6',
             '지속형':   '#38bdf8',
             '전환형':   '#4ade80',
             '기타':     '#64748b',
@@ -259,9 +259,9 @@ else:
 
             _comps = {
                 '최근수급 (recent)': _drill_row.get('recent', float('nan')),
-                '단기모멘텀 (short_trend)': _drill_row.get('short_trend', float('nan')),
-                '중기모멘텀 (mid_momentum)': _drill_row.get('mid_momentum', float('nan')),
-                '모멘텀 (momentum)': _drill_row.get('momentum', float('nan')),
+                '단기이격 (short_divergence)': _drill_row.get('short_divergence', float('nan')),
+                '중기이격 (mid_divergence)': _drill_row.get('mid_divergence', float('nan')),
+                '장기이격 (long_divergence)': _drill_row.get('long_divergence', float('nan')),
                 '가중평균 (weighted)': _drill_row.get('weighted', float('nan')),
                 '단순평균 (average)': _drill_row.get('average', float('nan')),
             }

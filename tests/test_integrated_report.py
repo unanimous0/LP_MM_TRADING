@@ -55,10 +55,10 @@ class TestIntegratedReport:
             '200D': [0.3, 0.8, 0.1, 1.8, 1.0],
             '500D': [0.1, 1.0, 0.0, 2.0, 1.5],
             'recent': [1.35, -0.4, 1.05, 0.9, -1.0],
-            'momentum': [1.4, -1.5, 2.0, -1.2, -2.7],
+            'long_divergence': [1.4, -1.5, 2.0, -1.2, -2.7],
             'weighted': [0.9, 0.4, 0.6, 1.3, 0.0],
             'average': [0.73, 0.28, 0.35, 1.38, 0.05],
-            'pattern': ['모멘텀형', '전환형', '모멘텀형', '지속형', '기타'],
+            'pattern': ['급등형', '전환형', '급등형', '지속형', '기타'],
             'score': [85, 45, 78, 92, 38]
         }
         return pd.DataFrame(data)
@@ -81,7 +81,7 @@ class TestIntegratedReport:
 
     def test_generate_entry_stop_recommendation(self, report_gen):
         """Test entry/stop recommendation generation"""
-        row = pd.Series({'pattern': '모멘텀형'})
+        row = pd.Series({'pattern': '급등형'})
         result = report_gen.generate_entry_stop_recommendation(row)
 
         assert 'entry_point' in result
@@ -120,11 +120,11 @@ class TestIntegratedReport:
         """Test report filtering by pattern"""
         report_df = report_gen.generate_report(sample_classified_df)
 
-        filtered = report_gen.filter_report(report_df, pattern='모멘텀형')
+        filtered = report_gen.filter_report(report_df, pattern='급등형')
 
         # All rows should have the same pattern
         if len(filtered) > 0:
-            assert (filtered['pattern'] == '모멘텀형').all()
+            assert (filtered['pattern'] == '급등형').all()
 
     def test_filter_report_by_score(self, report_gen, sample_classified_df):
         """Test report filtering by score"""
@@ -154,7 +154,7 @@ class TestIntegratedReport:
 
         filtered = report_gen.filter_report(
             report_df,
-            pattern='모멘텀형',
+            pattern='급등형',
             min_score=70,
             min_signal_count=1,
             top_n=5
@@ -162,7 +162,7 @@ class TestIntegratedReport:
 
         # Check all filters applied
         if len(filtered) > 0:
-            assert (filtered['pattern'] == '모멘텀형').all()
+            assert (filtered['pattern'] == '급등형').all()
             assert (filtered['score'] >= 70).all()
             assert (filtered['signal_count'] >= 1).all()
             assert len(filtered) <= 5
@@ -234,7 +234,7 @@ class TestIntegratedReport:
         assert isinstance(watchlist, dict)
 
         # Check patterns
-        expected_patterns = ['모멘텀형', '지속형', '전환형']
+        expected_patterns = ['급등형', '지속형', '전환형']
         assert all(pattern in watchlist for pattern in expected_patterns)
 
         # Check filters applied
@@ -259,13 +259,13 @@ class TestIntegratedReport:
         """Test custom configuration"""
         custom_config = {
             'entry_rules': {
-                '모멘텀형': {
+                '급등형': {
                     'condition': '테스트 진입',
                     'description': '테스트 설명'
                 }
             },
             'stop_loss_rules': {
-                '모멘텀형': -3
+                '급등형': -3
             },
             'display': {
                 'max_rows': 100,
@@ -277,14 +277,14 @@ class TestIntegratedReport:
         report_gen = IntegratedReport(conn, config=custom_config)
 
         # Check config applied
-        assert report_gen.config['entry_rules']['모멘텀형']['condition'] == '테스트 진입'
-        assert report_gen.config['stop_loss_rules']['모멘텀형'] == -3
+        assert report_gen.config['entry_rules']['급등형']['condition'] == '테스트 진입'
+        assert report_gen.config['stop_loss_rules']['급등형'] == -3
 
         conn.close()
 
     def test_entry_point_all_patterns(self, report_gen):
         """Test entry point generation for all patterns"""
-        patterns = ['모멘텀형', '지속형', '전환형', '기타']
+        patterns = ['급등형', '지속형', '전환형', '기타']
 
         for pattern in patterns:
             row = pd.Series({'pattern': pattern})

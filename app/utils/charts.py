@@ -122,12 +122,12 @@ def create_zscore_heatmap(
     def _compute_sort_key(dir_mode):
         if sort_by == 'recent':
             return _adj_z('5D', dir_mode) if '5D' in df.columns else _adj_z(period_cols[0], dir_mode)
-        elif sort_by == 'momentum':
+        elif sort_by == 'long_divergence':
             first = period_cols[0]
             # 장기 기준 = 200D (500D는 참고용, 모멘텀 계산에서 제외)
             last = '200D' if '200D' in period_cols else period_cols[-2] if len(period_cols) > 1 else period_cols[0]
             return _adj_z(first, dir_mode) - _adj_z(last, dir_mode)
-        elif sort_by == 'mid_momentum':
+        elif sort_by == 'mid_divergence':
             first = period_cols[0]
             mid = '100D' if '100D' in period_cols else '50D' if '50D' in period_cols else period_cols[0]
             return _adj_z(first, dir_mode) - _adj_z(mid, dir_mode)
@@ -211,11 +211,11 @@ def create_zscore_heatmap(
     ]
 
     sort_label = {
-        'recent':       '5D Z',
-        'momentum':     '모멘텀(5D-200D)',
-        'mid_momentum': '중기모멘텀(5D-100D)',
-        'weighted':     '가중평균',
-        'average':      '단순평균',
+        'recent':          '5D Z',
+        'long_divergence': '장기이격(5D-200D)',
+        'mid_divergence':  '중기이격(5D-100D)',
+        'weighted':        '가중평균',
+        'average':         '단순평균',
     }.get(sort_by, sort_by)
 
     # 히트맵(좌 80%) + 정렬기준 바차트(우 20%) 서브플롯
@@ -293,7 +293,7 @@ def create_sector_zscore_heatmap(
     Args:
         zscore_matrix: stock_code + 기간 컬럼 DataFrame
         stock_list: stock_code / sector 컬럼 포함 종목 마스터
-        sort_by: 정렬 기준 (recent / mid_momentum / momentum / weighted / average)
+        sort_by: 정렬 기준 (recent / mid_divergence / long_divergence / weighted / average)
     """
     if zscore_matrix.empty or stock_list is None or stock_list.empty:
         fig = go.Figure()
@@ -315,11 +315,11 @@ def create_sector_zscore_heatmap(
     # 정렬 키
     if sort_by == 'recent':
         sort_key = sector_df['5D'] if '5D' in sector_df.columns else sector_df[period_cols[0]]
-    elif sort_by == 'momentum':
+    elif sort_by == 'long_divergence':
         first = period_cols[0]
         last = '200D' if '200D' in period_cols else period_cols[-2] if len(period_cols) > 1 else period_cols[0]
         sort_key = sector_df[first] - sector_df[last]
-    elif sort_by == 'mid_momentum':
+    elif sort_by == 'mid_divergence':
         first = period_cols[0]
         mid = '100D' if '100D' in period_cols else '50D' if '50D' in period_cols else period_cols[0]
         sort_key = sector_df[first] - sector_df[mid]
@@ -334,11 +334,11 @@ def create_sector_zscore_heatmap(
     sector_df = sector_df.sort_values('_sort', ascending=False)
 
     sort_label = {
-        'recent':       '5D Z',
-        'momentum':     '모멘텀(5D-200D)',
-        'mid_momentum': '중기모멘텀(5D-100D)',
-        'weighted':     '가중평균',
-        'average':      '단순평균',
+        'recent':          '5D Z',
+        'long_divergence': '장기이격(5D-200D)',
+        'mid_divergence':  '중기이격(5D-100D)',
+        'weighted':        '가중평균',
+        'average':         '단순평균',
     }.get(sort_by, sort_by)
 
     y_labels = [
@@ -399,7 +399,7 @@ def create_pattern_pie_chart(report_df: pd.DataFrame) -> go.Figure:
     counts.columns = ['pattern', 'count']
 
     color_map = {
-        '모멘텀형': '#f472b6',   # pink-400
+        '급등형': '#f472b6',   # pink-400
         '지속형':   '#38bdf8',   # sky-400
         '전환형':   '#4ade80',   # green-400
         '기타':     '#64748b',   # slate-500
@@ -492,7 +492,7 @@ def create_signal_distribution_chart(report_df: pd.DataFrame) -> go.Figure:
 # ---------------------------------------------------------------------------
 
 _PATTERN_COLORS = {
-    '모멘텀형': '#f472b6',   # pink-400
+    '급등형': '#f472b6',   # pink-400
     '지속형':   '#38bdf8',   # sky-400
     '전환형':   '#4ade80',   # green-400
     '기타':     '#64748b',   # slate-500
@@ -516,7 +516,7 @@ def create_sector_pattern_crosstab_chart(report_df: pd.DataFrame) -> go.Figure:
     # 섹터별 종목수 내림차순 정렬
     sector_order = df['sector'].value_counts().index.tolist()
 
-    patterns = ['모멘텀형', '지속형', '전환형', '기타']
+    patterns = ['급등형', '지속형', '전환형', '기타']
     ct = pd.crosstab(df['sector'], df['pattern'])
 
     fig = go.Figure()
@@ -1415,12 +1415,12 @@ def create_compare_score_radar(
 ) -> go.Figure:
     """
     여러 종목의 패턴 점수 레이더 차트.
-    rows: [{'label':str, 'recent':f, 'short_trend':f, 'mid_momentum':f, 'momentum':f, 'weighted':f, 'average':f}]
+    rows: [{'label':str, 'recent':f, 'short_divergence':f, 'mid_divergence':f, 'long_divergence':f, 'weighted':f, 'average':f}]
     """
     if not rows:
         return go.Figure()
-    categories = ['최근수급', '단기모멘텀', '중기모멘텀', '모멘텀', '가중평균', '단순평균']
-    keys = ['recent', 'short_trend', 'mid_momentum', 'momentum', 'weighted', 'average']
+    categories = ['최근수급', '단기이격', '중기이격', '장기이격', '가중평균', '단순평균']
+    keys = ['recent', 'short_divergence', 'mid_divergence', 'long_divergence', 'weighted', 'average']
 
     fig = go.Figure()
     for idx, row in enumerate(rows):

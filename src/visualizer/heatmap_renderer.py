@@ -127,19 +127,19 @@ class HeatmapRenderer:
                 zscore_matrix['_sort_key'] = zscore_matrix[periods[0]]
                 sort_label = f"recent ({periods[0]})"
 
-        elif sort_by == 'mid_momentum':
-            # 중기 모멘텀 (5D - 100D, 양수 = 최근 중기 개선)
+        elif sort_by == 'mid_divergence':
+            # 중기 이격도 (5D - 100D, 양수 = 최근 중기 개선)
             first_period = periods[0]
             mid_period = '100D' if '100D' in periods else '50D' if '50D' in periods else periods[0]
             zscore_matrix['_sort_key'] = zscore_matrix[first_period] - zscore_matrix[mid_period]
-            sort_label = f"mid_momentum ({first_period} - {mid_period})"
+            sort_label = f"mid_divergence ({first_period} - {mid_period})"
 
-        elif sort_by == 'momentum':
-            # 수급 모멘텀 (5D - 200D, 양수 = 최근 개선). 500D는 참고용, 모멘텀에서 제외
+        elif sort_by == 'long_divergence':
+            # 장기 이격도 (5D - 200D, 양수 = 최근 개선). 500D는 참고용, 이격도에서 제외
             first_period = periods[0]
             last_period = '200D' if '200D' in periods else periods[-2] if len(periods) > 1 else periods[0]
             zscore_matrix['_sort_key'] = zscore_matrix[first_period] - zscore_matrix[last_period]
-            sort_label = f"momentum ({first_period} - {last_period})"
+            sort_label = f"long_divergence ({first_period} - {last_period})"
 
         elif sort_by == 'weighted':
             # 가중 평균 (최근에 높은 가중치: 3.5, 3.0, 2.5, 2.0, 1.5, 1.0, 0.5)
