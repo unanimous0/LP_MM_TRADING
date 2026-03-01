@@ -3,7 +3,7 @@ Pattern-based classification module
 
 Implements Stage 3 pattern classification:
 - 3개 바구니 자동 분류 (모멘텀형, 지속형, 전환형)
-- 5가지 정렬 키 통합 (Recent, Momentum, Weighted, Average, ShortTrend)
+- 6가지 정렬 키 통합 (Recent, MidMomentum, Momentum, Weighted, Average, ShortTrend)
 - 추가 특성 추출 (변동성, 지속성, 가속도, 시간 순서 일관성)
 - 패턴 강도 점수 계산 (0~100)
 
@@ -38,6 +38,7 @@ class PatternClassifier:
         'weighted':    0.30,
         'average':     0.20,   # short_trend 추가 이전 값
         'short_trend': 0.00,
+        'mid_momentum': 0.00,  # 레거시에서는 미사용
     }
 
     def __init__(self, config: Optional[dict] = None,
@@ -88,11 +89,12 @@ class PatternClassifier:
 
             # 점수 계산 가중치 (합계 = 1.00)
             'score_weights': {
-                'recent': 0.25,       # 현재 강도 (유지)
-                'momentum': 0.20,     # 장기 개선도 (0.25 → 0.20, 장기전환 과대평가 완화)
-                'weighted': 0.30,     # 중장기 트렌드 (유지)
-                'average': 0.10,      # 전체 일관성 (0.20 → 0.10, short_trend로 대체)
-                'short_trend': 0.15,  # 단기 모멘텀 방향 (5D-20D)
+                'recent': 0.25,        # 현재 강도 (유지)
+                'short_trend': 0.10,   # 단기 모멘텀 방향 (5D-20D, 0.15→0.10 mid_momentum이 중기 역할 분담)
+                'mid_momentum': 0.10,  # 중기 모멘텀 (5D-100D, 신규)
+                'momentum': 0.15,      # 장기 개선도 (0.20→0.15, mid_momentum과 정보 중복 경감)
+                'weighted': 0.30,      # 중장기 트렌드 (유지)
+                'average': 0.10,       # 전체 일관성 (유지)
             },
 
             # 특성 계산 설정
@@ -200,6 +202,11 @@ class PatternClassifier:
                     .fillna(df['20D']))
         df['momentum'] = df['5D'] - _longest
 
+        # 2.5. Mid Momentum: 5D - 100D (중기 수급 개선도)
+        # 100D가 NaN이면 50D로 폴백 (데이터 부족 시)
+        _mid = df['100D'].fillna(df['50D'])
+        df['mid_momentum'] = df['5D'] - _mid
+
         # 3. Weighted: NaN-robust 가중 평균 (데이터 없는 기간 자동 제외)
         # 백테스트 초기에 200D/500D가 NaN이어도 사용 가능한 기간으로 계산
         weights = {'5D': 3.5, '10D': 3.0, '20D': 2.5, '50D': 2.0, '100D': 1.5, '200D': 1.0, '500D': 0.5}
@@ -295,20 +302,23 @@ class PatternClassifier:
 
         # 패턴별 가중치 조정
         # 지속형: 이상적 패턴이 5D<10D<...<500D (장기>단기)이므로
-        #   short_trend(=5D-20D)가 음수가 정상 → 패널티 방지를 위해 가중치 0으로 설정
-        #   해제된 short_trend 가중치는 average로 재분배하여 total_w=1.0 유지
+        #   short_trend(=5D-20D)/mid_momentum(=5D-100D)가 음수가 정상 → 패널티 방지를 위해 가중치 0으로 설정
+        #   해제된 가중치는 average로 재분배하여 total_w=1.0 유지
         pattern = row.get('pattern', '')
         if pattern == '지속형':
             st_w = weights.get('short_trend', 0)
+            mm_w = weights.get('mid_momentum', 0)
             effective_weights = dict(weights)
             effective_weights['short_trend'] = 0.0
-            effective_weights['average'] = weights.get('average', 0) + st_w
+            effective_weights['mid_momentum'] = 0.0
+            effective_weights['average'] = weights.get('average', 0) + st_w + mm_w
         else:
             effective_weights = weights
 
         # NaN-robust 가중 합계 계산 (데이터 부족 기간 대응)
         components = [
             (row['recent'],                          effective_weights['recent']),
+            (row.get('mid_momentum', np.nan),        effective_weights.get('mid_momentum', 0)),
             (row['momentum'],                        effective_weights['momentum']),
             (row['weighted'],                        effective_weights['weighted']),
             (row['average'],                         effective_weights['average']),
@@ -564,13 +574,19 @@ class PatternClassifier:
         # confidence = tanh(today_sff / rolling_std)로 실제 수급 방향을 반영
         df = self._apply_direction_confidence(df, direction)
 
-        # [short_trend] — tanh 적용 후에 계산 (중요!)
+        # [short_trend, mid_momentum] — tanh 적용 후에 계산 (중요!)
         # recent/momentum/weighted/average와 동일한 post-tanh 스케일을 사용해야
         # 점수 계산 시 가중치가 의도한 비율로 반영됨 (pre-tanh 값은 스케일이 다름)
         if '5D' in df.columns and '20D' in df.columns:
             df['short_trend'] = df['5D'] - df['20D']
         else:
             df['short_trend'] = np.nan
+
+        # mid_momentum: 5D - 100D (중기 수급 개선도)
+        if '5D' in df.columns and '100D' in df.columns:
+            df['mid_momentum'] = df['5D'] - df['100D']
+        else:
+            df['mid_momentum'] = np.nan
 
         # 1. 5가지 정렬 키 계산
         df = self.calculate_sort_keys(df)
@@ -613,15 +629,17 @@ class PatternClassifier:
         for col, original in original_zscores.items():
             df[col] = original
 
-        # 출력용 short_trend 재계산: 복원된 원본 Z-Score 기준 (표시 일관성, Fix #3)
+        # 출력용 short_trend/mid_momentum 재계산: 복원된 원본 Z-Score 기준 (표시 일관성, Fix #3)
         # 분류/점수는 이미 post-tanh 값으로 계산 완료 → 이 재계산은 출력 컬럼 전용
         if '5D' in df.columns and '20D' in df.columns:
             df['short_trend'] = df['5D'] - df['20D']
+        if '5D' in df.columns and '100D' in df.columns:
+            df['mid_momentum'] = df['5D'] - df['100D']
 
         # 6. 컬럼 순서 정리
         base_cols = ['stock_code']
         period_cols = ['5D', '10D', '20D', '50D', '100D', '200D', '500D']
-        sort_key_cols = ['recent', 'momentum', 'weighted', 'average', 'short_trend']
+        sort_key_cols = ['recent', 'mid_momentum', 'momentum', 'weighted', 'average', 'short_trend']
         feature_cols = ['volatility', 'persistence', 'sl_ratio', 'temporal_consistency']
         result_cols = ['pattern', 'sub_type', 'pattern_label', 'score', 'direction']
 

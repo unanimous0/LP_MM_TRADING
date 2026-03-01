@@ -72,10 +72,11 @@ direction = st.sidebar.radio(
 )
 
 sort_options = {
-    'recent':   '최근 수급 (5D 기준)',
-    'momentum': '모멘텀 (단기-장기 차이)',
-    'weighted': '가중 평균 (최근 높은 비중)',
-    'average':  '단순 평균',
+    'recent':       '최근 수급 (5D 기준)',
+    'momentum':     '모멘텀 (단기-장기 차이)',
+    'mid_momentum': '중기 모멘텀 (5D-100D 차이)',
+    'weighted':     '가중 평균 (최근 높은 비중)',
+    'average':      '단순 평균',
 }
 sort_by = st.sidebar.selectbox(
     "정렬 기준",

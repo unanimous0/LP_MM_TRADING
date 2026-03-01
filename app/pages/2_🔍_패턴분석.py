@@ -50,6 +50,7 @@ def _build_tooltip_html(row, zscore_row=None):
     pat_label = row.get('pattern_label', pattern)
 
     recent = float(row.get('recent', 0))
+    mid_momentum = float(row.get('mid_momentum', 0))
     momentum = float(row.get('momentum', 0))
     weighted = float(row.get('weighted', 0))
     average = float(row.get('average', 0))
@@ -59,14 +60,14 @@ def _build_tooltip_html(row, zscore_row=None):
     is_sustained = (pattern == '지속형')
 
     if is_sustained:
-        weights = {'recent': 0.25, 'momentum': 0.20, 'weighted': 0.30,
-                   'average': 0.25, 'short_trend': 0.00}
+        weights = {'recent': 0.25, 'short_trend': 0.00, 'mid_momentum': 0.00,
+                   'momentum': 0.15, 'weighted': 0.30, 'average': 0.30}
     else:
-        weights = {'recent': 0.25, 'momentum': 0.20, 'weighted': 0.30,
-                   'average': 0.10, 'short_trend': 0.15}
+        weights = {'recent': 0.25, 'short_trend': 0.10, 'mid_momentum': 0.10,
+                   'momentum': 0.15, 'weighted': 0.30, 'average': 0.10}
 
-    comps = {'recent': recent, 'momentum': momentum, 'weighted': weighted,
-             'average': average, 'short_trend': short_trend}
+    comps = {'recent': recent, 'mid_momentum': mid_momentum, 'momentum': momentum,
+             'weighted': weighted, 'average': average, 'short_trend': short_trend}
 
     weighted_sum = sum(comps[k] * weights[k] for k in weights if weights[k] > 0)
     base_score = float(np.clip(((weighted_sum + 3) / 6) * 100, 0, 100))
@@ -152,6 +153,8 @@ def _build_tooltip_html(row, zscore_row=None):
             formula = '가중 평균 (최근 높은 비중)'
         elif key == 'average' and zvals:
             formula = f'{len(zvals)}개 기간 단순 평균'
+        elif key == 'mid_momentum' and z5d is not None and z100d is not None:
+            formula = f'5D {z5d:+.2f} − 100D {z100d:+.2f}'
         elif key == 'short_trend' and z5d is not None and z20d is not None:
             formula = f'5D {z5d:+.2f} − 20D {z20d:+.2f}'
 
@@ -162,7 +165,7 @@ def _build_tooltip_html(row, zscore_row=None):
                 f'{fml}'
                 f'<div class="cc-v"><b>{v:+.2f}</b> → {v*w:+.3f}</div></div>'
             )
-        elif key == 'short_trend' and is_sustained:
+        elif key in ('short_trend', 'mid_momentum') and is_sustained:
             return (
                 f'<div class="cc"><div class="cc-h">{label} <span class="tt-dim">×0 (지속형 제외)</span></div>'
                 f'<div class="cc-v">{v:+.2f}</div></div>'
@@ -170,9 +173,12 @@ def _build_tooltip_html(row, zscore_row=None):
         return ''
 
     cards = []
-    for key, label, w in [('recent', '최근수급', 0.25), ('momentum', '모멘텀', 0.20),
-                           ('weighted', '가중평균', 0.30), ('average', '단순평균', weights['average']),
-                           ('short_trend', '단기모멘텀', weights['short_trend'])]:
+    for key, label, w in [('recent', '최근수급', 0.25),
+                           ('short_trend', '단기모멘텀', weights['short_trend']),
+                           ('mid_momentum', '중기모멘텀', weights['mid_momentum']),
+                           ('momentum', '모멘텀', weights['momentum']),
+                           ('weighted', '가중평균', 0.30),
+                           ('average', '단순평균', weights['average'])]:
         c = _comp_card(label, key, w)
         if c:
             cards.append(c)
@@ -510,8 +516,10 @@ Z-Score 패턴의 형태에 따라 3가지 기본 패턴 + 7가지 복합 패턴
 | **기타** | 위 조건 모두 미충족 | 뚜렷한 수급 패턴 없음 | 관망 또는 다른 지표 참고 |
 
 **핵심 지표 설명**:
-- **모멘텀** = 5D - max(200D, 100D, 50D, 20D): 단기와 장기의 차이. 양수가 클수록 최근 수급 폭발
 - **최근수급** = (5D + 20D) / 2: 최근 단기 수급 강도
+- **단기모멘텀** = 5D - 20D: 1주 vs 1달 단기 방향
+- **중기모멘텀** = 5D - 100D: 1주 vs 5개월 중기 수급 개선도
+- **모멘텀** = 5D - max(200D, 100D, 50D, 20D): 단기와 장기의 차이. 양수가 클수록 최근 수급 폭발
 - **가중평균**: 7개 기간 Z-Score의 가중 평균 (최근 기간에 높은 비중)
 - **지속성**: 양수 Z-Score 기간의 비율 (0~1). 0.7이면 7개 중 5개 이상이 양수
 - **tc (Temporal Consistency)**: 인접 기간이 순서대로인 비율 (5D≥10D≥...≥500D). 1.0이면 완벽한 순서
@@ -552,10 +560,11 @@ Z-Score 패턴의 형태에 따라 3가지 기본 패턴 + 7가지 복합 패턴
 기본점수 = ((가중합산Z + 3) / 6) × 100     ← Z∈[-3,3] → 점수∈[0,100]
 
 가중합산Z = 최근수급 × 0.25
-          + 모멘텀 × 0.20
+          + 단기모멘텀 × 0.10 (지속형: 0)
+          + 중기모멘텀 × 0.10 (지속형: 0)
+          + 모멘텀 × 0.15
           + 가중평균 × 0.30
-          + 단순평균 × 0.10 (지속형: 0.25)
-          + 단기모멘텀 × 0.15 (지속형: 0)
+          + 단순평균 × 0.10 (지속형: 0.30)
 
 패턴점수 = 기본점수 + tc보너스 + 복합패턴보너스
   · tc보너스 = (tc - 0.5) × 20  (±10점, 지속형 제외)

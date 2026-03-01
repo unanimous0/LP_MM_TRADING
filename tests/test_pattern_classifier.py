@@ -864,6 +864,96 @@ class TestSubType:
         # sub_type 값 자체는 동일해야 함 (tc/short_trend는 점수에만 영향, 분류 조건 무관)
         assert r_default.iloc[0]['sub_type'] == r_legacy.iloc[0]['sub_type']
 
+class TestMidMomentum:
+    """mid_momentum (5D-100D) 중기 모멘텀 테스트"""
+
+    @pytest.fixture
+    def classifier(self):
+        return PatternClassifier()
+
+    @pytest.fixture
+    def sample_zscore_matrix(self):
+        return pd.DataFrame({
+            'stock_code': ['005930', '000660'],
+            '5D': [1.5, -0.5],
+            '10D': [1.3, -0.4],
+            '20D': [1.2, -0.3],
+            '50D': [0.8, 0.2],
+            '100D': [0.5, 0.5],
+            '200D': [0.3, 0.8],
+            '500D': [0.1, 1.0],
+        })
+
+    def test_calculate_sort_keys_includes_mid_momentum(self, classifier, sample_zscore_matrix):
+        """calculate_sort_keys() 결과에 mid_momentum 컬럼 존재, 값 = 5D - 100D"""
+        result = classifier.calculate_sort_keys(sample_zscore_matrix)
+        assert 'mid_momentum' in result.columns
+        expected = result['5D'] - result['100D']
+        pd.testing.assert_series_equal(
+            result['mid_momentum'], expected, check_names=False,
+        )
+
+    def test_mid_momentum_in_classify_all_output(self, classifier, sample_zscore_matrix):
+        """classify_all 결과에 mid_momentum 컬럼 존재"""
+        result = classifier.classify_all(sample_zscore_matrix)
+        assert 'mid_momentum' in result.columns
+
+    def test_mid_momentum_affects_score(self, classifier):
+        """mid_momentum 값 변화 시 비-지속형 패턴 점수가 달라짐"""
+        base = {
+            'recent': 1.0, 'momentum': 0.5, 'weighted': 0.8,
+            'average': 0.6, 'short_trend': 0.3,
+            'temporal_consistency': 0.5,
+        }
+        score_high = classifier.calculate_pattern_score(
+            pd.Series({**base, 'mid_momentum': 2.0})
+        )
+        score_low = classifier.calculate_pattern_score(
+            pd.Series({**base, 'mid_momentum': -2.0})
+        )
+        assert score_high != pytest.approx(score_low, abs=0.1)
+
+    def test_sustained_score_no_mid_momentum_penalty(self, classifier):
+        """지속형은 mid_momentum 가중치 0 → 음수/양수 점수 동일"""
+        base = {
+            'recent': 0.7, 'momentum': 0.3, 'weighted': 0.9,
+            'average': 0.6, 'short_trend': -0.5,
+            'temporal_consistency': 0.2, 'pattern': '지속형',
+        }
+        score_pos = classifier.calculate_pattern_score(
+            pd.Series({**base, 'mid_momentum': 2.0})
+        )
+        score_neg = classifier.calculate_pattern_score(
+            pd.Series({**base, 'mid_momentum': -2.0})
+        )
+        assert score_pos == pytest.approx(score_neg, abs=0.01)
+
+    def test_legacy_weights_include_mid_momentum_zero(self):
+        """레거시 가중치에 mid_momentum=0.00 포함"""
+        w = PatternClassifier._LEGACY_SCORE_WEIGHTS
+        assert 'mid_momentum' in w
+        assert w['mid_momentum'] == 0.0
+
+    def test_mid_momentum_fallback_to_50d(self, classifier):
+        """100D가 NaN일 때 50D로 폴백"""
+        data = pd.DataFrame({
+            'stock_code': ['A'],
+            '5D': [1.5], '10D': [1.3], '20D': [1.2],
+            '50D': [0.8], '100D': [np.nan],
+            '200D': [0.3], '500D': [0.1],
+        })
+        result = classifier.calculate_sort_keys(data)
+        # 100D가 NaN이므로 50D(0.8) 폴백: mid_momentum = 1.5 - 0.8 = 0.7
+        assert result['mid_momentum'].iloc[0] == pytest.approx(0.7, abs=0.01)
+
+
+class TestSubTypePriority:
+    """TestSubType에서 분리된 복합 패턴 우선순위 테스트"""
+
+    @pytest.fixture
+    def classifier(self):
+        return PatternClassifier()
+
     def test_sub_type_priority_sustained_breakout_over_uniform(self, classifier):
         """지속형에서 단기돌파 + 전면수급 동시 충족 시 단기돌파 우선"""
         row = pd.Series({

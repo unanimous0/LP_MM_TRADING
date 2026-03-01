@@ -127,6 +127,10 @@ def create_zscore_heatmap(
             # 장기 기준 = 200D (500D는 참고용, 모멘텀 계산에서 제외)
             last = '200D' if '200D' in period_cols else period_cols[-2] if len(period_cols) > 1 else period_cols[0]
             return _adj_z(first, dir_mode) - _adj_z(last, dir_mode)
+        elif sort_by == 'mid_momentum':
+            first = period_cols[0]
+            mid = '100D' if '100D' in period_cols else '50D' if '50D' in period_cols else period_cols[0]
+            return _adj_z(first, dir_mode) - _adj_z(mid, dir_mode)
         elif sort_by == 'weighted':
             weights = list(range(len(period_cols), 0, -1))
             total_w = sum(weights)
@@ -207,10 +211,11 @@ def create_zscore_heatmap(
     ]
 
     sort_label = {
-        'recent':   '5D Z',
-        'momentum': '모멘텀(5D-200D)',
-        'weighted': '가중평균',
-        'average':  '단순평균',
+        'recent':       '5D Z',
+        'momentum':     '모멘텀(5D-200D)',
+        'mid_momentum': '중기모멘텀(5D-100D)',
+        'weighted':     '가중평균',
+        'average':      '단순평균',
     }.get(sort_by, sort_by)
 
     # 히트맵(좌 80%) + 정렬기준 바차트(우 20%) 서브플롯
@@ -314,6 +319,10 @@ def create_sector_zscore_heatmap(
         first = period_cols[0]
         last = '200D' if '200D' in period_cols else period_cols[-2] if len(period_cols) > 1 else period_cols[0]
         sort_key = sector_df[first] - sector_df[last]
+    elif sort_by == 'mid_momentum':
+        first = period_cols[0]
+        mid = '100D' if '100D' in period_cols else '50D' if '50D' in period_cols else period_cols[0]
+        sort_key = sector_df[first] - sector_df[mid]
     elif sort_by == 'weighted':
         weights = list(range(len(period_cols), 0, -1))
         total_w = sum(weights)
@@ -325,10 +334,11 @@ def create_sector_zscore_heatmap(
     sector_df = sector_df.sort_values('_sort', ascending=False)
 
     sort_label = {
-        'recent':   '5D Z',
-        'momentum': '모멘텀(5D-200D)',
-        'weighted': '가중평균',
-        'average':  '단순평균',
+        'recent':       '5D Z',
+        'momentum':     '모멘텀(5D-200D)',
+        'mid_momentum': '중기모멘텀(5D-100D)',
+        'weighted':     '가중평균',
+        'average':      '단순평균',
     }.get(sort_by, sort_by)
 
     y_labels = [
@@ -1405,12 +1415,12 @@ def create_compare_score_radar(
 ) -> go.Figure:
     """
     여러 종목의 패턴 점수 레이더 차트.
-    rows: [{'label':str, 'recent':f, 'momentum':f, 'weighted':f, 'average':f, 'short_trend':f}]
+    rows: [{'label':str, 'recent':f, 'short_trend':f, 'mid_momentum':f, 'momentum':f, 'weighted':f, 'average':f}]
     """
     if not rows:
         return go.Figure()
-    categories = ['최근수급', '모멘텀', '가중평균', '단순평균', '단기모멘텀']
-    keys = ['recent', 'momentum', 'weighted', 'average', 'short_trend']
+    categories = ['최근수급', '단기모멘텀', '중기모멘텀', '모멘텀', '가중평균', '단순평균']
+    keys = ['recent', 'short_trend', 'mid_momentum', 'momentum', 'weighted', 'average']
 
     fig = go.Figure()
     for idx, row in enumerate(rows):
