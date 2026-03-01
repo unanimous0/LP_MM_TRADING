@@ -1,8 +1,13 @@
 [[pages]]
 path = "streamlit_app.py"
-name = "Whale Supply"
-icon = ":material/waves:"
+name = "수급 왕"
+icon = ":material/trophy:"
 is_section = false
+
+[[pages]]
+path = "pages/7_⚡_이상수급.py"
+name = "이상 수급"
+icon = ":material/bolt:"
 
 [[pages]]
 path = "pages/1_📊_히트맵.py"
