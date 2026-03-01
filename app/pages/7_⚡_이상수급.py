@@ -1,5 +1,5 @@
 """
-이상 수급 페이지 — 이상수급 / 당일 수급순위 / 관심종목 / 수급금액 조회
+이상 수급 페이지 — 이상수급 / 당일 수급순위 / 수급금액 / 고득점 변동알림
 
 메인 페이지에서 분리된 참고 데이터 페이지.
 """
@@ -20,8 +20,6 @@ from utils.data_loader import (
     get_date_range,
     get_abnormal_supply_data,
     get_today_supply_ranking,
-    get_watchlist,
-    remove_from_watchlist,
     snapshot_scores,
     get_score_change_alerts,
     get_stock_list,
@@ -51,7 +49,7 @@ div[data-testid="stVerticalBlockBorderWrapper"]:has(
 """, unsafe_allow_html=True)
 
 st.title("이상 수급")
-st.caption("Z-Score 기반 이상 수급 탐지 + 당일 수급 순위 + 관심종목 + 수급 금액 조회")
+st.caption("Z-Score 기반 이상 수급 탐지 + 당일 수급 순위 + 수급 금액 조회 + 고득점 변동 알림")
 
 # ---------------------------------------------------------------------------
 # 사이드바
@@ -131,13 +129,13 @@ if not st.session_state.get('abnormal_snapshot_done'):
 st.markdown(f"**기준일**: {end_date_str}")
 
 # ---------------------------------------------------------------------------
-# 4탭: 이상 수급 / 당일 수급 순위 / 관심 종목 / 수급 금액
+# 4탭: 이상 수급 / 당일 수급 순위 / 수급 금액 / 고득점 변동 알림
 # ---------------------------------------------------------------------------
-tab_abnormal, tab_ranking, tab_watchlist, tab_supply_amount = st.tabs([
-    "⚡ 이상 수급 (Z > 2σ)",
-    "💰 당일 수급 순위",
-    "⭐ 관심 종목",
-    "💹 수급 금액",
+tab_abnormal, tab_ranking, tab_supply_amount, tab_alerts = st.tabs([
+    "이상 수급 (Z > 2σ)",
+    "당일 수급 순위",
+    "수급 금액",
+    "고득점 변동 알림",
 ])
 
 # ─── 탭 1: 이상 수급 ─────────────────────────────────────────────────────────
@@ -306,117 +304,7 @@ with tab_ranking:
                     hide_index=True,
                 )
 
-# ─── 탭 3: 관심 종목 ──────────────────────────────────────────────────────────
-with tab_watchlist:
-    # 조건 기반 관심종목
-    watchlist_df = report_df[
-        (report_df['score'] >= 70) & (report_df['signal_count'] >= 2)
-    ].copy()
-
-    _sub_cond, _sub_saved = st.tabs([
-        f"📊 조건 기반 (점수 70+, 시그널 2+) — {len(watchlist_df)}개",
-        f"⭐ 저장된 관심종목",
-    ])
-
-    # ─── 조건 기반 관심종목 ────────────────────────────────────────────────────
-    with _sub_cond:
-        if watchlist_df.empty:
-            st.info("현재 조건을 만족하는 관심 종목이 없습니다.")
-        else:
-            _wl_pat_col = 'pattern_label' if 'pattern_label' in watchlist_df.columns else 'pattern'
-            display_cols = [
-                'stock_code', 'stock_name', 'sector', _wl_pat_col,
-                'score', 'signal_count', 'entry_point', 'stop_loss',
-            ]
-            display_cols = [c for c in display_cols if c in watchlist_df.columns]
-
-            col_config = {
-                'stock_code': st.column_config.TextColumn('종목코드'),
-                'stock_name': st.column_config.TextColumn('종목명'),
-                'sector': st.column_config.TextColumn('섹터'),
-                'pattern': st.column_config.TextColumn('패턴'),
-                'pattern_label': st.column_config.TextColumn('패턴'),
-                'score': st.column_config.ProgressColumn(
-                    '최종점수', min_value=0, max_value=115, format='%d점',
-                ),
-                'signal_count': st.column_config.NumberColumn('시그널', format='%d개'),
-                'entry_point': st.column_config.NumberColumn('진입가', format='₩%d'),
-                'stop_loss': st.column_config.NumberColumn('손절가', format='₩%d'),
-            }
-            col_config = {k: v for k, v in col_config.items() if k in display_cols}
-
-            st.dataframe(
-                watchlist_df[display_cols].reset_index(drop=True),
-                column_config=col_config,
-                use_container_width=True,
-                hide_index=True,
-                height=min(500, len(watchlist_df) * 40 + 40),
-            )
-            st.caption(f"총 {len(watchlist_df)}개 종목")
-
-    # ─── 저장된 관심종목 ─────────────────────────────────────────────────────────
-    with _sub_saved:
-        saved_wl = get_watchlist()
-        if saved_wl.empty:
-            st.info("저장된 관심종목이 없습니다. 종목 상세 페이지나 패턴분석 페이지에서 ⭐ 버튼으로 추가하세요.")
-        else:
-            # 현재 분석 결과와 조인하여 최신 패턴/점수 표시
-            if not report_df.empty:
-                _merge_cols = ['stock_code', 'score', 'signal_count', 'entry_point', 'stop_loss']
-                _merge_pat = 'pattern_label' if 'pattern_label' in report_df.columns else 'pattern'
-                _merge_cols.insert(1, _merge_pat)
-                merged = saved_wl.merge(
-                    report_df[[c for c in _merge_cols if c in report_df.columns]],
-                    on='stock_code', how='left',
-                )
-            else:
-                merged = saved_wl.copy()
-                for col in ['pattern', 'score', 'signal_count']:
-                    merged[col] = None
-
-            _saved_pat_col = 'pattern_label' if 'pattern_label' in merged.columns else 'pattern'
-            _saved_cols = ['stock_code', 'stock_name', 'sector', _saved_pat_col,
-                           'score', 'signal_count', 'added_at', 'note']
-            _saved_cols = [c for c in _saved_cols if c in merged.columns]
-            _saved_cfg = {
-                'stock_code':    st.column_config.TextColumn('종목코드'),
-                'stock_name':    st.column_config.TextColumn('종목명'),
-                'sector':        st.column_config.TextColumn('섹터'),
-                'pattern':       st.column_config.TextColumn('패턴'),
-                'pattern_label': st.column_config.TextColumn('패턴'),
-                'score':         st.column_config.NumberColumn('점수', format='%.1f'),
-                'signal_count':  st.column_config.NumberColumn('시그널', format='%d'),
-                'added_at':      st.column_config.TextColumn('추가일시'),
-                'note':          st.column_config.TextColumn('메모'),
-            }
-            _saved_cfg = {k: v for k, v in _saved_cfg.items() if k in _saved_cols}
-
-            st.dataframe(
-                merged[_saved_cols].reset_index(drop=True),
-                column_config=_saved_cfg,
-                use_container_width=True,
-                hide_index=True,
-                height=min(500, len(merged) * 40 + 40),
-            )
-            st.caption(f"총 {len(merged)}개 저장됨")
-
-            # 제거 UI
-            _rm_opts = [
-                f"{r['stock_name']} ({r['stock_code']})"
-                for _, r in saved_wl.iterrows()
-            ]
-            _rm_sel = st.multiselect(
-                "🗑️ 제거할 종목 선택", _rm_opts,
-                placeholder="종목 선택...", key="abnormal_wl_rm",
-            )
-            if st.button("관심종목에서 제거", disabled=not _rm_sel, use_container_width=False):
-                for _opt in _rm_sel:
-                    _scode = _opt.split('(')[-1].rstrip(')')
-                    remove_from_watchlist(_scode)
-                st.toast(f"{len(_rm_sel)}개 종목 제거 완료", icon="🗑️")
-                st.rerun()
-
-# ─── 탭 4: 수급 금액 ──────────────────────────────────────────────────────────
+# ─── 탭 3: 수급 금액 ──────────────────────────────────────────────────────────
 with tab_supply_amount:
     st.caption("종목을 선택하면 외국인/기관/개인 순매수 금액 차트와 상세 테이블을 확인할 수 있습니다.")
 
@@ -629,62 +517,59 @@ with tab_supply_amount:
 """
                 st.markdown(html_table, unsafe_allow_html=True)
 
-# ---------------------------------------------------------------------------
-# 고득점 변동 알림
-# ---------------------------------------------------------------------------
-st.divider()
-st.subheader("🔔 고득점 변동 알림")
-st.caption(f"점수 {70}점 이상 종목의 신규 진입 / 급등(+5점) / 급락(-5점) / 이탈 이벤트")
+# ─── 탭 4: 고득점 변동 알림 ────────────────────────────────────────────────────
+with tab_alerts:
+    st.caption(f"점수 {70}점 이상 종목의 신규 진입 / 급등(+5점) / 급락(-5점) / 이탈 이벤트")
 
-alerts_df = get_score_change_alerts(limit=100)
-if alerts_df.empty:
-    st.info("기록된 변동 알림이 없습니다. 페이지를 다시 로드하면 오늘 분석 결과와 이전 분석을 비교합니다.")
-else:
-    _ct_labels = {
-        'new_entry':  '🆕 신규 진입',
-        'score_up':   '📈 급등',
-        'score_down': '📉 급락',
-        'exit':       '🚪 이탈',
-    }
+    alerts_df = get_score_change_alerts(limit=100)
+    if alerts_df.empty:
+        st.info("기록된 변동 알림이 없습니다. 페이지를 다시 로드하면 오늘 분석 결과와 이전 분석을 비교합니다.")
+    else:
+        _ct_labels = {
+            'new_entry':  '🆕 신규 진입',
+            'score_up':   '📈 급등',
+            'score_down': '📉 급락',
+            'exit':       '🚪 이탈',
+        }
 
-    _ct_all = list(_ct_labels.keys())
-    _ct_sel = st.multiselect(
-        "이벤트 유형 필터",
-        options=_ct_all,
-        default=_ct_all,
-        format_func=lambda x: _ct_labels.get(x, x),
-        key="alert_type_filter",
-    )
+        _ct_all = list(_ct_labels.keys())
+        _ct_sel = st.multiselect(
+            "이벤트 유형 필터",
+            options=_ct_all,
+            default=_ct_all,
+            format_func=lambda x: _ct_labels.get(x, x),
+            key="alert_type_filter",
+        )
 
-    filtered_alerts = alerts_df[alerts_df['change_type'].isin(_ct_sel)] if _ct_sel else alerts_df
+        filtered_alerts = alerts_df[alerts_df['change_type'].isin(_ct_sel)] if _ct_sel else alerts_df
 
-    _al_cols = ['analysis_date', 'change_type', 'stock_code', 'stock_name',
-                'sector', 'pattern', 'score', 'prev_score', 'signal_count']
-    _al_cols = [c for c in _al_cols if c in filtered_alerts.columns]
+        _al_cols = ['analysis_date', 'change_type', 'stock_code', 'stock_name',
+                    'sector', 'pattern', 'score', 'prev_score', 'signal_count']
+        _al_cols = [c for c in _al_cols if c in filtered_alerts.columns]
 
-    _al_cfg = {
-        'analysis_date': st.column_config.TextColumn('분석일'),
-        'change_type':   st.column_config.TextColumn('변동 유형'),
-        'stock_code':    st.column_config.TextColumn('종목코드'),
-        'stock_name':    st.column_config.TextColumn('종목명'),
-        'sector':        st.column_config.TextColumn('섹터'),
-        'pattern':       st.column_config.TextColumn('패턴'),
-        'score':         st.column_config.NumberColumn('현재 점수', format='%.1f'),
-        'prev_score':    st.column_config.NumberColumn('이전 점수', format='%.1f'),
-        'signal_count':  st.column_config.NumberColumn('시그널', format='%d'),
-    }
-    _al_cfg = {k: v for k, v in _al_cfg.items() if k in _al_cols}
+        _al_cfg = {
+            'analysis_date': st.column_config.TextColumn('분석일'),
+            'change_type':   st.column_config.TextColumn('변동 유형'),
+            'stock_code':    st.column_config.TextColumn('종목코드'),
+            'stock_name':    st.column_config.TextColumn('종목명'),
+            'sector':        st.column_config.TextColumn('섹터'),
+            'pattern':       st.column_config.TextColumn('패턴'),
+            'score':         st.column_config.NumberColumn('현재 점수', format='%.1f'),
+            'prev_score':    st.column_config.NumberColumn('이전 점수', format='%.1f'),
+            'signal_count':  st.column_config.NumberColumn('시그널', format='%d'),
+        }
+        _al_cfg = {k: v for k, v in _al_cfg.items() if k in _al_cols}
 
-    _disp_alerts = filtered_alerts[_al_cols].copy()
-    _disp_alerts['change_type'] = _disp_alerts['change_type'].map(
-        lambda x: _ct_labels.get(x, x)
-    )
+        _disp_alerts = filtered_alerts[_al_cols].copy()
+        _disp_alerts['change_type'] = _disp_alerts['change_type'].map(
+            lambda x: _ct_labels.get(x, x)
+        )
 
-    st.dataframe(
-        _disp_alerts.reset_index(drop=True),
-        column_config=_al_cfg,
-        use_container_width=True,
-        hide_index=True,
-        height=min(500, len(_disp_alerts) * 40 + 40),
-    )
-    st.caption(f"총 {len(_disp_alerts)}건 (최근 100건)")
+        st.dataframe(
+            _disp_alerts.reset_index(drop=True),
+            column_config=_al_cfg,
+            use_container_width=True,
+            hide_index=True,
+            height=min(500, len(_disp_alerts) * 40 + 40),
+        )
+        st.caption(f"총 {len(_disp_alerts)}건 (최근 100건)")

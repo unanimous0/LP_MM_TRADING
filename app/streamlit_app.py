@@ -1,5 +1,5 @@
 """
-Stage 5-1: Streamlit 웹 대시보드 - 수급 왕 메인 페이지
+Stage 5-1: Streamlit 웹 대시보드 - 수급 메인 페이지
 
 final_score 기반 단일 랭킹 + 드릴다운 분석.
 """
@@ -87,7 +87,7 @@ min_score_filter = st.sidebar.slider(
 
 top_n = st.sidebar.selectbox(
     "표시 종목 수", [10, 20, 30, 50, 100], index=1,
-    help="수급 왕 랭킹에 표시할 최대 종목 수",
+    help="수급 랭킹에 표시할 최대 종목 수",
 )
 
 # ---------------------------------------------------------------------------
@@ -149,9 +149,9 @@ col5.metric("시그널 2+", f"{signal_2plus}개", help="시그널 2개 이상 �
 st.divider()
 
 # ---------------------------------------------------------------------------
-# 수급 왕 TOP N 랭킹
+# 수급 TOP N 랭킹
 # ---------------------------------------------------------------------------
-st.subheader(f"수급 왕 TOP {min(top_n, len(ranked_df))}")
+st.subheader(f"수급 TOP {min(top_n, len(ranked_df))}")
 st.caption(f"종합점수(패턴점수 + 시그널×5) 기준 내림차순 · 최소 {min_score_filter:.0f}점 이상 · {len(ranked_df)}개 종목")
 
 if ranked_df.empty:
@@ -183,26 +183,39 @@ else:
     }
     _col_cfg = {k: v for k, v in _col_cfg.items() if k in _show_cols}
 
-    st.dataframe(
+    # 테이블 클릭 → 드릴다운 연동
+    event = st.dataframe(
         _display[_show_cols],
         column_config=_col_cfg,
         use_container_width=True,
         hide_index=True,
-        height=min(700, len(_display) * 40 + 40),
+        height=min(600, len(_display) * 40 + 40),
+        on_select="rerun",
+        selection_mode="single-row",
+        key="ranking_table",
     )
 
-    # ---------------------------------------------------------------------------
-    # 드릴다운: 종목 선택 → "왜 이 종목이 상위인가?"
-    # ---------------------------------------------------------------------------
-    st.divider()
-    st.subheader("종목 드릴다운")
-    st.caption("위 랭킹에서 궁금한 종목을 선택하면 상위 랭크 이유를 분석합니다.")
-
+    # 클릭된 행 → selectbox 동기화 (session_state 직접 업데이트)
     _drill_options = [
         f"#{i+1} {row['stock_name']} ({row['stock_code']}) — {row['final_score']:.1f}점"
         for i, (_, row) in enumerate(ranked_df.iterrows())
     ]
-    _drill_sel = st.selectbox("종목 선택", _drill_options, key="drill_select")
+    _selected_rows = event.selection.rows if event.selection else []
+    if _selected_rows:
+        _drill_idx = _selected_rows[0]
+        if _drill_idx < len(_drill_options):
+            st.session_state['drill_select'] = _drill_options[_drill_idx]
+
+    # ---------------------------------------------------------------------------
+    # 드릴다운: 선택된 종목 분석
+    # ---------------------------------------------------------------------------
+    st.divider()
+    st.subheader("종목 드릴다운")
+
+    _drill_sel = st.selectbox(
+        "종목 선택", _drill_options, key="drill_select",
+        help="테이블에서 행을 클릭하거나, 여기서 직접 선택할 수 있습니다.",
+    )
 
     if _drill_sel:
         _drill_code = _drill_sel.split('(')[1].split(')')[0]
