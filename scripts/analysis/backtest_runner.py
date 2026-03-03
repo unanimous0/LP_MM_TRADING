@@ -55,7 +55,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.database.connection import get_connection, DB_PATH
+from src.database.connection import get_pg_engine
 from src.backtesting.engine import BacktestEngine, BacktestConfig
 from src.backtesting.metrics import PerformanceMetrics
 from src.backtesting.visualizer import BacktestVisualizer
@@ -175,7 +175,6 @@ def run_walk_forward(args):
         use_divergence=not args.no_divergence,
     )
     analyzer = WalkForwardAnalyzer(
-        db_path=str(project_root / DB_PATH),
         start_date=args.start,
         end_date=args.end,
         wf_config=wf_config,
@@ -204,7 +203,6 @@ def run_optimization(args):
     )
 
     optimizer = OptunaOptimizer(
-        db_path=str(project_root / DB_PATH),
         start_date=args.start,
         end_date=args.end,
         base_config=base_config,
@@ -377,10 +375,10 @@ def main():
     )
 
     # 데이터베이스 연결
-    conn = get_connection()
+    pg_engine = get_pg_engine()
 
     # 백테스트 실행
-    engine = BacktestEngine(conn, config)
+    engine = BacktestEngine(pg_engine, config)
 
     result = engine.run(
         start_date=args.start,
@@ -439,7 +437,7 @@ def main():
                 show=args.plot
             )
 
-    conn.close()
+    # PostgreSQL engine은 싱글턴 — close 불필요
 
 
 if __name__ == '__main__':

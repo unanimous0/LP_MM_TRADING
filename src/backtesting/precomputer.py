@@ -10,7 +10,7 @@ import pandas as pd
 import numpy as np
 from dataclasses import dataclass, field
 from typing import Optional
-import sqlite3
+from sqlalchemy import text
 
 
 PERIODS = {
@@ -57,7 +57,7 @@ class BacktestPrecomputer:
     벡터화 연산으로 전체 날짜의 Z-Score/시그널을 한 번에 계산.
     """
 
-    def __init__(self, conn: sqlite3.Connection, institution_weight: float = 0.3,
+    def __init__(self, conn, institution_weight: float = 0.3,
                  use_tc: bool = True, use_divergence: bool = True):
         """
         Args:
@@ -137,18 +137,32 @@ class BacktestPrecomputer:
         )
 
     def _load_raw_data(self, end_date: str) -> pd.DataFrame:
-        """DB에서 원본 데이터 1회 로드"""
-        query = """
-        SELECT trade_date, stock_code,
-               foreign_net_amount, institution_net_amount,
-               close_price, free_float_shares
-        FROM investor_flows
-        WHERE close_price IS NOT NULL
-          AND free_float_shares IS NOT NULL
-          AND trade_date <= ?
-        ORDER BY stock_code, trade_date
-        """
-        return pd.read_sql(query, self.conn, params=[end_date])
+        """DB에서 원본 데이터 1회 로드 (PostgreSQL PIVOT 쿼리)"""
+        query = text("""
+        SELECT
+            it.time AS trade_date,
+            it.stock_code,
+            SUM(CASE WHEN it.investor_type = 'FOREIGN'      THEN it.net_buy_value ELSE 0 END) AS foreign_net_amount,
+            SUM(CASE WHEN it.investor_type = 'INSTITUTION'  THEN it.net_buy_value ELSE 0 END) AS institution_net_amount,
+            MAX(o.close_price)      AS close_price,
+            MAX(ff.floating_shares) AS free_float_shares
+        FROM investor_trading it
+        JOIN ohlcv_daily o ON it.time = o.time AND it.stock_code = o.stock_code
+        JOIN (
+            SELECT DISTINCT ON (stock_code) stock_code, floating_shares
+            FROM floating_shares
+            ORDER BY stock_code, base_date DESC
+        ) ff ON it.stock_code = ff.stock_code
+        WHERE it.investor_type IN ('FOREIGN', 'INSTITUTION')
+          AND o.close_price IS NOT NULL
+          AND it.time <= :end_date
+        GROUP BY it.time, it.stock_code
+        ORDER BY it.stock_code, it.time
+        """)
+        df = pd.read_sql(query, self.conn, params={'end_date': end_date})
+        # PostgreSQL은 DATE를 datetime.date로 반환 → 문자열 통일 (기존 비교 로직 호환)
+        df['trade_date'] = df['trade_date'].astype(str)
+        return df
 
     def _compute_sff_all_dates(self, raw_df: pd.DataFrame) -> pd.DataFrame:
         """전체 날짜 Sff 벡터화 계산 (normalizer._apply_sff_formula 동일 로직)"""
@@ -282,7 +296,7 @@ class BacktestPrecomputer:
 
     def _build_stock_names(self) -> dict:
         """stock_code → stock_name dict 생성"""
-        df = pd.read_sql("SELECT stock_code, stock_name FROM stocks", self.conn)
+        df = pd.read_sql(text("SELECT stock_code, stock_name FROM stocks"), self.conn)
         return dict(zip(df['stock_code'], df['stock_name']))
 
     def _compute_patterns_all_dates(self, zscore_df: pd.DataFrame,

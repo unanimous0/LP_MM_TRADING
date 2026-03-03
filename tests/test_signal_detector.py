@@ -13,36 +13,26 @@ They will be skipped if the database is not available.
 
 import pytest
 import pandas as pd
-from pathlib import Path
 
 from src.analyzer.signal_detector import SignalDetector
-from src.database.connection import get_connection
+from src.database.connection import get_pg_engine
 
 
-# Check if database exists
-DB_PATH = Path(__file__).parent.parent / 'data' / 'processed' / 'investor_data.db'
-DB_EXISTS = DB_PATH.exists()
-
-skip_if_no_db = pytest.mark.skipif(
-    not DB_EXISTS,
-    reason="Database not found. Run load_initial_data.py first."
-)
-
-
-@skip_if_no_db
 class TestSignalDetector:
     """Test SignalDetector class"""
 
+    # 전체 테이블 스캔 방지 — 테스트용 소수 종목
+    TEST_STOCKS = ['005930', '000660', '035720', '035420', '051910']
+
     @pytest.fixture
     def detector(self):
-        """Create detector instance"""
-        conn = get_connection()
-        yield SignalDetector(conn)
-        conn.close()
+        """Create detector instance — Engine 사용으로 쿼리마다 fresh connection"""
+        engine = get_pg_engine()
+        yield SignalDetector(engine)
 
     def test_detect_ma_crossover(self, detector):
         """Test MA golden cross detection"""
-        result = detector.detect_ma_crossover()
+        result = detector.detect_ma_crossover(stock_codes=self.TEST_STOCKS)
 
         # Check columns exist
         expected_cols = ['stock_code', 'trade_date', 'ma_short', 'ma_long',
@@ -59,7 +49,7 @@ class TestSignalDetector:
 
     def test_calculate_acceleration(self, detector):
         """Test supply acceleration calculation"""
-        result = detector.calculate_acceleration()
+        result = detector.calculate_acceleration(stock_codes=self.TEST_STOCKS)
 
         # Check columns exist
         expected_cols = ['stock_code', 'trade_date', 'recent_avg',
@@ -73,7 +63,7 @@ class TestSignalDetector:
 
     def test_calculate_sync_rate(self, detector):
         """Test foreign-institution sync rate calculation"""
-        result = detector.calculate_sync_rate()
+        result = detector.calculate_sync_rate(stock_codes=self.TEST_STOCKS)
 
         # Check columns exist
         expected_cols = ['stock_code', 'trade_date', 'sync_days',
@@ -92,7 +82,7 @@ class TestSignalDetector:
 
     def test_detect_all_signals(self, detector):
         """Test integrated signal detection"""
-        result = detector.detect_all_signals()
+        result = detector.detect_all_signals(stock_codes=self.TEST_STOCKS)
 
         # Check columns exist
         expected_cols = ['stock_code', 'ma_cross', 'ma_diff', 'acceleration',
@@ -112,7 +102,8 @@ class TestSignalDetector:
 
     def test_get_strong_signals(self, detector):
         """Test strong signal filtering"""
-        result = detector.get_strong_signals(min_signal_count=2)
+        result = detector.get_strong_signals(
+            stock_codes=self.TEST_STOCKS, min_signal_count=2)
 
         # All results should have signal_count >= 2
         if len(result) > 0:
@@ -132,15 +123,13 @@ class TestSignalDetector:
             'sync_window': 10,
         }
 
-        conn = get_connection()
-        detector = SignalDetector(conn, config=custom_config)
+        engine = get_pg_engine()
+        detector = SignalDetector(engine, config=custom_config)
 
         # Check config applied
         assert detector.config['ma_short'] == 3
         assert detector.config['ma_long'] == 10
         assert detector.config['acceleration_window'] == 3
-
-        conn.close()
 
     def test_specific_stock_codes(self, detector):
         """Test signal detection for specific stock codes"""
@@ -188,7 +177,7 @@ class TestSignalDetector:
 
     def test_signal_list_content(self, detector):
         """Test signal_list contains valid signal names"""
-        result = detector.detect_all_signals()
+        result = detector.detect_all_signals(stock_codes=self.TEST_STOCKS)
 
         valid_signals = ['MA크로스', '가속도', '동조율']
 
@@ -199,7 +188,7 @@ class TestSignalDetector:
 
     def test_ma_diff_consistency(self, detector):
         """Test ma_diff consistency with ma_short and ma_long"""
-        result = detector.detect_ma_crossover()
+        result = detector.detect_ma_crossover(stock_codes=self.TEST_STOCKS)
 
         if len(result) > 0:
             # ma_diff should equal ma_short - ma_long

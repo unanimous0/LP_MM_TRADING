@@ -8,7 +8,6 @@ WalkForwardAnalyzer 클래스:
 - 전체 기간 통합 성과 분석
 """
 
-import sqlite3
 import calendar
 import pandas as pd
 from typing import Optional, List, Dict
@@ -18,6 +17,7 @@ from multiprocessing import Pool
 from .engine import BacktestConfig, BacktestEngine
 from .optimizer import OptunaOptimizer
 from .metrics import PerformanceMetrics
+from src.database.connection import get_pg_engine
 
 
 def _add_months(dt: datetime, months: int) -> datetime:
@@ -50,6 +50,7 @@ def _run_wf_period_optuna_worker(args: tuple) -> Optional[dict]:
 
     Args:
         args: (db_path, period, base_config_dict, optuna_param_space, n_trials, metric)
+            - db_path: 레거시 (미사용, 하위 호환용)
             - period: {'train_start', 'train_end', 'val_start', 'val_end'}
             - base_config_dict: BacktestConfig 파라미터 딕셔너리
 
@@ -57,13 +58,12 @@ def _run_wf_period_optuna_worker(args: tuple) -> Optional[dict]:
         {기간 정보, best_params, 성과 메트릭, val_trades, val_daily_values}
         또는 None (최적화 실패 시)
     """
-    db_path, period, base_config_dict, optuna_param_space, n_trials, metric = args
+    _db_path, period, base_config_dict, optuna_param_space, n_trials, metric = args
 
     base_config = BacktestConfig(**base_config_dict)
 
     # 학습 기간: Optuna 2단계 최적화
     optimizer = OptunaOptimizer(
-        db_path=db_path,
         start_date=period['train_start'],
         end_date=period['train_end'],
         base_config=base_config,
@@ -79,16 +79,13 @@ def _run_wf_period_optuna_worker(args: tuple) -> Optional[dict]:
         return None
 
     # 검증 기간: 최적 파라미터로 백테스트
-    conn = sqlite3.connect(db_path)
-    try:
-        val_config = BacktestConfig(**best_result['params'])
-        engine = BacktestEngine(conn, val_config)
-        val_result = engine.run(
-            period['val_start'], period['val_end'],
-            verbose=False, preload_data=True,
-        )
-    finally:
-        conn.close()
+    pg_engine = get_pg_engine()
+    val_config = BacktestConfig(**best_result['params'])
+    engine = BacktestEngine(pg_engine, val_config)
+    val_result = engine.run(
+        period['val_start'], period['val_end'],
+        verbose=False, preload_data=True,
+    )
 
     val_metrics = PerformanceMetrics(
         val_result['trades'],
@@ -147,16 +144,16 @@ class WalkForwardAnalyzer:
     """Walk-Forward Analysis 클래스 (Optuna 기반)"""
 
     def __init__(self,
-                 db_path: str,
-                 start_date: str,
-                 end_date: str,
+                 db_path: str = '',
+                 start_date: str = '',
+                 end_date: str = '',
                  wf_config: Optional[WalkForwardConfig] = None,
                  base_config: Optional[BacktestConfig] = None,
                  param_grid: Optional[dict] = None,
                  optuna_param_space: Optional[dict] = None):
         """
         Args:
-            db_path: SQLite DB 경로
+            db_path: (레거시, 미사용) 하위 호환용으로 파라미터 유지
             start_date: 전체 분석 시작일 (YYYY-MM-DD)
             end_date: 전체 분석 종료일 (YYYY-MM-DD)
             wf_config: Walk-Forward 설정 (None이면 기본값)
@@ -166,7 +163,7 @@ class WalkForwardAnalyzer:
                 None이면 OptunaOptimizer.DEFAULT_PARAM_SPACE 사용
                 형식: {'param': {'type': 'float'/'int', 'low': ..., 'high': ...}}
         """
-        self.db_path = db_path
+        self.db_path = db_path  # 레거시 호환 (미사용)
         self.start_date = start_date
         self.end_date = end_date
         self.wf_config = wf_config or WalkForwardConfig()

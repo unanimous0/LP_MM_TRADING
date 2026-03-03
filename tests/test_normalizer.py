@@ -13,32 +13,18 @@ They will be skipped if the database is not available.
 
 import pytest
 import pandas as pd
-from pathlib import Path
 
 from src.analyzer.normalizer import SupplyNormalizer
-from src.database.connection import get_connection
+from src.database.connection import get_pg_engine
 
 
-# Check if database exists
-DB_PATH = Path(__file__).parent.parent / 'data' / 'processed' / 'investor_data.db'
-DB_EXISTS = DB_PATH.exists()
-
-skip_if_no_db = pytest.mark.skipif(
-    not DB_EXISTS,
-    reason="Database not found. Run load_initial_data.py first."
-)
-
-
-@skip_if_no_db
 class TestCalculateSff:
     """Test calculate_sff() method"""
 
     @pytest.fixture
     def normalizer(self):
         """Create normalizer instance"""
-        conn = get_connection()
-        yield SupplyNormalizer(conn)
-        conn.close()
+        return SupplyNormalizer(get_pg_engine())
 
     def test_calculate_sff_valid_stock(self, normalizer):
         """Calculate Sff for valid stock code"""
@@ -85,16 +71,13 @@ class TestCalculateSff:
             )
 
 
-@skip_if_no_db
 class TestCalculateZScore:
     """Test calculate_zscore() method"""
 
     @pytest.fixture
     def normalizer(self):
         """Create normalizer instance"""
-        conn = get_connection()
-        yield SupplyNormalizer(conn)
-        conn.close()
+        return SupplyNormalizer(get_pg_engine())
 
     def test_calculate_zscore_valid_stock(self, normalizer):
         """Calculate Z-Score for valid stock"""
@@ -115,16 +98,13 @@ class TestCalculateZScore:
         assert result.empty, "Should return empty for insufficient data"
 
 
-@skip_if_no_db
 class TestGetAbnormalSupply:
     """Test get_abnormal_supply() method"""
 
     @pytest.fixture
     def normalizer(self):
         """Create normalizer instance"""
-        conn = get_connection()
-        yield SupplyNormalizer(conn)
-        conn.close()
+        return SupplyNormalizer(get_pg_engine())
 
     def test_get_abnormal_supply_default(self, normalizer):
         """Get abnormal supply with default parameters"""
@@ -162,16 +142,13 @@ class TestGetAbnormalSupply:
             assert (result['combined_zscore'].abs() >= 3.0).any(), "Should have Z-Score >= 3.0"
 
 
-@skip_if_no_db
 class TestGetSffData:
     """Test _get_sff_data() method"""
 
     @pytest.fixture
     def normalizer(self):
         """Create normalizer instance"""
-        conn = get_connection()
-        yield SupplyNormalizer(conn)
-        conn.close()
+        return SupplyNormalizer(get_pg_engine())
 
     def test_get_sff_data_all_stocks(self, normalizer):
         """Get Sff data for all stocks"""

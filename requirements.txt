@@ -3,11 +3,9 @@ numpy>=1.24.0
 openpyxl>=3.1.0  # 엑셀 파일 처리
 python-dotenv>=1.0.0  # 환경변수 관리
 
-# 크롤링 관련
-finance-datareader>=0.9.50  # 주가 데이터 수집
-requests>=2.31.0  # HTTP 요청
-beautifulsoup4>=4.12.0  # HTML 파싱
-tqdm>=4.66.0  # 진행률 표시
+# PostgreSQL 연결
+psycopg2-binary>=2.9.0  # PostgreSQL 드라이버
+sqlalchemy>=2.0.0       # ORM / 연결 관리
 
 # 시각화 관련 (Stage 2)
 matplotlib>=3.5.0  # 히트맵 렌더링
@@ -15,3 +13,9 @@ seaborn>=0.12.0  # 색상 스케일
 plotly>=5.0.0  # 인터랙티브 차트 (Option 2)
 optuna>=3.0.0  # Bayesian Optimization (Walk-Forward)
 streamlit>=1.30.0  # 웹 대시보드 (Stage 5)
+
+# 크롤링 관련 (레거시 — 공유 DB 전환 후 불필요)
+# finance-datareader>=0.9.50
+# requests>=2.31.0
+# beautifulsoup4>=4.12.0
+tqdm>=4.66.0  # 진행률 표시 (기타 용도로 유지)

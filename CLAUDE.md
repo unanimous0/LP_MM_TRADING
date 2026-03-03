@@ -1,10 +1,16 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- **현재 작업**: Stage 5-1 Streamlit 웹 대시보드 진행 중
-- **마지막 업데이트**: 2026-03-01
+- **현재 작업**: PostgreSQL 공유 DB 전환 완료 — Stage 5-2 기획 또는 데이터 확장 중
+- **마지막 업데이트**: 2026-03-04
+- **DB 전환**: SQLite(`data/processed/investor_data.db`) → PostgreSQL(`korea_stock_data`) 완료
+  - 소스 전환 완료: `connection.py`, `normalizer.py`, `precomputer.py`, `engine.py`, `signal_detector.py`, `data_loader.py`, `optimizer.py`, `walk_forward.py`, `backtest_runner.py`
+  - PostgreSQL `datetime.date` → `str` 변환 처리 (precomputer, normalizer)
+  - 앱 전용 데이터(watchlist/backtest_history/score_change_log): `data/app.db`(SQLite) 분리
+  - 환경변수: `KOREA_STOCK_DB_HOST`(기본 localhost), `KOREA_STOCK_DB_PORT`(기본 5432)
+  - 삭제된 파일: `scripts/crawlers/` (3개), `scripts/loaders/` (3개), `src/database/schema.py`
 - **백테스트 권장 시작일**: 2025-01-01 이후 (DB가 2024-01-02 시작이므로 1Y 데이터 확보)
-- **다음 시작점**: 페이지 재편 완료 (수급 메인 + 이상수급 분리) — 다음 기능 기획 또는 실제 데이터 검증
+- **다음 시작점**: Stage 5-1 전 기능 완료 (Phase 2 포함) — Stage 5-2(자동화 파이프라인) 또는 데이터 확장(23년/시가) 선택
 - **시각화**: matplotlib 5종 (PNG/PDF) + Plotly 5종 (Streamlit 인터랙티브)
 - **Streamlit**: `venv/bin/streamlit run app/streamlit_app.py` → http://localhost:8501
 - **현재 브랜치**: main
@@ -47,10 +53,10 @@ git push
 - **DB 교체 시에만** 위 삭제 절차 수행
 
 ### TODO (데이터 개선 시)
-- [ ] **공유 한국주식 DB 연동** → 크롤링 제거 + 다중 프로젝트 공유
-  - 여러 프로젝트에서 공동으로 사용하는 한국주식 DB 구축 중
-  - 완성 시: `src/database/connection.py` 접속 설정만 변경하면 이 프로젝트에 즉시 적용
-  - 효과: 크롤링 유지보수 부담 제거, 데이터 일관성 확보
+- [x] **공유 한국주식 DB 연동** → 크롤링 제거 + 다중 프로젝트 공유 ✅ (2026-03-04 완료)
+  - PostgreSQL `korea_stock_data` DB 연동 완료
+  - `src/database/connection.py` → `get_pg_engine()` 싱글턴
+  - 크롤러/로더 스크립트 삭제 (`scripts/crawlers/`, `scripts/loaders/`)
 - [ ] **23년 데이터 추가** → 백테스트 기간 확장 (현재 2024-01-02부터 시작)
   - 23년 데이터 추가 시 2024년 백테스트도 2Y Z-Score 완전 활용 가능
 - [ ] **시가 데이터 추가** → 진입/청산 타이밍 개선
@@ -173,7 +179,7 @@ git push
   - `pattern_classifier.py` 폴백: 200D→100D→50D→20D (500D 제거)
   - 히트맵 정렬(`charts.py`, `heatmap_renderer.py`)도 200D 기준으로 통일
   - 스크립트/문서 10곳 일괄 수정
-- 290개 테스트 (100% 통과)
+- 294개 테스트 (100% 통과, slow 6개 제외)
 
 **핵심 인사이트**:
 - 3개 패턴은 투자 스타일별 최적 종목 필터링 (단기=돌파형, 중기=매집형, 저가=반등형)
@@ -197,16 +203,17 @@ cd LP_MM_TRADING
 pip install -r requirements.txt
 ```
 
-### 데이터베이스 초기화
+### 데이터베이스 연결
 ```bash
-# 1. DB 생성
-python -c "from src.database.schema import create_database; create_database()"
+# PostgreSQL 공유 DB는 별도 프로젝트에서 관리 (크롤링 불필요)
+# 기본값: korea_stock_reader@localhost:5432/korea_stock_data
 
-# 2. 데이터 로드
-python scripts/loaders/load_initial_data.py
+# 환경변수로 호스트/포트 변경 시:
+export KOREA_STOCK_DB_HOST=your-server
+export KOREA_STOCK_DB_PORT=5432
 
-# 3. 주가/유통주식 크롤링
-python scripts/crawlers/crawl_all_data.py --start 2024-01-01
+# 연결 확인:
+python -c "from src.database.connection import get_pg_engine; print(get_pg_engine())"
 ```
 
 ### 분석 실행
@@ -377,33 +384,38 @@ python backtest_runner.py --plot --save-pdf output/report.pdf
 **목표**: 일별 자동 분석 및 AI 기반 종목 리포트 생성 웹 서비스 구축
 
 **전체 로드맵**:
-- **Stage 5-1**: Streamlit 웹 대시보드 (진행 중)
+- **Stage 5-1**: Streamlit 웹 대시보드 (완료 ✅)
 - **Stage 5-2**: 스케줄러 기반 자동화 파이프라인
 
 ---
 
-#### 5-1. Streamlit 웹 대시보드 (진행 중)
+#### 5-1. Streamlit 웹 대시보드 (완료 ✅)
 
 **구조**: `app/` 멀티페이지 앱
 
 **완료된 기능**:
 - ✅ 멀티페이지 앱 구조 (`app/streamlit_app.py` + `app/pages/`)
 - ✅ 공유 데이터 로더 (`app/utils/data_loader.py`) - DB 연결, 분석/백테스트 캐싱
-- ✅ 홈 페이지 (`1_🏠_홈.py`) - DB 통계, 최근 업데이트
-- ✅ 분석 페이지 (`2_🔍_수급_분석.py`) - Stage 1-3 파이프라인, 패턴/시그널 필터링
+- ✅ 홈 페이지 (`streamlit_app.py`) - KPI 5개 + final_score 랭킹 + 드릴다운 패널 (패턴/점수/Z-Score/종목상세 링크)
+- ✅ 패턴분석 페이지 (`2_🔍_패턴분析.py`) - 사이드바 필터 + 2탭 + 커스텀 HTML 툴팁 테이블
 - ✅ 백테스트 페이지 (`3_📈_백테스트.py`) - 파라미터 설정 + 실행 + 결과 시각화
   - Plotly 인터랙티브 차트 5종 (수익률 곡선, 낙폭, 월별 수익률, 수익률 분포, 패턴별 성과)
   - KPI 카드 5개 (총 수익률, 승률, MDD, 샤프 비율, 총 거래)
   - 거래 내역 테이블 + CSV 다운로드
   - **Optuna 파라미터 최적화** 버튼 (Trial 수/평가 지표 설정 → 최적 파라미터 자동 반영)
+- ✅ 워크포워드 페이지 (`4_🔄_워크포워드.py`)
+- ✅ 종목 상세 페이지 (`5_📋_종목상세.py`) — 4탭 (Z-Score추이/수급금액/시그널MA/패턴현황)
+- ✅ 종목 비교 페이지 (`6_🔀_종목비교.py`) — 최대 5종목 병렬 비교 (Z-Score추이 오버레이 / 멀티기간 바차트 / 레이더 / 지표 테이블)
+- ✅ 이상수급 페이지 (`7_⚡_이상수급.py`) — 4탭 (이상수급 / 당일수급순위 / 수급금액 / 고득점변동알림)
+- ✅ 히트맵 페이지 (`1_📊_히트맵.py`) — 클릭→미니상세, 호버 패턴/점수, 섹터 평균
 - ✅ BacktestPrecomputer 속도 최적화 (165~262배 향상)
 - ✅ PlotlyVisualizer (`src/backtesting/plotly_visualizer.py`)
 
-**남은 작업**:
-- ✅ 종목 상세 페이지 (`app/pages/5_📋_종목상세.py`) — 4탭 (Z-Score추이/수급금액/시그널MA/패턴현황)
-- ✅ 종목 상세 UI 개선 — 수급금액 테이블/차트/사이드바 대폭 개선
-- ✅ 히트맵 페이지 — 인터랙티브 히트맵 (클릭→미니상세, 호버 패턴/점수, 필터, 섹터 평균)
-- ✅ 분석 페이지 고도화 — 정렬 7종 + 수급 방향 필터 + 7개 탭 (섹터 크로스/Z히트맵/집중도/Treemap)
+**Phase 2 대시보드 기능** (모두 완료 ✅):
+- ✅ **관심종목 저장** — SQLite `watchlist` 테이블 영구 저장 / 종목상세(⭐ 토글) + 패턴분석(일괄 추가/제거) + 종목비교(자동 기본 선택) 연동
+- ✅ **종목 비교 페이지** — 관심종목 자동 기본 선택 + 4탭 병렬 비교
+- ✅ **고득점 변동 알림** — `score_change_log` 테이블 / 70점+ 종목 변동 이벤트 4종(신규진입/점수급등/점수하락/이탈) 자동 기록 → 이상수급 페이지 Tab 4
+- ✅ **백테스트 히스토리** — `backtest_history` 테이블 / 레이블·메모 저장 → 백테스트 페이지 하단 expander에서 조회·삭제
 
 **실행 방법**:
 ```bash
@@ -595,8 +607,7 @@ LP_MM_TRADING/
 ├── README.md                      # 프로젝트 소개
 ├── requirements.txt               # 의존성
 ├── data/
-│   └── processed/
-│       └── investor_data.db       # SQLite DB (171,227 레코드)
+│   └── app.db                     # 앱 전용 SQLite (watchlist/backtest_history/score_change_log)
 ├── app/                           # Streamlit 웹 대시보드 (Stage 5-1) ✨
 │   ├── streamlit_app.py           # 메인 엔트리포인트
 │   ├── utils/
@@ -607,8 +618,7 @@ LP_MM_TRADING/
 │       └── 3_📈_백테스트.py        # 백테스트 실행 + Optuna 최적화 + Plotly 차트
 ├── src/
 │   ├── database/                  # DB 모듈
-│   │   ├── schema.py
-│   │   └── connection.py
+│   │   └── connection.py          # PostgreSQL(시장데이터) + SQLite(앱데이터) 이중 연결
 │   ├── analyzer/                  # 분석 모듈
 │   │   ├── normalizer.py          # Sff/Z-Score 계산 (외국인 중심 조건부)
 │   │   ├── pattern_classifier.py  # 패턴 분류 (Stage 3)
@@ -629,18 +639,13 @@ LP_MM_TRADING/
 │   ├── config.py                  # 전역 설정
 │   └── utils.py                   # 입력 검증 (보안)
 ├── scripts/
-│   ├── analysis/
-│   │   ├── abnormal_supply_detector.py  # Stage 1 CLI
-│   │   ├── heatmap_generator.py         # Stage 2 CLI
-│   │   └── regime_scanner.py            # Stage 3 CLI (통합)
-│   ├── crawlers/
-│   │   ├── crawl_all_data.py
-│   │   ├── crawl_stock_prices.py
-│   │   └── crawl_free_float.py
-│   └── loaders/
-│       ├── load_initial_data.py
-│       └── load_daily_data.py
-└── tests/                         # 테스트 (258개 통과)
+│   └── analysis/
+│       ├── abnormal_supply_detector.py  # Stage 1 CLI
+│       ├── heatmap_generator.py         # Stage 2 CLI
+│       ├── backtest_runner.py           # Stage 4 CLI
+│       └── regime_scanner.py            # Stage 3 CLI (통합)
+├── pytest.ini                     # pytest 설정 (slow 마크 등록)
+└── tests/                         # 테스트 (294개 통과)
     ├── test_config.py
     ├── test_normalizer.py
     ├── test_performance_optimizer.py
@@ -662,13 +667,13 @@ LP_MM_TRADING/
 
 ## [Tech Stack]
 - Python 3.10+
-- SQLite (DB)
+- PostgreSQL (시장 데이터 — 공유 DB), SQLite (앱 전용 데이터)
+- SQLAlchemy, psycopg2 (DB 연결)
 - pandas, numpy (분석)
 - matplotlib, seaborn (시각화 - CLI/PDF)
 - plotly (인터랙티브 차트 - Streamlit)
 - streamlit (웹 대시보드)
 - optuna (Bayesian Optimization - --optimize, --walk-forward, Streamlit 공용)
-- FinanceDataReader, BeautifulSoup (크롤링)
 - pytest (테스트)
 
 ---
@@ -846,6 +851,68 @@ short 정렬/분류: adjusted_z = z × max(-confidence, 0)   ← 매도 방향�
 
 > 전체 이력은 **CHANGELOG.md** 참조. 아래는 최근 항목만 기록.
 
+### 2026-03-04 (PostgreSQL 전환 완료 + 코드 리뷰 5건 수정)
+
+**목표**: SQLite → PostgreSQL 공유 DB 전환 마무리 + 전체 코드베이스 검토
+
+**구현 내용**:
+
+- ✅ **소스 코드 전환 완료** (9개 파일)
+  - `optimizer.py`: `sqlite3.connect(self.db_path)` → `get_pg_engine()` (런타임 크래시 버그 수정)
+  - `walk_forward.py`: worker 함수 `db_path` 파라미터 레거시 처리
+  - `backtest_runner.py`: `DB_PATH` 임포트 제거, `get_pg_engine()` 전환
+
+- ✅ **테스트 파일 전환** (6개 파일)
+  - `test_engine.py`: undefined `conn` fixture → `get_pg_engine()` 직접 사용
+  - `test_performance_optimizer.py`: `skip_if_no_db` 제거, `get_pg_engine()` 전환
+  - `test_walk_forward.py`: SQLite in-memory fixture → PostgreSQL 실 데이터
+  - `test_optimizer.py`: unused `import sqlite3` 제거
+  - `test_normalizer.py`, `test_integrated_report.py`: `skip_if_no_db` 제거, `get_pg_engine()` 전환
+
+- ✅ **datetime.date → str 변환 처리**
+  - PostgreSQL은 DATE 컬럼을 `datetime.date` 객체로 반환 (SQLite는 문자열)
+  - `precomputer.py` `_load_raw_data()`: `df['trade_date'].astype(str)` 추가
+  - `normalizer.py` 3곳: `preload()`, `calculate_sff()`, `_get_sff_data()` — 동일 변환 추가
+
+- ✅ **불필요 파일 삭제**: `scripts/crawlers/` (3개), `scripts/loaders/` (3개), `src/database/schema.py`
+- ✅ **기타**: `config.py`에서 `get_db_path()` 제거, `pytest.ini` 생성 (slow 마크 등록)
+
+**파일** (16개):
+```
+src/backtesting/optimizer.py           (sqlite3 → get_pg_engine)
+src/backtesting/walk_forward.py        (db_path 레거시 처리)
+src/backtesting/precomputer.py         (datetime.date → str)
+src/analyzer/normalizer.py             (datetime.date → str, 3곳)
+src/config.py                          (get_db_path 제거)
+scripts/analysis/backtest_runner.py    (DB_PATH → get_pg_engine)
+tests/backtesting/test_engine.py       (conn fixture 수정)
+tests/backtesting/test_walk_forward.py (SQLite → PostgreSQL)
+tests/backtesting/test_optimizer.py    (unused import 제거)
+tests/test_performance_optimizer.py    (skip_if_no_db 제거)
+tests/test_normalizer.py              (skip_if_no_db 제거)
+tests/test_integrated_report.py       (skip_if_no_db 제거)
+pytest.ini                             (신규 — slow 마크 등록)
+삭제: scripts/crawlers/* (3), scripts/loaders/* (3), src/database/schema.py
+```
+
+**코드 리뷰** (5개 영역 병렬 검토 → 수동 검증):
+
+- ✅ **[버그] `integrated_report.py:102`**: `pd.read_sql(query, ...)` → `pd.read_sql(text(query), ...)` — SQLAlchemy 2.0+ 호환
+- ✅ **[버그] `signal_detector.py:101`**: `trade_date` datetime.date→str 변환 누락 — normalizer/precomputer와 타입 불일치
+- ✅ **[버그] `data_loader.py` SQLite 13개 함수**: 수동 `conn.close()` → `try/finally` 패턴 — 예외 시 연결 누수 방지
+- ✅ **[정리] `optimizer.py:115`**: 미사용 `db_path` 변수 제거 (레거시 잔재)
+- ✅ **[정리] `test_signal_detector.py:23`**: 무의미한 `skip_if_no_db` 데코레이터 + unused import 제거
+
+**확인 완료 (이상 없음)**:
+- Z-Score 조건부 공식 3곳 일치 (normalizer/precomputer/performance_optimizer)
+- 방향 확신도 tanh 2곳 일치 (classifier/charts)
+- Preload 캐시 vs DB 직접 쿼리 동일 출력
+- Multiprocessing 엔진 생성 정상 (자식 프로세스 독립 singleton)
+
+**테스트**: 294개 통과 (100%), slow 6개 제외, 경고 18→12개 감소
+
+---
+
 ### 2026-03-01 (페이지 재편 + UI 개선)
 
 **목표**: 메인 페이지를 final_score 단일 랭킹 중심으로 재설계 + 이상수급/수급순위를 별도 페이지로 분리
@@ -1012,5 +1079,5 @@ app/pages/2_🔍_패턴분析.py             (Tab2 캡션 추가)
 
 ---
 
-**프로젝트 버전**: v5.0 (Stage 5-1 Streamlit 대시보드 + Precomputer 속도 최적화)
-**마지막 업데이트**: 2026-02-20
+**프로젝트 버전**: v5.1 (Stage 5-1 완료 — Phase 2 대시보드 4종 포함)
+**마지막 업데이트**: 2026-03-02

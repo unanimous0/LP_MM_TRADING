@@ -14,33 +14,20 @@ They will be skipped if the database is not available.
 import pytest
 import pandas as pd
 import numpy as np
-from pathlib import Path
 import tempfile
+from pathlib import Path
 
 from src.analyzer.integrated_report import IntegratedReport
-from src.database.connection import get_connection
+from src.database.connection import get_pg_engine
 
 
-# Check if database exists
-DB_PATH = Path(__file__).parent.parent / 'data' / 'processed' / 'investor_data.db'
-DB_EXISTS = DB_PATH.exists()
-
-skip_if_no_db = pytest.mark.skipif(
-    not DB_EXISTS,
-    reason="Database not found. Run load_initial_data.py first."
-)
-
-
-@skip_if_no_db
 class TestIntegratedReport:
     """Test IntegratedReport class"""
 
     @pytest.fixture
     def report_gen(self):
         """Create report generator instance"""
-        conn = get_connection()
-        yield IntegratedReport(conn)
-        conn.close()
+        return IntegratedReport(get_pg_engine())
 
     @pytest.fixture
     def sample_classified_df(self):
@@ -273,14 +260,11 @@ class TestIntegratedReport:
             }
         }
 
-        conn = get_connection()
-        report_gen = IntegratedReport(conn, config=custom_config)
+        report_gen = IntegratedReport(get_pg_engine(), config=custom_config)
 
         # Check config applied
         assert report_gen.config['entry_rules']['급등형']['condition'] == '테스트 진입'
         assert report_gen.config['stop_loss_rules']['급등형'] == -3
-
-        conn.close()
 
     def test_entry_point_all_patterns(self, report_gen):
         """Test entry point generation for all patterns"""

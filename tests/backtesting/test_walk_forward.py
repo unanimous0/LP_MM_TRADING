@@ -15,7 +15,6 @@ WalkForwardAnalyzer 모듈 테스트 (Week 5)
 """
 
 import pytest
-import sqlite3
 import pandas as pd
 from datetime import datetime
 from unittest.mock import patch, MagicMock
@@ -23,58 +22,16 @@ from unittest.mock import patch, MagicMock
 from src.backtesting.walk_forward import WalkForwardAnalyzer, WalkForwardConfig
 from src.backtesting.engine import BacktestConfig
 from src.analyzer.normalizer import SupplyNormalizer
+from src.database.connection import get_pg_engine
 
 
 # ============================================================================
 # 픽스처
 # ============================================================================
 
-@pytest.fixture
-def sample_db():
-    """테스트용 인메모리 SQLite DB (investor_flows + stocks 테이블)"""
-    conn = sqlite3.connect(':memory:')
-    conn.execute("""
-        CREATE TABLE investor_flows (
-            trade_date TEXT,
-            stock_code TEXT,
-            foreign_net_amount REAL,
-            institution_net_amount REAL,
-            close_price REAL,
-            free_float_shares REAL
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE stocks (
-            stock_code TEXT,
-            stock_name TEXT,
-            sector TEXT
-        )
-    """)
-    # 2024-01-02 ~ 2024-01-05 데이터
-    data = [
-        ('2024-01-02', '005930', 1_000_000, 500_000, 70_000, 5_000_000_000),
-        ('2024-01-03', '005930', -500_000, 200_000, 71_000, 5_000_000_000),
-        ('2024-01-04', '005930', 800_000, 300_000, 72_000, 5_000_000_000),
-        ('2024-01-05', '005930', -200_000, -100_000, 71_500, 5_000_000_000),
-        ('2024-01-02', '000660', 200_000, 100_000, 150_000, 1_000_000_000),
-        ('2024-01-03', '000660', -100_000, -50_000, 148_000, 1_000_000_000),
-        ('2024-01-04', '000660', 300_000, 150_000, 152_000, 1_000_000_000),
-    ]
-    conn.executemany(
-        "INSERT INTO investor_flows VALUES (?, ?, ?, ?, ?, ?)", data
-    )
-    conn.execute(
-        "INSERT INTO stocks VALUES ('005930', '삼성전자', '반도체')"
-    )
-    conn.commit()
-    yield conn
-    conn.close()
-
-
 def _make_analyzer(start, end, train=6, val=1, step=1):
     """테스트용 WalkForwardAnalyzer 생성"""
     return WalkForwardAnalyzer(
-        db_path=':memory:',
         start_date=start,
         end_date=end,
         wf_config=WalkForwardConfig(
@@ -281,12 +238,15 @@ class TestWalkForwardAnalyzerRun:
 
 
 class TestNormalizerPreload:
-    """SupplyNormalizer preload / clear_preload 테스트"""
+    """SupplyNormalizer preload / clear_preload 테스트 (PostgreSQL)"""
 
-    def test_normalizer_preload_activates(self, sample_db):
+    @pytest.fixture
+    def normalizer(self):
+        """PostgreSQL 연결 기반 normalizer"""
+        return SupplyNormalizer(get_pg_engine())
+
+    def test_normalizer_preload_activates(self, normalizer):
         """preload() 후 _preload_raw가 None이 아님을 확인"""
-        normalizer = SupplyNormalizer(sample_db)
-
         assert normalizer._preload_raw is None  # 초기값
 
         normalizer.preload()
@@ -295,40 +255,35 @@ class TestNormalizerPreload:
         assert isinstance(normalizer._preload_raw, pd.DataFrame)
         assert len(normalizer._preload_raw) > 0
 
-    def test_normalizer_clear_preload(self, sample_db):
+    def test_normalizer_clear_preload(self, normalizer):
         """clear_preload() 후 _preload_raw가 None으로 복구됨"""
-        normalizer = SupplyNormalizer(sample_db)
         normalizer.preload()
         assert normalizer._preload_raw is not None  # 로드 확인
 
         normalizer.clear_preload()
         assert normalizer._preload_raw is None  # 해제 확인
 
-    def test_normalizer_preload_filters_by_end_date(self, sample_db):
+    def test_normalizer_preload_filters_by_end_date(self, normalizer):
         """preload(end_date) 후 해당 날짜 이후 데이터가 포함되지 않음"""
-        normalizer = SupplyNormalizer(sample_db)
-
-        # 2024-01-03까지만 로드
-        normalizer.preload(end_date='2024-01-03')
+        # 2022-01-10까지만 로드 (DB에 2022-01-03부터 데이터 있음)
+        normalizer.preload(end_date='2022-01-10')
 
         assert normalizer._preload_raw is not None
-        # 2024-01-04, 2024-01-05 데이터가 없어야 함
-        dates_loaded = normalizer._preload_raw['trade_date'].unique()
-        assert '2024-01-04' not in dates_loaded, "end_date 이후 데이터가 포함됨"
-        assert '2024-01-05' not in dates_loaded, "end_date 이후 데이터가 포함됨"
-        assert '2024-01-02' in dates_loaded
-        assert '2024-01-03' in dates_loaded
+        dates_loaded = normalizer._preload_raw['trade_date'].astype(str).unique()
+        # 2022-01-10 이후 데이터가 없어야 함
+        assert all(d <= '2022-01-10' for d in dates_loaded), \
+            f"end_date 이후 데이터가 포함됨: {[d for d in dates_loaded if d > '2022-01-10']}"
 
-    def test_normalizer_preload_used_in_calculate_sff(self, sample_db):
+    def test_normalizer_preload_used_in_calculate_sff(self, normalizer):
         """preload 활성화 시 calculate_sff()가 메모리 필터링 사용"""
-        normalizer = SupplyNormalizer(sample_db)
+        end_date = '2022-01-10'
 
         # preload 없이 계산
-        result_no_preload = normalizer.calculate_sff(end_date='2024-01-03')
+        result_no_preload = normalizer.calculate_sff(end_date=end_date)
 
         # preload 후 계산
         normalizer.preload()
-        result_with_preload = normalizer.calculate_sff(end_date='2024-01-03')
+        result_with_preload = normalizer.calculate_sff(end_date=end_date)
 
         # 결과가 동일해야 함
         assert len(result_no_preload) == len(result_with_preload)

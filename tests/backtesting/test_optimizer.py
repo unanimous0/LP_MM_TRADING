@@ -13,7 +13,6 @@ OptunaOptimizer 모듈 테스트
 """
 
 import pytest
-import sqlite3
 import pandas as pd
 from unittest.mock import patch, MagicMock
 

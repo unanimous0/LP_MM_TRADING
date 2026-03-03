@@ -3,6 +3,10 @@ Streamlit 캐시 데이터 로더
 
 DB 연결, Stage 1-3 분석 파이프라인, 백테스트 실행을 캐싱하여 성능 확보.
 기존 모듈(normalizer, pattern_classifier 등)을 수정 없이 재사용.
+
+연결 분리:
+    PostgreSQL (get_db_connection): 수급/주가/종목 데이터
+    SQLite app.db (get_app_db_path): watchlist/backtest_history/score_change_log
 """
 
 import sqlite3
@@ -12,6 +16,7 @@ from typing import Optional, Tuple, List, Dict, Any
 
 import pandas as pd
 import streamlit as st
+from sqlalchemy import text
 
 # 프로젝트 루트 경로 등록
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -19,7 +24,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from src.config import DEFAULT_CONFIG
-from src.database.connection import DB_PATH
+from src.database.connection import get_pg_engine, APP_DB_PATH
 from src.analyzer.normalizer import SupplyNormalizer
 from src.visualizer.performance_optimizer import OptimizedMultiPeriodCalculator
 from src.analyzer.pattern_classifier import PatternClassifier
@@ -31,17 +36,21 @@ from src.backtesting.portfolio import Trade
 
 
 # ---------------------------------------------------------------------------
+# 앱 DB 경로 (SQLite — watchlist/backtest_history/score_change_log)
+# ---------------------------------------------------------------------------
+
+def _get_app_db_path() -> str:
+    return str(_PROJECT_ROOT / APP_DB_PATH)
+
+
+# ---------------------------------------------------------------------------
 # DB 연결 (싱글턴)
 # ---------------------------------------------------------------------------
 
 @st.cache_resource
-def get_db_connection() -> sqlite3.Connection:
-    """Streamlit 스레드 안전 DB 연결 (check_same_thread=False)"""
-    db_path = str(_PROJECT_ROOT / DB_PATH)
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute('PRAGMA foreign_keys = ON')
-    return conn
+def get_db_connection():
+    """Streamlit 캐시: PostgreSQL SQLAlchemy Engine (싱글턴)"""
+    return get_pg_engine()
 
 
 # ---------------------------------------------------------------------------
@@ -50,33 +59,48 @@ def get_db_connection() -> sqlite3.Connection:
 
 @st.cache_data(ttl=3600)
 def get_stock_list() -> pd.DataFrame:
-    """종목 리스트 (stock_code, stock_name, sector)"""
-    conn = get_db_connection()
-    df = pd.read_sql_query(
-        "SELECT stock_code, stock_name, sector FROM stocks ORDER BY stock_code",
-        conn,
+    """종목 리스트 (stock_code, stock_name, sector) — 활성 KOSPI/KOSDAQ 종목"""
+    engine = get_db_connection()
+    df = pd.read_sql(
+        text(
+            "SELECT s.stock_code, s.stock_name, ss.fics_sector AS sector "
+            "FROM stocks s "
+            "LEFT JOIN stock_sectors ss ON s.stock_code = ss.stock_code "
+            "WHERE s.is_active = true AND s.market IN ('KOSPI', 'KOSDAQ') "
+            "ORDER BY s.stock_code"
+        ),
+        engine,
     )
     return df
 
 
 @st.cache_data(ttl=3600)
 def get_sectors() -> List[str]:
-    """고유 섹터 목록"""
-    conn = get_db_connection()
-    rows = conn.execute(
-        "SELECT DISTINCT sector FROM stocks WHERE sector IS NOT NULL ORDER BY sector"
-    ).fetchall()
-    return [r[0] for r in rows]
+    """고유 섹터 목록 (stock_sectors.fics_sector 기준)"""
+    engine = get_db_connection()
+    df = pd.read_sql(
+        text(
+            "SELECT DISTINCT ss.fics_sector "
+            "FROM stock_sectors ss "
+            "JOIN stocks s ON ss.stock_code = s.stock_code "
+            "WHERE s.is_active = true AND ss.fics_sector IS NOT NULL "
+            "ORDER BY ss.fics_sector"
+        ),
+        engine,
+    )
+    return df['fics_sector'].tolist()
 
 
 @st.cache_data(ttl=3600)
 def get_date_range() -> Tuple[str, str]:
     """DB 내 거래 날짜 범위 (min_date, max_date)"""
-    conn = get_db_connection()
-    row = conn.execute(
-        "SELECT MIN(trade_date), MAX(trade_date) FROM investor_flows"
-    ).fetchone()
-    return row[0], row[1]
+    engine = get_db_connection()
+    df = pd.read_sql(
+        text("SELECT MIN(time) AS min_date, MAX(time) AS max_date FROM investor_trading"),
+        engine,
+    )
+    row = df.iloc[0]
+    return str(row['min_date']), str(row['max_date'])
 
 
 # ---------------------------------------------------------------------------
@@ -86,18 +110,23 @@ def get_date_range() -> Tuple[str, str]:
 @st.cache_data(ttl=600, show_spinner=False)
 def get_today_supply_ranking(top_n: int = 50) -> pd.DataFrame:
     """당일 전 종목 외국인/기관 순매수금액 조회 (캐싱)"""
-    conn = get_db_connection()
-    max_date = conn.execute(
-        "SELECT MAX(trade_date) FROM investor_flows"
-    ).fetchone()[0]
-    df = pd.read_sql_query(
-        "SELECT f.stock_code, s.stock_name, s.sector, "
-        "f.foreign_net_amount, f.institution_net_amount "
-        "FROM investor_flows f "
-        "JOIN stocks s ON f.stock_code = s.stock_code "
-        "WHERE f.trade_date = ?",
-        conn,
-        params=[max_date],
+    engine = get_db_connection()
+    df = pd.read_sql(
+        text("""
+        SELECT
+            it.stock_code,
+            s.stock_name,
+            ss.fics_sector AS sector,
+            SUM(CASE WHEN it.investor_type = 'FOREIGN'      THEN it.net_buy_value ELSE 0 END) AS foreign_net_amount,
+            SUM(CASE WHEN it.investor_type = 'INSTITUTION'  THEN it.net_buy_value ELSE 0 END) AS institution_net_amount
+        FROM investor_trading it
+        JOIN stocks s ON it.stock_code = s.stock_code
+        LEFT JOIN stock_sectors ss ON it.stock_code = ss.stock_code
+        WHERE it.investor_type IN ('FOREIGN', 'INSTITUTION')
+          AND it.time = (SELECT MAX(time) FROM investor_trading)
+        GROUP BY it.stock_code, s.stock_name, ss.fics_sector
+        """),
+        engine,
     )
     return df
 
@@ -112,8 +141,8 @@ def get_abnormal_supply_data(
     z_score_window: int = 60,
 ) -> pd.DataFrame:
     """이상 수급 종목 조회 (캐싱) — 순매수금액 포함"""
-    conn = get_db_connection()
-    normalizer = SupplyNormalizer(conn, config={
+    engine = get_db_connection()
+    normalizer = SupplyNormalizer(engine, config={
         'z_score_window': z_score_window,
         'min_data_points': 30,
         'institution_weight': institution_weight,
@@ -127,15 +156,23 @@ def get_abnormal_supply_data(
     if df.empty:
         return df
 
-    # 순매수금액 조인
+    # 순매수금액 조인 (해당 날짜)
     trade_date = df['trade_date'].iloc[0]
     codes = df['stock_code'].tolist()
-    placeholders = ','.join('?' for _ in codes)
-    amounts = pd.read_sql_query(
-        f"SELECT stock_code, foreign_net_amount, institution_net_amount "
-        f"FROM investor_flows WHERE trade_date = ? AND stock_code IN ({placeholders})",
-        conn,
-        params=[trade_date] + codes,
+    codes_str = "','".join(codes)
+    amounts = pd.read_sql(
+        text(f"""
+        SELECT
+            it.stock_code,
+            SUM(CASE WHEN it.investor_type = 'FOREIGN'      THEN it.net_buy_value ELSE 0 END) AS foreign_net_amount,
+            SUM(CASE WHEN it.investor_type = 'INSTITUTION'  THEN it.net_buy_value ELSE 0 END) AS institution_net_amount
+        FROM investor_trading it
+        WHERE it.investor_type IN ('FOREIGN', 'INSTITUTION')
+          AND it.time = '{trade_date}'
+          AND it.stock_code IN ('{codes_str}')
+        GROUP BY it.stock_code
+        """),
+        engine,
     )
     df = df.merge(amounts, on='stock_code', how='left')
     return df
@@ -148,8 +185,8 @@ def get_abnormal_supply_data(
 @st.cache_data(ttl=600, show_spinner=False)
 def _stage_zscore(end_date: Optional[str] = None, institution_weight: float = 0.3) -> pd.DataFrame:
     """Stage 1+2: 수급 정규화 + 멀티 기간 Z-Score"""
-    conn = get_db_connection()
-    normalizer = SupplyNormalizer(conn, config={
+    engine = get_db_connection()
+    normalizer = SupplyNormalizer(engine, config={
         'z_score_window': 60,
         'min_data_points': 30,
         'institution_weight': institution_weight,
@@ -174,8 +211,8 @@ def _stage_classify(end_date: Optional[str] = None, institution_weight: float = 
 @st.cache_data(ttl=600, show_spinner=False)
 def _stage_signals(end_date: Optional[str] = None, institution_weight: float = 0.3) -> pd.DataFrame:
     """Stage 3b: 시그널 탐지"""
-    conn = get_db_connection()
-    detector = SignalDetector(conn, institution_weight=institution_weight)
+    engine = get_db_connection()
+    detector = SignalDetector(engine, institution_weight=institution_weight)
     return detector.detect_all_signals(end_date=end_date)
 
 
@@ -186,8 +223,8 @@ def _stage_report(end_date: Optional[str] = None, institution_weight: float = 0.
     signals_df = _stage_signals(end_date=end_date, institution_weight=institution_weight)
     if classified_df.empty:
         return pd.DataFrame()
-    conn = get_db_connection()
-    report_gen = IntegratedReport(conn)
+    engine = get_db_connection()
+    report_gen = IntegratedReport(engine)
     return report_gen.generate_report(classified_df, signals_df)
 
 
@@ -259,8 +296,8 @@ def get_stock_zscore_history(
     Returns:
         컬럼: trade_date, stock_code, foreign_zscore, institution_zscore, combined_zscore
     """
-    conn = get_db_connection()
-    normalizer = SupplyNormalizer(conn, config={
+    engine = get_db_connection()
+    normalizer = SupplyNormalizer(engine, config={
         'z_score_window': z_score_window,
         'min_data_points': min(30, z_score_window // 2),
         'institution_weight': institution_weight,
@@ -279,21 +316,26 @@ def get_stock_raw_history(
         컬럼: trade_date, close_price, foreign_net_amount, institution_net_amount,
                trading_volume, ma5, ma20, sync_rate
     """
-    conn = get_db_connection()
-    if end_date:
-        query = (
-            "SELECT trade_date, close_price, foreign_net_amount, institution_net_amount, "
-            "trading_volume FROM investor_flows "
-            "WHERE stock_code = ? AND trade_date <= ? ORDER BY trade_date"
-        )
-        df = pd.read_sql_query(query, conn, params=[stock_code, end_date])
-    else:
-        query = (
-            "SELECT trade_date, close_price, foreign_net_amount, institution_net_amount, "
-            "trading_volume FROM investor_flows "
-            "WHERE stock_code = ? ORDER BY trade_date"
-        )
-        df = pd.read_sql_query(query, conn, params=[stock_code])
+    engine = get_db_connection()
+    date_filter = f"AND it.time <= '{end_date}'" if end_date else ""
+    df = pd.read_sql(
+        text(f"""
+        SELECT
+            it.time AS trade_date,
+            MAX(o.close_price) AS close_price,
+            SUM(CASE WHEN it.investor_type = 'FOREIGN'      THEN it.net_buy_value ELSE 0 END) AS foreign_net_amount,
+            SUM(CASE WHEN it.investor_type = 'INSTITUTION'  THEN it.net_buy_value ELSE 0 END) AS institution_net_amount,
+            MAX(o.volume)      AS trading_volume
+        FROM investor_trading it
+        JOIN ohlcv_daily o ON it.time = o.time AND it.stock_code = o.stock_code
+        WHERE it.investor_type IN ('FOREIGN', 'INSTITUTION')
+          AND it.stock_code = '{stock_code}'
+          {date_filter}
+        GROUP BY it.time
+        ORDER BY it.time
+        """),
+        engine,
+    )
 
     if df.empty:
         return df
@@ -370,7 +412,7 @@ def run_backtest(
             'initial_capital': float,
         }
     """
-    conn = get_db_connection()
+    pg_engine = get_db_connection()
 
     config = BacktestConfig(
         initial_capital=initial_capital,
@@ -393,7 +435,7 @@ def run_backtest(
         borrowing_rate=borrowing_rate,
     )
 
-    engine = BacktestEngine(conn, config)
+    engine = BacktestEngine(pg_engine, config)
     result = engine.run(
         start_date=start_date,
         end_date=end_date,
@@ -465,7 +507,7 @@ def run_backtest_with_progress(
     use_divergence: bool = True,
 ) -> Dict:
     """백테스트 실행 (캐시 없음, progress_callback 지원)"""
-    conn = get_db_connection()
+    pg_engine = get_db_connection()
     config = BacktestConfig(
         initial_capital=initial_capital,
         max_positions=max_positions,
@@ -486,7 +528,7 @@ def run_backtest_with_progress(
         slippage_rate=slippage_rate,
         borrowing_rate=borrowing_rate,
     )
-    engine = BacktestEngine(conn, config)
+    engine = BacktestEngine(pg_engine, config)
     result = engine.run(
         start_date=start_date,
         end_date=end_date,
@@ -583,7 +625,6 @@ def run_optuna_optimization(
     """
     from src.backtesting.optimizer import OptunaOptimizer
 
-    db_path = str(_PROJECT_ROOT / DB_PATH)
     base_config = BacktestConfig(
         strategy=strategy,
         initial_capital=initial_capital,
@@ -601,7 +642,7 @@ def run_optuna_optimization(
     )
 
     optimizer = OptunaOptimizer(
-        db_path=db_path,
+        db_path=None,  # PostgreSQL 사용 (db_path는 무시됨)
         start_date=start_date,
         end_date=end_date,
         base_config=base_config,
@@ -618,24 +659,26 @@ def run_optuna_optimization(
 
 
 # ---------------------------------------------------------------------------
-# 관심종목 (Watchlist)
+# 관심종목 (Watchlist) — SQLite app.db
 # ---------------------------------------------------------------------------
 
 def _ensure_watchlist_table() -> None:
     """watchlist 테이블이 없으면 생성 (앱 최초 실행 시 자동 호출)"""
-    db_path = str(_PROJECT_ROOT / DB_PATH)
-    conn = sqlite3.connect(db_path)
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS watchlist (
-            stock_code TEXT PRIMARY KEY,
-            stock_name TEXT NOT NULL,
-            sector     TEXT,
-            added_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            note       TEXT DEFAULT ''
-        )
-    ''')
-    conn.commit()
-    conn.close()
+    app_db_path = _get_app_db_path()
+    conn = sqlite3.connect(app_db_path)
+    try:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS watchlist (
+                stock_code TEXT PRIMARY KEY,
+                stock_name TEXT NOT NULL,
+                sector     TEXT,
+                added_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                note       TEXT DEFAULT ''
+            )
+        ''')
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # 모듈 임포트 시 테이블 자동 생성
@@ -644,95 +687,107 @@ _ensure_watchlist_table()
 
 def get_watchlist() -> pd.DataFrame:
     """관심종목 목록 반환 (stock_code, stock_name, sector, added_at, note)"""
-    db_path = str(_PROJECT_ROOT / DB_PATH)
-    conn = sqlite3.connect(db_path)
-    df = pd.read_sql_query(
-        "SELECT stock_code, stock_name, sector, added_at, note FROM watchlist ORDER BY added_at DESC",
-        conn,
-    )
-    conn.close()
+    app_db_path = _get_app_db_path()
+    conn = sqlite3.connect(app_db_path)
+    try:
+        df = pd.read_sql_query(
+            "SELECT stock_code, stock_name, sector, added_at, note FROM watchlist ORDER BY added_at DESC",
+            conn,
+        )
+    finally:
+        conn.close()
     return df
 
 
 def is_in_watchlist(stock_code: str) -> bool:
     """해당 종목이 관심종목에 포함되어 있는지 확인"""
-    db_path = str(_PROJECT_ROOT / DB_PATH)
-    conn = sqlite3.connect(db_path)
-    cursor = conn.execute(
-        "SELECT 1 FROM watchlist WHERE stock_code = ?", (stock_code,)
-    )
-    result = cursor.fetchone() is not None
-    conn.close()
+    app_db_path = _get_app_db_path()
+    conn = sqlite3.connect(app_db_path)
+    try:
+        cursor = conn.execute(
+            "SELECT 1 FROM watchlist WHERE stock_code = ?", (stock_code,)
+        )
+        result = cursor.fetchone() is not None
+    finally:
+        conn.close()
     return result
 
 
 def add_to_watchlist(stock_code: str, stock_name: str, sector: str = '', note: str = '') -> None:
     """관심종목 추가 (이미 있으면 무시)"""
-    db_path = str(_PROJECT_ROOT / DB_PATH)
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        "INSERT OR IGNORE INTO watchlist (stock_code, stock_name, sector, note) VALUES (?, ?, ?, ?)",
-        (stock_code, stock_name, sector or '', note),
-    )
-    conn.commit()
-    conn.close()
+    app_db_path = _get_app_db_path()
+    conn = sqlite3.connect(app_db_path)
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO watchlist (stock_code, stock_name, sector, note) VALUES (?, ?, ?, ?)",
+            (stock_code, stock_name, sector or '', note),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def remove_from_watchlist(stock_code: str) -> None:
     """관심종목 삭제"""
-    db_path = str(_PROJECT_ROOT / DB_PATH)
-    conn = sqlite3.connect(db_path)
-    conn.execute("DELETE FROM watchlist WHERE stock_code = ?", (stock_code,))
-    conn.commit()
-    conn.close()
+    app_db_path = _get_app_db_path()
+    conn = sqlite3.connect(app_db_path)
+    try:
+        conn.execute("DELETE FROM watchlist WHERE stock_code = ?", (stock_code,))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def update_watchlist_note(stock_code: str, note: str) -> None:
     """관심종목 메모 수정"""
-    db_path = str(_PROJECT_ROOT / DB_PATH)
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        "UPDATE watchlist SET note = ? WHERE stock_code = ?", (note, stock_code)
-    )
-    conn.commit()
-    conn.close()
+    app_db_path = _get_app_db_path()
+    conn = sqlite3.connect(app_db_path)
+    try:
+        conn.execute(
+            "UPDATE watchlist SET note = ? WHERE stock_code = ?", (note, stock_code)
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
-# 백테스트 결과 히스토리
+# 백테스트 결과 히스토리 — SQLite app.db
 # ---------------------------------------------------------------------------
 
 def _ensure_backtest_history_table() -> None:
     """backtest_history 테이블이 없으면 생성"""
-    db_path = str(_PROJECT_ROOT / DB_PATH)
-    conn = sqlite3.connect(db_path)
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS backtest_history (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            run_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            strategy      TEXT,
-            start_date    TEXT,
-            end_date      TEXT,
-            total_return  REAL,
-            mdd           REAL,
-            sharpe        REAL,
-            calmar        REAL,
-            win_rate      REAL,
-            total_trades  INTEGER,
-            profit_factor REAL,
-            min_score     REAL,
-            min_signals   INTEGER,
-            target_return REAL,
-            stop_loss     REAL,
-            max_positions INTEGER,
-            max_hold_days INTEGER,
-            institution_weight REAL,
-            note          TEXT DEFAULT '',
-            label         TEXT DEFAULT ''
-        )
-    ''')
-    conn.commit()
-    conn.close()
+    app_db_path = _get_app_db_path()
+    conn = sqlite3.connect(app_db_path)
+    try:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS backtest_history (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                strategy      TEXT,
+                start_date    TEXT,
+                end_date      TEXT,
+                total_return  REAL,
+                mdd           REAL,
+                sharpe        REAL,
+                calmar        REAL,
+                win_rate      REAL,
+                total_trades  INTEGER,
+                profit_factor REAL,
+                min_score     REAL,
+                min_signals   INTEGER,
+                target_return REAL,
+                stop_loss     REAL,
+                max_positions INTEGER,
+                max_hold_days INTEGER,
+                institution_weight REAL,
+                note          TEXT DEFAULT '',
+                label         TEXT DEFAULT ''
+            )
+        ''')
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # 모듈 임포트 시 테이블 자동 생성
@@ -762,67 +817,73 @@ def save_backtest_history(
     mdd_info = metrics.max_drawdown() if metrics else {}
     total_trades = len(get_trades_from_result(result))
 
-    db_path = str(_PROJECT_ROOT / DB_PATH)
-    conn = sqlite3.connect(db_path)
-    cursor = conn.execute('''
-        INSERT INTO backtest_history (
-            strategy, start_date, end_date,
-            total_return, mdd, sharpe, calmar, win_rate,
-            total_trades, profit_factor,
-            min_score, min_signals, target_return, stop_loss,
-            max_positions, max_hold_days, institution_weight,
-            note, label
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (
-        cfg.get('strategy', 'long'),
-        start_date,
-        end_date,
-        metrics.total_return()  if metrics else 0.0,
-        mdd_info.get('mdd', 0.0),
-        metrics.sharpe_ratio()  if metrics else 0.0,
-        metrics.calmar_ratio()  if metrics else 0.0,
-        metrics.win_rate()      if metrics else 0.0,
-        total_trades,
-        metrics.profit_factor() if metrics else 0.0,
-        cfg.get('min_score', 60),
-        cfg.get('min_signals', 1),
-        cfg.get('target_return', 0.10),
-        cfg.get('stop_loss', -0.05),
-        cfg.get('max_positions', 5),
-        cfg.get('max_hold_days', 999),
-        cfg.get('institution_weight', 0.3),
-        note,
-        label,
-    ))
-    row_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
+    app_db_path = _get_app_db_path()
+    conn = sqlite3.connect(app_db_path)
+    try:
+        cursor = conn.execute('''
+            INSERT INTO backtest_history (
+                strategy, start_date, end_date,
+                total_return, mdd, sharpe, calmar, win_rate,
+                total_trades, profit_factor,
+                min_score, min_signals, target_return, stop_loss,
+                max_positions, max_hold_days, institution_weight,
+                note, label
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            cfg.get('strategy', 'long'),
+            start_date,
+            end_date,
+            metrics.total_return()  if metrics else 0.0,
+            mdd_info.get('mdd', 0.0),
+            metrics.sharpe_ratio()  if metrics else 0.0,
+            metrics.calmar_ratio()  if metrics else 0.0,
+            metrics.win_rate()      if metrics else 0.0,
+            total_trades,
+            metrics.profit_factor() if metrics else 0.0,
+            cfg.get('min_score', 60),
+            cfg.get('min_signals', 1),
+            cfg.get('target_return', 0.10),
+            cfg.get('stop_loss', -0.05),
+            cfg.get('max_positions', 5),
+            cfg.get('max_hold_days', 999),
+            cfg.get('institution_weight', 0.3),
+            note,
+            label,
+        ))
+        row_id = cursor.lastrowid
+        conn.commit()
+    finally:
+        conn.close()
     return row_id
 
 
 def get_backtest_history(limit: int = 50) -> pd.DataFrame:
     """저장된 백테스트 히스토리 조회 (최신순)"""
-    db_path = str(_PROJECT_ROOT / DB_PATH)
-    conn = sqlite3.connect(db_path)
-    df = pd.read_sql_query(
-        f"SELECT * FROM backtest_history ORDER BY run_at DESC LIMIT {limit}",
-        conn,
-    )
-    conn.close()
+    app_db_path = _get_app_db_path()
+    conn = sqlite3.connect(app_db_path)
+    try:
+        df = pd.read_sql_query(
+            f"SELECT * FROM backtest_history ORDER BY run_at DESC LIMIT {limit}",
+            conn,
+        )
+    finally:
+        conn.close()
     return df
 
 
 def delete_backtest_history(row_id: int) -> None:
     """백테스트 히스토리 행 삭제"""
-    db_path = str(_PROJECT_ROOT / DB_PATH)
-    conn = sqlite3.connect(db_path)
-    conn.execute("DELETE FROM backtest_history WHERE id = ?", (row_id,))
-    conn.commit()
-    conn.close()
+    app_db_path = _get_app_db_path()
+    conn = sqlite3.connect(app_db_path)
+    try:
+        conn.execute("DELETE FROM backtest_history WHERE id = ?", (row_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
-# 고득점 변동 알림 (Score Change Log)
+# 고득점 변동 알림 (Score Change Log) — SQLite app.db
 # ---------------------------------------------------------------------------
 
 _SCORE_LOG_TABLE = "score_change_log"
@@ -831,28 +892,30 @@ _SCORE_HIGH_THRESHOLD = 70   # "고득점" 기준
 
 def _ensure_score_change_log_table() -> None:
     """score_change_log 테이블이 없으면 생성"""
-    db_path = str(_PROJECT_ROOT / DB_PATH)
-    conn = sqlite3.connect(db_path)
-    conn.execute(f'''
-        CREATE TABLE IF NOT EXISTS {_SCORE_LOG_TABLE} (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            logged_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            analysis_date TEXT NOT NULL,
-            stock_code    TEXT NOT NULL,
-            stock_name    TEXT,
-            sector        TEXT,
-            pattern       TEXT,
-            score         REAL,
-            signal_count  INTEGER,
-            prev_score    REAL,
-            change_type   TEXT  -- 'new_entry', 'score_up', 'score_down', 'exit'
+    app_db_path = _get_app_db_path()
+    conn = sqlite3.connect(app_db_path)
+    try:
+        conn.execute(f'''
+            CREATE TABLE IF NOT EXISTS {_SCORE_LOG_TABLE} (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                logged_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                analysis_date TEXT NOT NULL,
+                stock_code    TEXT NOT NULL,
+                stock_name    TEXT,
+                sector        TEXT,
+                pattern       TEXT,
+                score         REAL,
+                signal_count  INTEGER,
+                prev_score    REAL,
+                change_type   TEXT  -- 'new_entry', 'score_up', 'score_down', 'exit'
+            )
+        ''')
+        conn.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_scl_date ON {_SCORE_LOG_TABLE}(analysis_date DESC)"
         )
-    ''')
-    conn.execute(
-        f"CREATE INDEX IF NOT EXISTS idx_scl_date ON {_SCORE_LOG_TABLE}(analysis_date DESC)"
-    )
-    conn.commit()
-    conn.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # 모듈 임포트 시 테이블 자동 생성
@@ -875,84 +938,83 @@ def snapshot_scores(report_df: pd.DataFrame, analysis_date: str) -> None:
     """
     global _prev_score_snapshot
 
-    db_path = str(_PROJECT_ROOT / DB_PATH)
-    conn = sqlite3.connect(db_path)
+    app_db_path = _get_app_db_path()
+    conn = sqlite3.connect(app_db_path)
+    try:
+        # 같은 analysis_date로 이미 기록된 이벤트가 있으면 중복 삽입 방지
+        existing = conn.execute(
+            f"SELECT COUNT(*) FROM {_SCORE_LOG_TABLE} WHERE analysis_date = ?",
+            (analysis_date,),
+        ).fetchone()[0]
+        if existing > 0:
+            return
 
-    # 같은 analysis_date로 이미 기록된 이벤트가 있으면 중복 삽입 방지
-    existing = conn.execute(
-        f"SELECT COUNT(*) FROM {_SCORE_LOG_TABLE} WHERE analysis_date = ?",
-        (analysis_date,),
-    ).fetchone()[0]
-    if existing > 0:
-        conn.close()
-        return
-
-    # 직전 스냅샷: DB에서 가장 최근 날짜의 고득점 종목
-    prev_df = pd.read_sql_query(
-        f"""
-        SELECT stock_code, score, pattern
-        FROM {_SCORE_LOG_TABLE}
-        WHERE analysis_date = (
-            SELECT MAX(analysis_date)
+        # 직전 스냅샷: DB에서 가장 최근 날짜의 고득점 종목
+        prev_df = pd.read_sql_query(
+            f"""
+            SELECT stock_code, score, pattern
             FROM {_SCORE_LOG_TABLE}
-            WHERE analysis_date < ?
+            WHERE analysis_date = (
+                SELECT MAX(analysis_date)
+                FROM {_SCORE_LOG_TABLE}
+                WHERE analysis_date < ?
+            )
+            """,
+            conn,
+            params=(analysis_date,),
         )
-        """,
-        conn,
-        params=(analysis_date,),
-    )
-    prev_scores = dict(zip(prev_df['stock_code'], prev_df['score'])) if not prev_df.empty else {}
+        prev_scores = dict(zip(prev_df['stock_code'], prev_df['score'])) if not prev_df.empty else {}
 
-    # 현재 고득점 종목 (threshold 이상)
-    high_df = report_df[report_df['score'] >= _SCORE_HIGH_THRESHOLD].copy()
-    curr_codes = set(high_df['stock_code'].tolist())
-    prev_codes = set(prev_scores.keys())
+        # 현재 고득점 종목 (threshold 이상)
+        high_df = report_df[report_df['score'] >= _SCORE_HIGH_THRESHOLD].copy()
+        curr_codes = set(high_df['stock_code'].tolist())
+        prev_codes = set(prev_scores.keys())
 
-    rows = []
-    for _, row in high_df.iterrows():
-        code = row['stock_code']
-        curr_s = float(row.get('score', 0))
-        prev_s = prev_scores.get(code)
+        rows = []
+        for _, row in high_df.iterrows():
+            code = row['stock_code']
+            curr_s = float(row.get('score', 0))
+            prev_s = prev_scores.get(code)
 
-        if code not in prev_codes:
-            change_type = 'new_entry'
-        elif curr_s - (prev_s or 0) >= 5:
-            change_type = 'score_up'
-        elif (prev_s or 0) - curr_s >= 5:
-            change_type = 'score_down'
-        else:
-            change_type = None  # 변동 없음 → 로그 불필요 (중복 방지)
+            if code not in prev_codes:
+                change_type = 'new_entry'
+            elif curr_s - (prev_s or 0) >= 5:
+                change_type = 'score_up'
+            elif (prev_s or 0) - curr_s >= 5:
+                change_type = 'score_down'
+            else:
+                change_type = None  # 변동 없음 → 로그 불필요 (중복 방지)
 
-        if change_type:
+            if change_type:
+                rows.append((
+                    analysis_date,
+                    code,
+                    str(row.get('stock_name', '')),
+                    str(row.get('sector', '')),
+                    str(row.get('pattern', '')),
+                    curr_s,
+                    int(row.get('signal_count', 0)),
+                    prev_s,
+                    change_type,
+                ))
+
+        # 이탈 종목 (직전 고득점이었으나 지금 없음)
+        for code in prev_codes - curr_codes:
             rows.append((
-                analysis_date,
-                code,
-                str(row.get('stock_name', '')),
-                str(row.get('sector', '')),
-                str(row.get('pattern', '')),
-                curr_s,
-                int(row.get('signal_count', 0)),
-                prev_s,
-                change_type,
+                analysis_date, code, '', '', '', None, 0, prev_scores.get(code), 'exit',
             ))
 
-    # 이탈 종목 (직전 고득점이었으나 지금 없음)
-    for code in prev_codes - curr_codes:
-        rows.append((
-            analysis_date, code, '', '', '', None, 0, prev_scores.get(code), 'exit',
-        ))
-
-    if rows:
-        conn.executemany(
-            f"""INSERT INTO {_SCORE_LOG_TABLE}
-            (analysis_date, stock_code, stock_name, sector, pattern,
-             score, signal_count, prev_score, change_type)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            rows,
-        )
-        conn.commit()
-
-    conn.close()
+        if rows:
+            conn.executemany(
+                f"""INSERT INTO {_SCORE_LOG_TABLE}
+                (analysis_date, stock_code, stock_name, sector, pattern,
+                 score, signal_count, prev_score, change_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                rows,
+            )
+            conn.commit()
+    finally:
+        conn.close()
     _prev_score_snapshot = high_df
 
 
@@ -961,16 +1023,18 @@ def get_score_change_alerts(limit: int = 100) -> pd.DataFrame:
     최근 고득점 변동 알림 조회.
     Returns: DataFrame (analysis_date, change_type, stock_code, stock_name, score, prev_score, ...)
     """
-    db_path = str(_PROJECT_ROOT / DB_PATH)
-    conn = sqlite3.connect(db_path)
-    df = pd.read_sql_query(
-        f"""
-        SELECT *
-        FROM {_SCORE_LOG_TABLE}
-        ORDER BY logged_at DESC
-        LIMIT {limit}
-        """,
-        conn,
-    )
-    conn.close()
+    app_db_path = _get_app_db_path()
+    conn = sqlite3.connect(app_db_path)
+    try:
+        df = pd.read_sql_query(
+            f"""
+            SELECT *
+            FROM {_SCORE_LOG_TABLE}
+            ORDER BY logged_at DESC
+            LIMIT {limit}
+            """,
+            conn,
+        )
+    finally:
+        conn.close()
     return df

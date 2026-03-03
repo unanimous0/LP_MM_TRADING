@@ -17,6 +17,7 @@ Implements Stage 1 calculations:
 import pandas as pd
 import numpy as np
 from typing import Optional
+from sqlalchemy import text
 
 # 보안: SQL 인젝션 방지를 위한 입력 검증
 from src.utils import validate_stock_codes, validate_date_format
@@ -49,20 +50,33 @@ class SupplyNormalizer:
         Args:
             end_date: 로드 종료일 (None이면 전체)
         """
-        where_clauses = ["close_price IS NOT NULL", "free_float_shares IS NOT NULL"]
-        if end_date:
-            where_clauses.append(f"trade_date <= '{end_date}'")
-        where_sql = "WHERE " + " AND ".join(where_clauses)
+        extra = f"AND it.time <= '{end_date}'" if end_date else ""
 
         query = f"""
-        SELECT trade_date, stock_code,
-               foreign_net_amount, institution_net_amount,
-               close_price, free_float_shares
-        FROM investor_flows
-        {where_sql}
-        ORDER BY stock_code, trade_date
+        SELECT
+            it.time AS trade_date,
+            it.stock_code,
+            SUM(CASE WHEN it.investor_type = 'FOREIGN'      THEN it.net_buy_value ELSE 0 END) AS foreign_net_amount,
+            SUM(CASE WHEN it.investor_type = 'INSTITUTION'  THEN it.net_buy_value ELSE 0 END) AS institution_net_amount,
+            MAX(o.close_price)      AS close_price,
+            MAX(ff.floating_shares) AS free_float_shares
+        FROM investor_trading it
+        JOIN ohlcv_daily o ON it.time = o.time AND it.stock_code = o.stock_code
+        JOIN (
+            SELECT DISTINCT ON (stock_code) stock_code, floating_shares
+            FROM floating_shares
+            ORDER BY stock_code, base_date DESC
+        ) ff ON it.stock_code = ff.stock_code
+        WHERE it.investor_type IN ('FOREIGN', 'INSTITUTION')
+          AND o.close_price IS NOT NULL
+          {extra}
+        GROUP BY it.time, it.stock_code
+        ORDER BY it.stock_code, it.time
         """
-        self._preload_raw = pd.read_sql(query, self.conn)
+        df = pd.read_sql(text(query), self.conn)
+        # PostgreSQL은 DATE를 datetime.date로 반환 → 문자열 통일 (비교 로직 호환)
+        df['trade_date'] = df['trade_date'].astype(str)
+        self._preload_raw = df
 
     def clear_preload(self):
         """프리로드 데이터 삭제 (메모리 해제)"""
@@ -130,38 +144,44 @@ class SupplyNormalizer:
             result = self._apply_sff_formula(df)
             return result[['trade_date', 'stock_code', 'foreign_sff', 'institution_sff', 'combined_sff']]
 
-        # WHERE 절 생성 (검증된 입력만 사용)
-        where_clauses = ["close_price IS NOT NULL", "free_float_shares IS NOT NULL"]
-
+        # WHERE 추가 조건 생성 (검증된 입력만 사용)
+        extra_clauses = []
         if stock_codes:
-            # 검증된 종목 코드를 안전하게 문자열로 결합
             codes_str = "','".join(stock_codes)
-            where_clauses.append(f"stock_code IN ('{codes_str}')")
+            extra_clauses.append(f"AND it.stock_code IN ('{codes_str}')")
         if start_date:
-            # 검증된 날짜만 사용
-            where_clauses.append(f"trade_date >= '{start_date}'")
+            extra_clauses.append(f"AND it.time >= '{start_date}'")
         if end_date:
-            # 검증된 날짜만 사용
-            where_clauses.append(f"trade_date <= '{end_date}'")
-
-        where_sql = "WHERE " + " AND ".join(where_clauses)
+            extra_clauses.append(f"AND it.time <= '{end_date}'")
+        extra = "\n          ".join(extra_clauses)
 
         # 쿼리 실행
         query = f"""
         SELECT
-            trade_date,
-            stock_code,
-            foreign_net_amount,
-            institution_net_amount,
-            close_price,
-            free_float_shares,
-            (close_price * free_float_shares) as free_float_mcap
-        FROM investor_flows
-        {where_sql}
-        ORDER BY stock_code, trade_date
+            it.time AS trade_date,
+            it.stock_code,
+            SUM(CASE WHEN it.investor_type = 'FOREIGN'      THEN it.net_buy_value ELSE 0 END) AS foreign_net_amount,
+            SUM(CASE WHEN it.investor_type = 'INSTITUTION'  THEN it.net_buy_value ELSE 0 END) AS institution_net_amount,
+            MAX(o.close_price)      AS close_price,
+            MAX(ff.floating_shares) AS free_float_shares
+        FROM investor_trading it
+        JOIN ohlcv_daily o ON it.time = o.time AND it.stock_code = o.stock_code
+        JOIN (
+            SELECT DISTINCT ON (stock_code) stock_code, floating_shares
+            FROM floating_shares
+            ORDER BY stock_code, base_date DESC
+        ) ff ON it.stock_code = ff.stock_code
+        WHERE it.investor_type IN ('FOREIGN', 'INSTITUTION')
+          AND o.close_price IS NOT NULL
+          {extra}
+        GROUP BY it.time, it.stock_code
+        ORDER BY it.stock_code, it.time
         """
 
-        df = pd.read_sql(query, self.conn)
+        df = pd.read_sql(text(query), self.conn)
+        # PostgreSQL은 DATE를 datetime.date로 반환 → 문자열 통일
+        if not df.empty and 'trade_date' in df.columns:
+            df['trade_date'] = df['trade_date'].astype(str)
 
         if df.empty:
             print("[WARN] No data found for Sff calculation")
@@ -169,8 +189,9 @@ class SupplyNormalizer:
                                         'institution_sff', 'combined_sff'])
 
         # Sff 계산 (백분율)
-        df['foreign_sff'] = (df['foreign_net_amount'] / df['free_float_mcap']) * 100
-        df['institution_sff'] = (df['institution_net_amount'] / df['free_float_mcap']) * 100
+        free_float_mcap = df['close_price'] * df['free_float_shares']
+        df['foreign_sff'] = (df['foreign_net_amount'] / free_float_mcap) * 100
+        df['institution_sff'] = (df['institution_net_amount'] / free_float_mcap) * 100
 
         # 외국인 중심 조건부 합산:
         # 같은 방향 → 외국인 + 기관×weight (동반 보너스)
@@ -308,7 +329,10 @@ class SupplyNormalizer:
             sort_ascending = False
 
         # 종목명 + 섹터 추가
-        df_stocks = pd.read_sql('SELECT stock_code, stock_name, sector FROM stocks', self.conn)
+        df_stocks = pd.read_sql(text(
+            "SELECT s.stock_code, s.stock_name, ss.fics_sector AS sector "
+            "FROM stocks s LEFT JOIN stock_sectors ss ON s.stock_code = ss.stock_code"
+        ), self.conn)
         df_filtered = df_filtered.merge(df_stocks, on='stock_code', how='left')
 
         # combined_zscore로 정렬 후 상위 N개
@@ -400,43 +424,51 @@ class SupplyNormalizer:
             result = self._apply_sff_formula(df)
             return result[['trade_date', 'stock_code', 'combined_sff']]
 
-        # WHERE 절 생성 (검증된 입력만 사용)
-        where_clauses = ["close_price IS NOT NULL", "free_float_shares IS NOT NULL"]
-
+        # WHERE 추가 조건 생성 (검증된 입력만 사용)
+        extra_clauses = []
         if stock_codes:
-            # 검증된 종목 코드를 안전하게 문자열로 결합
             codes_str = "','".join(stock_codes)
-            where_clauses.append(f"stock_code IN ('{codes_str}')")
-
+            extra_clauses.append(f"AND it.stock_code IN ('{codes_str}')")
         if end_date:
-            where_clauses.append(f"trade_date <= '{end_date}'")
-
-        where_sql = "WHERE " + " AND ".join(where_clauses)
+            extra_clauses.append(f"AND it.time <= '{end_date}'")
+        extra = "\n          ".join(extra_clauses)
 
         # 쿼리 실행
         query = f"""
         SELECT
-            trade_date,
-            stock_code,
-            foreign_net_amount,
-            institution_net_amount,
-            close_price,
-            free_float_shares,
-            (close_price * free_float_shares) as free_float_mcap
-        FROM investor_flows
-        {where_sql}
-        ORDER BY stock_code, trade_date
+            it.time AS trade_date,
+            it.stock_code,
+            SUM(CASE WHEN it.investor_type = 'FOREIGN'      THEN it.net_buy_value ELSE 0 END) AS foreign_net_amount,
+            SUM(CASE WHEN it.investor_type = 'INSTITUTION'  THEN it.net_buy_value ELSE 0 END) AS institution_net_amount,
+            MAX(o.close_price)      AS close_price,
+            MAX(ff.floating_shares) AS free_float_shares
+        FROM investor_trading it
+        JOIN ohlcv_daily o ON it.time = o.time AND it.stock_code = o.stock_code
+        JOIN (
+            SELECT DISTINCT ON (stock_code) stock_code, floating_shares
+            FROM floating_shares
+            ORDER BY stock_code, base_date DESC
+        ) ff ON it.stock_code = ff.stock_code
+        WHERE it.investor_type IN ('FOREIGN', 'INSTITUTION')
+          AND o.close_price IS NOT NULL
+          {extra}
+        GROUP BY it.time, it.stock_code
+        ORDER BY it.stock_code, it.time
         """
 
-        df = pd.read_sql(query, self.conn)
+        df = pd.read_sql(text(query), self.conn)
+        # PostgreSQL은 DATE를 datetime.date로 반환 → 문자열 통일
+        if not df.empty and 'trade_date' in df.columns:
+            df['trade_date'] = df['trade_date'].astype(str)
 
         if df.empty:
             print("[WARN] No data found for Sff calculation")
             return pd.DataFrame(columns=['trade_date', 'stock_code', 'combined_sff'])
 
         # Sff 계산 (외국인 중심 조건부 합산)
-        df['foreign_sff'] = (df['foreign_net_amount'] / df['free_float_mcap']) * 100
-        df['institution_sff'] = (df['institution_net_amount'] / df['free_float_mcap']) * 100
+        free_float_mcap = df['close_price'] * df['free_float_shares']
+        df['foreign_sff'] = (df['foreign_net_amount'] / free_float_mcap) * 100
+        df['institution_sff'] = (df['institution_net_amount'] / free_float_mcap) * 100
 
         institution_weight = self.config.get('institution_weight', 0.3)
         same_direction = (df['foreign_sff'] * df['institution_sff']) > 0

@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 from typing import Optional, Dict, List, Tuple
 from datetime import datetime, timedelta
-import sqlite3
+from sqlalchemy import text
 
 from .portfolio import Portfolio, Trade, Position
 from .precomputer import BacktestPrecomputer
@@ -94,7 +94,7 @@ class BacktestConfig:
 class BacktestEngine:
     """백테스트 엔진"""
 
-    def __init__(self, conn: sqlite3.Connection, config: Optional[BacktestConfig] = None):
+    def __init__(self, conn, config: Optional[BacktestConfig] = None):
         """
         초기화
 
@@ -164,14 +164,14 @@ class BacktestEngine:
             return [d for d in self._precomputed.trading_dates
                     if start_date <= d <= end_date]
 
-        query = """
-        SELECT DISTINCT trade_date
-        FROM investor_flows
-        WHERE trade_date BETWEEN ? AND ?
+        query = text("""
+        SELECT DISTINCT time AS trade_date
+        FROM ohlcv_daily
+        WHERE time BETWEEN :start AND :end
         ORDER BY trade_date
-        """
-        df = pd.read_sql(query, self.conn, params=[start_date, end_date])
-        return df['trade_date'].tolist()
+        """)
+        df = pd.read_sql(query, self.conn, params={'start': start_date, 'end': end_date})
+        return df['trade_date'].astype(str).tolist()
 
     def get_price(self, stock_code: str, trade_date: str) -> Optional[float]:
         """
@@ -195,13 +195,13 @@ class BacktestEngine:
                 return float(price)
             return None
 
-        query = """
+        query = text("""
         SELECT close_price
-        FROM investor_flows
-        WHERE stock_code = ? AND trade_date = ?
+        FROM ohlcv_daily
+        WHERE stock_code = :sc AND time = :td
         LIMIT 1
-        """
-        df = pd.read_sql(query, self.conn, params=[stock_code, trade_date])
+        """)
+        df = pd.read_sql(query, self.conn, params={'sc': stock_code, 'td': trade_date})
 
         if df.empty or pd.isna(df.iloc[0]['close_price']):
             return None
@@ -214,13 +214,13 @@ class BacktestEngine:
         if self._precomputed is not None:
             return self._precomputed.stock_names.get(stock_code, stock_code)
 
-        query = """
+        query = text("""
         SELECT stock_name
         FROM stocks
-        WHERE stock_code = ?
+        WHERE stock_code = :sc
         LIMIT 1
-        """
-        df = pd.read_sql(query, self.conn, params=[stock_code])
+        """)
+        df = pd.read_sql(query, self.conn, params={'sc': stock_code})
         if df.empty:
             return stock_code
         return df.iloc[0]['stock_name']

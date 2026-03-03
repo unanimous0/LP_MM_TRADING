@@ -8,7 +8,6 @@ OptunaOptimizer 클래스:
   (study_storage=None이면 인메모리 일회성 실행 — Walk-Forward 기본값)
 """
 
-import sqlite3
 import pandas as pd
 from datetime import datetime
 from typing import Optional, Dict
@@ -16,6 +15,7 @@ from typing import Optional, Dict
 from .engine import BacktestConfig, BacktestEngine
 from .precomputer import BacktestPrecomputer
 from .metrics import PerformanceMetrics
+from src.database.connection import get_pg_engine
 
 
 # ============================================================================
@@ -50,19 +50,20 @@ class OptunaOptimizer:
         # BacktestConfig의 고정 파라미터로 관리 (기본값: 0.3)
     }
 
-    def __init__(self, db_path: str, start_date: str, end_date: str,
+    def __init__(self, db_path: str = '', start_date: str = '',
+                 end_date: str = '',
                  base_config: Optional[BacktestConfig] = None,
                  study_storage: Optional[str] = None):
         """
         Args:
-            db_path: SQLite DB 파일 경로
+            db_path: (레거시, 미사용) 하위 호환용으로 파라미터 유지
             start_date: 백테스트 시작일 (YYYY-MM-DD)
             end_date: 백테스트 종료일 (YYYY-MM-DD)
             base_config: 기본 BacktestConfig (최적화 대상 외 파라미터)
             study_storage: Optuna study 저장 경로 (예: "sqlite:///data/optuna_studies.db")
                 None이면 인메모리 (비지속, Walk-Forward 기본값)
         """
-        self.db_path = db_path
+        self.db_path = db_path  # 레거시 호환 (미사용)
         self.start_date = start_date
         self.end_date = end_date
         self.base_config = base_config or BacktestConfig()
@@ -111,7 +112,6 @@ class OptunaOptimizer:
             precomputed: PrecomputeResult (외부 주입 시 Trial 간 공유, None이면 Trial마다 계산)
         """
         import optuna as _optuna
-        db_path = self.db_path
         start_date = self.start_date
         end_date = self.end_date
         build_base = self._build_base_params
@@ -134,7 +134,7 @@ class OptunaOptimizer:
             mid_dt = start_dt + (end_dt - start_dt) // 2
             mid_date = mid_dt.strftime('%Y-%m-%d')
 
-            conn = sqlite3.connect(db_path)
+            pg_engine = get_pg_engine()
             try:
                 config = BacktestConfig(**params)
 
@@ -142,7 +142,7 @@ class OptunaOptimizer:
                 # precomputed 주입 시: 전체 기간 사전 계산 데이터를 절반 루프에도 재사용
                 # (rolling은 backward-looking이므로 미래 누수 없음)
                 if mid_date > start_date:
-                    engine_half = BacktestEngine(conn, config)
+                    engine_half = BacktestEngine(pg_engine, config)
                     half_result = engine_half.run(
                         start_date, mid_date, verbose=False,
                         preload_data=(precomputed is None),
@@ -164,7 +164,7 @@ class OptunaOptimizer:
                         raise _TrialPruned()
 
                 # 전체 기간 평가
-                engine_full = BacktestEngine(conn, config)
+                engine_full = BacktestEngine(pg_engine, config)
                 full_result = engine_full.run(
                     start_date, end_date, verbose=False,
                     preload_data=(precomputed is None),
@@ -185,8 +185,6 @@ class OptunaOptimizer:
                 raise
             except Exception:
                 return float('-inf')
-            finally:
-                conn.close()
 
         return objective
 
@@ -327,19 +325,16 @@ class OptunaOptimizer:
             progress_callback(0, n_trials)
         if verbose:
             print(f"\n[Precompute] 사전 계산 중...")
-        conn_pre = sqlite3.connect(self.db_path)
-        try:
-            pc = BacktestPrecomputer(
-                conn_pre,
-                institution_weight=self.base_config.institution_weight,
-                use_tc=self.base_config.use_tc,
-                use_divergence=self.base_config.use_divergence,
-            )
-            shared_precomputed = pc.precompute(
-                self.end_date, start_date=self.start_date, verbose=verbose
-            )
-        finally:
-            conn_pre.close()
+        pg_engine = get_pg_engine()
+        pc = BacktestPrecomputer(
+            pg_engine,
+            institution_weight=self.base_config.institution_weight,
+            use_tc=self.base_config.use_tc,
+            use_divergence=self.base_config.use_divergence,
+        )
+        shared_precomputed = pc.precompute(
+            self.end_date, start_date=self.start_date, verbose=verbose
+        )
         if verbose:
             print(f"[Precompute] 완료\n")
 

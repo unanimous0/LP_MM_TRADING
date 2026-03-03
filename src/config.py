@@ -320,10 +320,5 @@ def get_project_root() -> Path:
     return Path(__file__).parent.parent
 
 
-def get_db_path() -> Path:
-    """데이터베이스 파일 경로 반환"""
-    return get_project_root() / 'data' / 'processed' / 'investor_data.db'
-
-
 # 모듈 임포트 시 기본 설정 제공
 config = DEFAULT_CONFIG

@@ -15,6 +15,7 @@ Implements Stage 3 additional signals:
 import pandas as pd
 import numpy as np
 from typing import Optional, Dict, List
+from sqlalchemy import text
 from src.utils import validate_stock_codes
 
 
@@ -74,29 +75,34 @@ class SignalDetector:
         if stock_codes:
             stock_codes = validate_stock_codes(stock_codes)
 
-        # WHERE 절 생성
-        where_clauses = []
+        # WHERE 추가 조건 생성 (검증된 입력만 사용)
+        extra_clauses = []
         if stock_codes:
             codes_str = "','".join(stock_codes)
-            where_clauses.append(f"stock_code IN ('{codes_str}')")
+            extra_clauses.append(f"AND it.stock_code IN ('{codes_str}')")
         if end_date:
-            where_clauses.append(f"trade_date <= '{end_date}'")
+            extra_clauses.append(f"AND it.time <= '{end_date}'")
+        extra = "\n          ".join(extra_clauses)
 
-        where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
-
-        # 쿼리 실행
+        # 쿼리 실행 (signal_detector는 net_amount만 필요 — ohlcv/floating JOIN 없음)
         query = f"""
         SELECT
-            trade_date,
-            stock_code,
-            foreign_net_amount,
-            institution_net_amount
-        FROM investor_flows
-        {where_sql}
-        ORDER BY stock_code, trade_date
+            it.time AS trade_date,
+            it.stock_code,
+            SUM(CASE WHEN it.investor_type = 'FOREIGN'      THEN it.net_buy_value ELSE 0 END) AS foreign_net_amount,
+            SUM(CASE WHEN it.investor_type = 'INSTITUTION'  THEN it.net_buy_value ELSE 0 END) AS institution_net_amount
+        FROM investor_trading it
+        WHERE it.investor_type IN ('FOREIGN', 'INSTITUTION')
+          {extra}
+        GROUP BY it.time, it.stock_code
+        ORDER BY it.stock_code, it.time
         """
 
-        df = pd.read_sql(query, self.conn)
+        df = pd.read_sql(text(query), self.conn)
+
+        # PostgreSQL은 DATE를 datetime.date로 반환 → 문자열 통일
+        if not df.empty and 'trade_date' in df.columns:
+            df['trade_date'] = df['trade_date'].astype(str)
 
         if df.empty:
             print("[WARN] No supply data found")

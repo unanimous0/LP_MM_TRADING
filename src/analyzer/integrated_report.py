@@ -15,6 +15,7 @@ Implements Stage 3 final report generation:
 import pandas as pd
 import numpy as np
 from typing import Optional, Dict, List
+from sqlalchemy import text
 from src.analyzer.pattern_classifier import PatternClassifier
 from src.analyzer.signal_detector import SignalDetector
 
@@ -88,17 +89,18 @@ class IntegratedReport:
         """
         if stock_codes:
             codes_str = "','".join(stock_codes)
-            where_sql = f"WHERE stock_code IN ('{codes_str}')"
+            where_sql = f"WHERE s.stock_code IN ('{codes_str}')"
         else:
             where_sql = ""
 
         query = f"""
-        SELECT stock_code, stock_name, sector
-        FROM stocks
+        SELECT s.stock_code, s.stock_name, ss.fics_sector AS sector
+        FROM stocks s
+        LEFT JOIN stock_sectors ss ON s.stock_code = ss.stock_code
         {where_sql}
         """
 
-        df = pd.read_sql(query, self.conn)
+        df = pd.read_sql(text(query), self.conn)
 
         if df.empty:
             print("[WARN] No stock info found")

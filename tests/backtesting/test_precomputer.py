@@ -8,22 +8,19 @@ import pytest
 import pandas as pd
 import numpy as np
 from src.backtesting.precomputer import BacktestPrecomputer, PrecomputeResult, PERIODS
-from src.database.connection import get_connection
+from src.database.connection import get_pg_engine
+
+# DB 테스트 기준일: 2022-06-30 (6개월 데이터 = ~87K rows, 빠른 쿼리)
+TEST_END_DATE = '2022-06-30'
 
 
 class TestPrecomputeResult:
     """PrecomputeResult 구조 테스트"""
 
     @pytest.fixture
-    def conn(self):
-        conn = get_connection()
-        yield conn
-        conn.close()
-
-    @pytest.fixture
-    def result(self, conn):
-        pc = BacktestPrecomputer(conn, institution_weight=0.3)
-        return pc.precompute('2024-03-31', verbose=False)
+    def result(self):
+        pc = BacktestPrecomputer(get_pg_engine(), institution_weight=0.3)
+        return pc.precompute(TEST_END_DATE, verbose=False)
 
     def test_returns_precompute_result(self, result):
         """precompute가 PrecomputeResult를 반환하는지"""
@@ -54,15 +51,9 @@ class TestZScorePrecomputation:
     """Z-Score 사전 계산 테스트"""
 
     @pytest.fixture
-    def conn(self):
-        conn = get_connection()
-        yield conn
-        conn.close()
-
-    @pytest.fixture
-    def result(self, conn):
-        pc = BacktestPrecomputer(conn, institution_weight=0.3)
-        return pc.precompute('2024-03-31', verbose=False)
+    def result(self):
+        pc = BacktestPrecomputer(get_pg_engine(), institution_weight=0.3)
+        return pc.precompute(TEST_END_DATE, verbose=False)
 
     def test_zscore_multiindex(self, result):
         """Z-Score DataFrame이 올바른 MultiIndex를 갖는지"""
@@ -81,13 +72,15 @@ class TestZScorePrecomputation:
                 assert col.min() > -20, f"{period} Z-Score too low: {col.min()}"
                 assert col.max() < 20, f"{period} Z-Score too high: {col.max()}"
 
-    def test_zscore_matches_slow_path(self, conn):
+    def test_zscore_matches_slow_path(self):
         """사전 계산 Z-Score가 느린 경로(performance_optimizer)와 일치하는지"""
         from src.analyzer.normalizer import SupplyNormalizer
         from src.visualizer.performance_optimizer import OptimizedMultiPeriodCalculator
 
+        engine = get_pg_engine()
+
         # 느린 경로: 기존 OptimizedMultiPeriodCalculator
-        normalizer = SupplyNormalizer(conn, config={
+        normalizer = SupplyNormalizer(engine, config={
             'z_score_window': 60,
             'min_data_points': 30,
             'institution_weight': 0.3,
@@ -95,12 +88,12 @@ class TestZScorePrecomputation:
         calculator = OptimizedMultiPeriodCalculator(normalizer, enable_caching=False)
         slow_zscore = calculator.calculate_multi_period_zscores(
             periods_dict=PERIODS,
-            end_date='2024-03-31'
+            end_date=TEST_END_DATE
         )
 
         # 빠른 경로: BacktestPrecomputer
-        pc = BacktestPrecomputer(conn, institution_weight=0.3)
-        result = pc.precompute('2024-03-31', verbose=False)
+        pc = BacktestPrecomputer(engine, institution_weight=0.3)
+        result = pc.precompute(TEST_END_DATE, verbose=False)
 
         # 최신 날짜의 Z-Score 비교
         latest_date = result.trading_dates[-1]
@@ -128,15 +121,9 @@ class TestSignalPrecomputation:
     """시그널 사전 계산 테스트"""
 
     @pytest.fixture
-    def conn(self):
-        conn = get_connection()
-        yield conn
-        conn.close()
-
-    @pytest.fixture
-    def result(self, conn):
-        pc = BacktestPrecomputer(conn, institution_weight=0.3)
-        return pc.precompute('2024-03-31', verbose=False)
+    def result(self):
+        pc = BacktestPrecomputer(get_pg_engine(), institution_weight=0.3)
+        return pc.precompute(TEST_END_DATE, verbose=False)
 
     def test_signals_multiindex(self, result):
         """시그널 DataFrame이 올바른 MultiIndex를 갖는지"""
@@ -170,19 +157,13 @@ class TestPriceLookup:
     """가격 lookup 테스트"""
 
     @pytest.fixture
-    def conn(self):
-        conn = get_connection()
-        yield conn
-        conn.close()
-
-    @pytest.fixture
-    def result(self, conn):
-        pc = BacktestPrecomputer(conn, institution_weight=0.3)
-        return pc.precompute('2024-03-31', verbose=False)
+    def result(self):
+        pc = BacktestPrecomputer(get_pg_engine(), institution_weight=0.3)
+        return pc.precompute(TEST_END_DATE, verbose=False)
 
     def test_samsung_price_exists(self, result):
         """삼성전자 가격이 존재하는지"""
-        price = result.price_lookup.get(('005930', '2024-01-02'))
+        price = result.price_lookup.get(('005930', '2022-01-03'))
         assert price is not None
         assert price > 0
 
@@ -201,15 +182,9 @@ class TestStockNames:
     """종목명 lookup 테스트"""
 
     @pytest.fixture
-    def conn(self):
-        conn = get_connection()
-        yield conn
-        conn.close()
-
-    @pytest.fixture
-    def result(self, conn):
-        pc = BacktestPrecomputer(conn, institution_weight=0.3)
-        return pc.precompute('2024-03-31', verbose=False)
+    def result(self):
+        pc = BacktestPrecomputer(get_pg_engine(), institution_weight=0.3)
+        return pc.precompute(TEST_END_DATE, verbose=False)
 
     def test_samsung_name(self, result):
         """삼성전자 종목명이 올바른지"""
@@ -223,43 +198,33 @@ class TestStockNames:
 class TestStartDateFilter:
     """start_date 필터 테스트"""
 
-    @pytest.fixture
-    def conn(self):
-        conn = get_connection()
-        yield conn
-        conn.close()
-
-    def test_start_date_filters_trading_dates(self, conn):
+    def test_start_date_filters_trading_dates(self):
         """start_date가 거래일 목록을 필터링하는지"""
-        pc = BacktestPrecomputer(conn, institution_weight=0.3)
-        result = pc.precompute('2024-03-31', start_date='2024-02-01', verbose=False)
-        assert all(d >= '2024-02-01' for d in result.trading_dates)
+        pc = BacktestPrecomputer(get_pg_engine(), institution_weight=0.3)
+        result = pc.precompute(TEST_END_DATE, start_date='2022-05-01', verbose=False)
+        assert all(d >= '2022-05-01' for d in result.trading_dates)
 
-    def test_zscore_still_has_all_data(self, conn):
+    def test_zscore_still_has_all_data(self):
         """start_date 필터와 관계없이 Z-Score는 전체 데이터 포함"""
-        pc = BacktestPrecomputer(conn, institution_weight=0.3)
-        result = pc.precompute('2024-03-31', start_date='2024-02-01', verbose=False)
-        # Z-Score에는 2024-02-01 이전 데이터도 있어야 함 (rolling 계산용)
+        pc = BacktestPrecomputer(get_pg_engine(), institution_weight=0.3)
+        result = pc.precompute(TEST_END_DATE, start_date='2022-05-01', verbose=False)
+        # Z-Score에는 2022-05-01 이전 데이터도 있어야 함 (rolling 계산용)
         zscore_dates = result.zscore_all_dates.index.get_level_values('trade_date').unique()
-        assert any(d < '2024-02-01' for d in zscore_dates)
+        assert any(d < '2022-05-01' for d in zscore_dates)
 
 
 class TestInstitutionWeight:
     """기관 가중치 테스트"""
 
-    @pytest.fixture
-    def conn(self):
-        conn = get_connection()
-        yield conn
-        conn.close()
-
-    def test_different_weights_produce_different_results(self, conn):
+    def test_different_weights_produce_different_results(self):
         """기관 가중치 변경 시 Z-Score가 달라지는지"""
-        pc1 = BacktestPrecomputer(conn, institution_weight=0.3)
-        result1 = pc1.precompute('2024-03-31', verbose=False)
+        engine = get_pg_engine()
 
-        pc2 = BacktestPrecomputer(conn, institution_weight=0.5)
-        result2 = pc2.precompute('2024-03-31', verbose=False)
+        pc1 = BacktestPrecomputer(engine, institution_weight=0.3)
+        result1 = pc1.precompute(TEST_END_DATE, verbose=False)
+
+        pc2 = BacktestPrecomputer(engine, institution_weight=0.5)
+        result2 = pc2.precompute(TEST_END_DATE, verbose=False)
 
         # 같은 날짜의 Z-Score 비교 (다른 weight → 다른 값)
         date = result1.trading_dates[-1]
