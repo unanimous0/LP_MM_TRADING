@@ -45,9 +45,6 @@ venv/bin/streamlit run app/streamlit_app.py
 
 ### CLI 분석
 ```bash
-# 이상 수급 탐지
-python scripts/analysis/abnormal_supply_detector.py
-
 # 통합 레짐 스캐너
 python scripts/analysis/regime_scanner.py --save-csv --print-cards --top 20
 

@@ -583,8 +583,6 @@ LP_MM_TRADING/
 │   ├── setup_materialized_views.sql   # MV 생성 SQL
 │   ├── refresh_mv.sh                  # MV 리프레시 스크립트
 │   └── analysis/
-│       ├── abnormal_supply_detector.py  # Stage 1 CLI
-│       ├── heatmap_generator.py         # Stage 2 CLI
 │       ├── backtest_runner.py           # Stage 4 CLI
 │       └── regime_scanner.py            # Stage 3 CLI (통합)
 ├── pytest.ini                     # pytest 설정 (slow 마크 등록)

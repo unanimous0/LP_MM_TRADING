@@ -351,13 +351,6 @@ python scripts/analysis/backtest_runner.py --start 2023-01-01 --end 2025-12-31
 python scripts/analysis/backtest_runner.py --optimize --n-trials 100
 ```
 
-### 7-3. 리포트 파일 생성
-
-```bash
-bash scripts/analysis/run_all.sh
-```
-→ Excel, CSV, HTML, Markdown 형식 리포트 생성
-
 ---
 
 ## 8. 실전 투자 전략 프레임워크
