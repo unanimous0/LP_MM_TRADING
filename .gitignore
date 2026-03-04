@@ -19,6 +19,9 @@ data/processed/
 data/raw/processed/
 *.backup_*
 
+# Pipeline cache (regeneratable)
+data/cache/
+
 # Output files (regeneratable)
 output/*.pdf
 output/*.png

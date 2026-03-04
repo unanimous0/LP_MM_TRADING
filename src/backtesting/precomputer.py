@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 from sqlalchemy import text
 
+from src.database.connection import is_mv_available
+
 
 PERIODS = {
     '5D': 5,
@@ -136,41 +138,74 @@ class BacktestPrecomputer:
             merged_short=merged_short,
         )
 
-    def _load_raw_data(self, end_date: str) -> pd.DataFrame:
-        """DB에서 원본 데이터 1회 로드 (PostgreSQL PIVOT 쿼리)"""
-        query = text("""
-        SELECT
-            it.time AS trade_date,
-            it.stock_code,
-            SUM(CASE WHEN it.investor_type = 'FOREIGN'      THEN it.net_buy_value ELSE 0 END) AS foreign_net_amount,
-            SUM(CASE WHEN it.investor_type = 'INSTITUTION'  THEN it.net_buy_value ELSE 0 END) AS institution_net_amount,
-            MAX(o.close_price)      AS close_price,
-            MAX(ff.floating_shares) AS free_float_shares
-        FROM investor_trading it
-        JOIN ohlcv_daily o ON it.time = o.time AND it.stock_code = o.stock_code
-        JOIN (
-            SELECT DISTINCT ON (stock_code) stock_code, floating_shares
-            FROM floating_shares
-            ORDER BY stock_code, base_date DESC
-        ) ff ON it.stock_code = ff.stock_code
-        WHERE it.investor_type IN ('FOREIGN', 'INSTITUTION')
-          AND o.close_price IS NOT NULL
-          AND it.time <= :end_date
-        GROUP BY it.time, it.stock_code
-        ORDER BY it.stock_code, it.time
-        """)
-        df = pd.read_sql(query, self.conn, params={'end_date': end_date})
+    def _load_raw_data(self, end_date: str, start_date: Optional[str] = None) -> pd.DataFrame:
+        """DB에서 원본 데이터 1회 로드 (MV 또는 원본 테이블 자동 분기)
+
+        Args:
+            end_date: 데이터 로드 종료일
+            start_date: 데이터 로드 시작일 (None이면 전체)
+        """
+        if is_mv_available():
+            # MV 경로: 사전 계산된 Sff 포함
+            clauses = [f"trade_date <= '{end_date}'"]
+            if start_date:
+                clauses.append(f"trade_date >= '{start_date}'")
+            where = "WHERE " + " AND ".join(clauses)
+
+            query = text(f"""
+            SELECT trade_date, stock_code, foreign_net_amount, institution_net_amount,
+                   close_price, free_float_shares, foreign_sff, institution_sff
+            FROM mv_daily_sff
+            {where}
+            ORDER BY stock_code, trade_date
+            """)
+        else:
+            # Fallback: 기존 3-table JOIN
+            extra = ""
+            if start_date:
+                extra = f"AND it.time >= '{start_date}'"
+
+            query = text(f"""
+            SELECT
+                it.time AS trade_date,
+                it.stock_code,
+                SUM(CASE WHEN it.investor_type = 'FOREIGN'      THEN it.net_buy_value ELSE 0 END) AS foreign_net_amount,
+                SUM(CASE WHEN it.investor_type = 'INSTITUTION'  THEN it.net_buy_value ELSE 0 END) AS institution_net_amount,
+                MAX(o.close_price)      AS close_price,
+                MAX(ff.floating_shares) AS free_float_shares
+            FROM investor_trading it
+            JOIN ohlcv_daily o ON it.time = o.time AND it.stock_code = o.stock_code
+            JOIN (
+                SELECT DISTINCT ON (stock_code) stock_code, floating_shares
+                FROM floating_shares
+                ORDER BY stock_code, base_date DESC
+            ) ff ON it.stock_code = ff.stock_code
+            WHERE it.investor_type IN ('FOREIGN', 'INSTITUTION')
+              AND o.close_price IS NOT NULL
+              AND it.time <= '{end_date}'
+              {extra}
+            GROUP BY it.time, it.stock_code
+            ORDER BY it.stock_code, it.time
+            """)
+
+        df = pd.read_sql(query, self.conn)
         # PostgreSQL은 DATE를 datetime.date로 반환 → 문자열 통일 (기존 비교 로직 호환)
-        df['trade_date'] = df['trade_date'].astype(str)
+        if not df.empty:
+            df['trade_date'] = df['trade_date'].astype(str)
         return df
 
     def _compute_sff_all_dates(self, raw_df: pd.DataFrame) -> pd.DataFrame:
-        """전체 날짜 Sff 벡터화 계산 (normalizer._apply_sff_formula 동일 로직)"""
-        df = raw_df.copy()
-        free_float_mcap = df['close_price'] * df['free_float_shares']
+        """전체 날짜 Sff 벡터화 계산 (normalizer._apply_sff_formula 동일 로직)
 
-        df['foreign_sff'] = (df['foreign_net_amount'] / free_float_mcap) * 100
-        df['institution_sff'] = (df['institution_net_amount'] / free_float_mcap) * 100
+        MV 경로에서는 foreign_sff/institution_sff가 이미 있으므로 combined만 계산.
+        """
+        df = raw_df.copy()
+
+        if 'foreign_sff' not in df.columns:
+            # Fallback: Sff 전체 계산
+            free_float_mcap = df['close_price'] * df['free_float_shares']
+            df['foreign_sff'] = (df['foreign_net_amount'] / free_float_mcap) * 100
+            df['institution_sff'] = (df['institution_net_amount'] / free_float_mcap) * 100
 
         same_direction = (df['foreign_sff'] * df['institution_sff']) > 0
         df['combined_sff'] = np.where(

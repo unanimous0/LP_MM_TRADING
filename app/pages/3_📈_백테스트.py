@@ -693,13 +693,21 @@ with st.container(border=True):
             _codes = trade_df['stock_code'].unique().tolist()
             _min_d = trade_df['entry_date'].min()
             _max_d = trade_df['exit_date'].max()
-            _ph = ','.join(['?' for _ in _codes])
-            _price_df = pd.read_sql_query(
-                f"SELECT stock_code, trade_date, close_price FROM investor_flows "
-                f"WHERE stock_code IN ({_ph}) AND trade_date BETWEEN ? AND ? "
-                f"ORDER BY stock_code, trade_date",
-                _conn, params=_codes + [_min_d, _max_d],
+            from sqlalchemy import text as _text
+            _ph = ','.join([f':c{i}' for i in range(len(_codes))])
+            _params = {f'c{i}': c for i, c in enumerate(_codes)}
+            _params['min_d'] = _min_d
+            _params['max_d'] = _max_d
+            _price_df = pd.read_sql(
+                _text(
+                    f"SELECT stock_code, time AS trade_date, close_price FROM ohlcv_daily "
+                    f"WHERE stock_code IN ({_ph}) AND time BETWEEN :min_d AND :max_d "
+                    f"ORDER BY stock_code, time"
+                ),
+                _conn, params=_params,
             )
+            if not _price_df.empty and 'trade_date' in _price_df.columns:
+                _price_df['trade_date'] = _price_df['trade_date'].astype(str)
             _stats = []
             for _, _tr in trade_df.iterrows():
                 _p = _price_df[

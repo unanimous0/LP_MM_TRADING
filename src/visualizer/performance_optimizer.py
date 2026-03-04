@@ -13,7 +13,9 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from sqlalchemy import text
 from src.analyzer.normalizer import SupplyNormalizer
+from src.database.connection import is_mv_available
 
 
 class OptimizedMultiPeriodCalculator:
@@ -66,6 +68,19 @@ class OptimizedMultiPeriodCalculator:
             005930      2.3     1.8     1.2
             000660      -0.5    -0.3    0.1
         """
+        # SQL 고속 경로 (MV + fn_zscore_latest 존재 시)
+        if is_mv_available() and stock_codes is None:
+            result = self._calculate_zscores_sql(end_date)
+            if result is not None and not result.empty:
+                # periods_dict에 요청된 기간 + 메타데이터 컬럼만 유지
+                requested = list(periods_dict.keys())
+                meta_cols = [c for c in result.columns if c.startswith('_')]
+                keep_cols = requested + meta_cols
+                result = result[[c for c in keep_cols if c in result.columns]]
+                print(f"[OK] SQL Z-Score: {len(result)} stocks, {len(requested)} periods")
+                return result
+
+        # Fallback: 기존 Python 경로
         print("[INFO] Loading Sff data (one-time)...")
 
         # Step 1: Sff 캐싱 (1회만 실행)
@@ -118,6 +133,53 @@ class OptimizedMultiPeriodCalculator:
                 df_result[f'_std_{p_name}'] = meta_df['rolling_std']
 
         return df_result
+
+    def _calculate_zscores_sql(self, end_date: Optional[str] = None) -> Optional[pd.DataFrame]:
+        """
+        SQL 함수 fn_zscore_latest()로 7개 기간 Z-Score를 한 번에 계산.
+
+        Returns:
+            기존 Python 경로와 동일 포맷의 DataFrame 또는 None (SQL 함수 없을 때)
+            - index: stock_code
+            - columns: 5D, 10D, ..., 500D, _today_sff, _sff_5d_avg, _std_5D, ...
+        """
+        try:
+            weight = self.normalizer.config.get('institution_weight', 0.3)
+            if end_date:
+                query = text("SELECT * FROM fn_zscore_latest(:w, :d)")
+                params = {'w': weight, 'd': end_date}
+            else:
+                query = text("SELECT * FROM fn_zscore_latest(:w)")
+                params = {'w': weight}
+
+            df = pd.read_sql(query, self.normalizer.conn, params=params)
+
+            if df.empty:
+                return None
+
+            # 컬럼명 변환: SQL → Python 경로 동일 포맷
+            df = df.set_index('stock_code')
+
+            result = pd.DataFrame(index=df.index)
+            # Z-Score 컬럼
+            for period in ['5d', '10d', '20d', '50d', '100d', '200d', '500d']:
+                col_name = period.upper()  # '5D', '10D', ...
+                result[col_name] = df[f'zscore_{period}']
+
+            # 메타데이터 (방향 확신도용)
+            result['_today_sff'] = df['today_sff']
+            result['_sff_5d_avg'] = df['sff_5d_avg']
+            for period in ['5d', '10d', '20d', '50d', '100d', '200d', '500d']:
+                result[f'_std_{period.upper()}'] = df[f'std_{period}']
+
+            # inf/nan 처리
+            result = result.replace([np.inf, -np.inf], np.nan)
+
+            return result
+
+        except Exception as e:
+            print(f"[WARN] SQL Z-Score failed, falling back to Python: {e}")
+            return None
 
     def _calculate_zscore_vectorized(self, lookback_days: int,
                                      return_metadata: bool = False):

@@ -15,7 +15,7 @@ import time
 
 from src.analyzer.normalizer import SupplyNormalizer
 from src.visualizer.performance_optimizer import OptimizedMultiPeriodCalculator
-from src.database.connection import get_pg_engine
+from src.database.connection import get_pg_engine, is_mv_available
 
 
 class TestOptimizedMultiPeriodCalculator:
@@ -53,16 +53,20 @@ class TestOptimizedMultiPeriodCalculator:
         assert len(period_cols) == 7, "Should have all 7 period columns"
 
     def test_caching_enabled(self, optimizer):
-        """Test caching behavior"""
+        """Test caching behavior (Python path) or SQL path returns results"""
         periods = {'5D': 5, '10D': 10}
 
-        # First call (loads cache)
+        # First call
         result1 = optimizer.calculate_multi_period_zscores(periods)
-        assert optimizer._sff_cache is not None, "Cache should be populated"
+        assert not result1.empty, "Should return data"
 
-        # Second call (uses cache)
+        if not is_mv_available():
+            # Python path: _sff_cache should be populated
+            assert optimizer._sff_cache is not None, "Cache should be populated"
+
+        # Second call should also return data
         result2 = optimizer.calculate_multi_period_zscores(periods)
-        assert optimizer._sff_cache is not None, "Cache should still be populated"
+        assert not result2.empty, "Should return data on second call"
 
     def test_caching_disabled(self):
         """Test behavior with caching disabled"""
@@ -87,10 +91,11 @@ class TestOptimizedMultiPeriodCalculator:
 
     def test_clear_cache(self, optimizer):
         """Test cache clearing"""
-        periods = {'1D': 1}
-        optimizer.calculate_multi_period_zscores(periods)
+        # stock_codes 지정 → Python fallback 경로 강제 (SQL은 stock_codes=None만 지원)
+        periods = {'5D': 5}
+        optimizer.calculate_multi_period_zscores(periods, stock_codes=['005930'])
 
-        assert optimizer._sff_cache is not None, "Cache should be populated"
+        assert optimizer._sff_cache is not None, "Cache should be populated (Python path)"
 
         optimizer.clear_cache()
         assert optimizer._sff_cache is None, "Cache should be cleared"
@@ -140,8 +145,9 @@ class TestPerformance:
         time_with_cache = time.time() - start2
 
         # Note: First call with caching may not be faster
-        # But cache should be populated
-        assert optimizer_cache._sff_cache is not None
+        # SQL path doesn't populate _sff_cache, Python path does
+        if not is_mv_available():
+            assert optimizer_cache._sff_cache is not None
 
 
 class TestZScoreCorrectness:
@@ -160,8 +166,9 @@ class TestZScoreCorrectness:
         result = optimizer.calculate_multi_period_zscores(periods)
 
         if not result.empty:
-            # Most Z-Scores should be between -5 and 5
-            for col in result.columns:
+            # Most Z-Scores should be between -5 and 5 (메타데이터 컬럼 제외)
+            period_cols = [c for c in result.columns if not c.startswith('_')]
+            for col in period_cols:
                 valid_zscores = result[col].dropna()
                 if len(valid_zscores) > 0:
                     assert valid_zscores.abs().quantile(0.95) < 5.0, \
@@ -173,7 +180,8 @@ class TestZScoreCorrectness:
         result = optimizer.calculate_multi_period_zscores(periods)
 
         if not result.empty:
-            for col in result.columns:
+            period_cols = [c for c in result.columns if not c.startswith('_')]
+            for col in period_cols:
                 non_nan = result[col].notna().sum()
                 assert non_nan > 0, f"Column {col} should have non-NaN values"
 

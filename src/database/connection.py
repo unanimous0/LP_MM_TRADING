@@ -14,7 +14,7 @@ import os
 import sqlite3
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 
 # ---------------------------------------------------------------------------
@@ -47,6 +47,26 @@ def get_connection():
         conn.close()
     """
     return get_pg_engine().connect()
+
+
+# ---------------------------------------------------------------------------
+# Materialized View 존재 확인
+# ---------------------------------------------------------------------------
+
+_mv_available = None
+
+
+def is_mv_available() -> bool:
+    """mv_daily_sff 존재 여부 확인 (1회만 체크, 캐싱)"""
+    global _mv_available
+    if _mv_available is None:
+        try:
+            with get_pg_engine().connect() as conn:
+                conn.execute(text("SELECT 1 FROM mv_daily_sff LIMIT 1"))
+                _mv_available = True
+        except Exception:
+            _mv_available = False
+    return _mv_available
 
 
 # ---------------------------------------------------------------------------

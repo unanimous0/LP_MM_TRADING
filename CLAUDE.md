@@ -1,7 +1,7 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- **현재 작업**: PostgreSQL 공유 DB 전환 완료 — Stage 5-2 기획 또는 데이터 확장 중
+- **현재 작업**: 성능 최적화 Phase 3 완료 (벡터화 Z-Score + MV 날짜 + lazy import) — 490초→8초
 - **마지막 업데이트**: 2026-03-04
 - **DB 전환**: SQLite(`data/processed/investor_data.db`) → PostgreSQL(`korea_stock_data`) 완료
   - 소스 전환 완료: `connection.py`, `normalizer.py`, `precomputer.py`, `engine.py`, `signal_detector.py`, `data_loader.py`, `optimizer.py`, `walk_forward.py`, `backtest_runner.py`
@@ -607,7 +607,8 @@ LP_MM_TRADING/
 ├── README.md                      # 프로젝트 소개
 ├── requirements.txt               # 의존성
 ├── data/
-│   └── app.db                     # 앱 전용 SQLite (watchlist/backtest_history/score_change_log)
+│   ├── app.db                     # 앱 전용 SQLite (watchlist/backtest_history/score_change_log)
+│   └── cache/                     # 파이프라인 결과 파일 캐시 (pkl, .gitignore)
 ├── app/                           # Streamlit 웹 대시보드 (Stage 5-1) ✨
 │   ├── streamlit_app.py           # 메인 엔트리포인트
 │   ├── utils/
@@ -618,7 +619,7 @@ LP_MM_TRADING/
 │       └── 3_📈_백테스트.py        # 백테스트 실행 + Optuna 최적화 + Plotly 차트
 ├── src/
 │   ├── database/                  # DB 모듈
-│   │   └── connection.py          # PostgreSQL(시장데이터) + SQLite(앱데이터) 이중 연결
+│   │   └── connection.py          # PostgreSQL(시장데이터) + SQLite(앱데이터) 이중 연결 + MV 확인
 │   ├── analyzer/                  # 분석 모듈
 │   │   ├── normalizer.py          # Sff/Z-Score 계산 (외국인 중심 조건부)
 │   │   ├── pattern_classifier.py  # 패턴 분류 (Stage 3)
@@ -639,6 +640,8 @@ LP_MM_TRADING/
 │   ├── config.py                  # 전역 설정
 │   └── utils.py                   # 입력 검증 (보안)
 ├── scripts/
+│   ├── setup_materialized_views.sql   # MV 생성 SQL
+│   ├── refresh_mv.sh                  # MV 리프레시 스크립트
 │   └── analysis/
 │       ├── abnormal_supply_detector.py  # Stage 1 CLI
 │       ├── heatmap_generator.py         # Stage 2 CLI
@@ -711,10 +714,11 @@ LP_MM_TRADING/
 ---
 
 ## [Data]
-- **171,227 레코드** (2024-01-02 ~ 2026-01-20)
-- **345개 핵심 종목** (KOSPI200 + KOSDAQ150)
-- **1,609개 종목 마스터** (섹터 정보 97.9% 커버리지)
+- **~2,427,520 레코드** (2022-01-03 ~ 2026-02-27, MV 기준)
+- **2,628개 종목** (KOSPI + KOSDAQ 활성 종목)
+- **1,609개+ 종목 마스터** (섹터 정보 97.9% 커버리지)
 - **13개 컬럼** (수급 + 주가 + 유통주식)
+- **Materialized View**: `mv_daily_sff` (Sff 사전 계산, 장 마감 후 리프레시)
 
 ---
 
@@ -728,10 +732,14 @@ LP_MM_TRADING/
 
 | Stage | 처리 | 소요시간 | 최적화 |
 |-------|------|----------|--------|
-| Stage 1 | 345종목 이상 수급 탐지 | ~15초 | 벡터화 완료 |
-| Stage 2 | 345종목×6기간 히트맵 | ~1.5초 | Sff 캐싱 + groupby.transform |
-| Stage 3 | 패턴 분류 + 시그널 통합 | ~1.5초 | 벡터화 + 병렬 처리 |
-| **전체** | **Stage 1~3 통합 실행** | **~3초** | **최적화 완료** |
+| Stage 1+2 | 2,628종목 Z-Score | **~1.2초** | **SQL fn_zscore_latest() LATERAL+FILTER** |
+| Stage 3a | 패턴 분류 | ~0.1초 | 벡터화 |
+| Stage 3b | 시그널 탐지 | **~0.3초** | **SQL fn_signals_latest() LATERAL+FILTER** |
+| Stage 3c | 통합 리포트 | ~0.03초 | — |
+| **전체 (첫 로드)** | **Stage 1~3 통합** | **~2.2초** | **SQL 함수 (이전 47초, 21배 향상)** |
+| **전체 (캐시 히트)** | **파일 캐시 로드** | **<0.01초** | **pkl 파일 캐시** |
+| 이상수급 (buy+sell) | 2,628종목 Z-Score×3 | **~6초** | **groupby.transform 벡터화 (이전 440초, 75배)** |
+| get_date_range() | 날짜 범위 조회 | **~2ms** | **mv_daily_sff (이전 343ms, 172배)** |
 | **백테스트 38일** | **Precomputer 적용** | **~1.1초** | **165배 향상 (177초→1.1초)** |
 | **백테스트 63일** | **Precomputer 적용** | **~1.5초** | **262배 향상 (393초→1.5초)** |
 | **백테스트 1년** | **Streamlit 실행** | **~4초** | **Precomputer 자동 적용** |
@@ -850,6 +858,159 @@ short 정렬/분류: adjusted_z = z × max(-confidence, 0)   ← 매도 방향�
 ## [Progress History]
 
 > 전체 이력은 **CHANGELOG.md** 참조. 아래는 최근 항목만 기록.
+
+### 2026-03-04 (성능 최적화 Phase 3 — 벡터화 Z-Score + 부가 병목 해소)
+
+**목표**: Phase 2 이후 남은 병목 전수 파악 및 일괄 해결 (490초 → 8초)
+
+**병목 분석**:
+- `get_abnormal_supply()` × 2회 = **440초** — `calculate_zscore()`가 per-stock for 루프 (2,628종목)
+- `get_date_range()` = 343ms — `investor_trading` 2.4M rows 풀스캔
+- `data_loader.py` 모듈 임포트 = ~450ms — 백테스트 모듈 즉시 로드
+
+**구현 내용**:
+
+- ✅ **`calculate_zscore()` 벡터화** (`normalizer.py`)
+  - per-stock for 루프 → `groupby.transform` (220초 → 3초, 73배)
+  - 날짜 범위 최적화: `_calc_date_start(end_date, max_period=window)` — 500일이 아닌 실제 window(60일)+버퍼만 로드
+  - end_date=None 시 MV/investor_trading에서 MAX(date) 자동 조회
+  - Z-Score 정확성 검증 완료 (수동 계산 결과와 완전 일치)
+
+- ✅ **`get_date_range()` MV 사용** (`data_loader.py`)
+  - `investor_trading` (343ms) → `mv_daily_sff` try/except fallback (2ms, 172배)
+
+- ✅ **백테스트 모듈 lazy import** (`data_loader.py`)
+  - `BacktestConfig`, `BacktestEngine`, `PerformanceMetrics`, `Trade` → 사용 함수 내부 import
+  - 비백테스트 페이지 임포트 비용 ~450ms 절감
+
+**성능 개선 결과**:
+
+| 구간 | Before | After | 배수 |
+|------|--------|-------|------|
+| 이상수급 (buy+sell) | 440초 | **6초** | **75배** |
+| get_date_range() | 343ms | **2ms** | **172배** |
+| 파이프라인 (Stage 1~3) | 1.6초 | 2.2초 | (동일) |
+| **Streamlit 첫 로드 합계** | **~490초** | **~8초** | **61배** |
+
+**파일** (2개):
+```
+src/analyzer/normalizer.py       (calculate_zscore 벡터화 + 날짜 범위 최적화)
+app/utils/data_loader.py         (get_date_range MV + lazy import)
+```
+
+**테스트**: 294개 통과 (100%), slow 6개 제외
+
+---
+
+### 2026-03-04 (성능 최적화 Phase 2 — SQL Z-Score + SQL 시그널)
+
+**목표**: 첫 로드 47초 → ~2초 (SQL 함수로 Python 연산 대체)
+
+**구현 내용**:
+
+- ✅ **SQL 함수 `fn_zscore_latest(weight, target_date)`** (`setup_materialized_views.sql`)
+  - LATERAL + FILTER 패턴으로 7개 기간 Z-Score를 0.38초에 계산
+  - 조건부 Z-Score 공식 (부호 전환 시 과잉 반응 방지) SQL 구현
+  - 방향 확신도용 메타데이터 (today_sff, sff_5d_avg, std_*) 동시 반환
+
+- ✅ **SQL 함수 `fn_signals_latest(weight, target_date)`** (`setup_materialized_views.sql`)
+  - MA 크로스오버 + 가속도 + 동조율을 0.04초에 계산
+  - LATERAL 서브쿼리로 종목별 최근 21일 데이터만 참조
+
+- ✅ **performance_optimizer.py SQL 분기**
+  - `_calculate_zscores_sql()`: SQL 함수 호출 → 기존 Python 경로와 동일 출력 포맷
+  - `is_mv_available()` + `stock_codes is None` 조건 → SQL/Python 자동 분기
+  - `periods_dict` 키에 맞게 컬럼 필터링 (요청 기간만 반환)
+
+- ✅ **signal_detector.py SQL 분기**
+  - `_detect_all_signals_sql()`: SQL 함수 호출 → 시그널 카운트/리스트 Python 후처리
+  - SQL 실패 시 기존 Python 경로 자동 fallback
+
+- ✅ **TTL 증가** (`data_loader.py`)
+  - 파이프라인 캐시 TTL 600초 → 3600초 (1시간)
+  - 장중 수급 데이터 불변 → 불필요한 재계산 방지
+
+**성능 개선 결과**:
+
+| 단계 | Before (Phase 1) | After (Phase 2) | 배수 |
+|------|-----------------|-----------------|------|
+| Z-Score (7기간) | 17초 (Python) | **1.2초** (SQL) | **14배** |
+| 시그널 탐지 | 4.6초 (Python) | **0.3초** (SQL) | **15배** |
+| **전체 파이프라인** | **47초** | **1.6초** | **30배** |
+
+**파일** (5개):
+```
+scripts/setup_materialized_views.sql    (fn_zscore_latest + fn_signals_latest 추가)
+src/visualizer/performance_optimizer.py (_calculate_zscores_sql + SQL 분기)
+src/analyzer/signal_detector.py         (_detect_all_signals_sql + SQL 분기)
+app/utils/data_loader.py               (TTL 600→3600)
+tests/test_performance_optimizer.py     (SQL 경로 호환 테스트 수정)
+```
+
+**테스트**: 294개 통과 (100%), slow 6개 제외
+
+---
+
+### 2026-03-04 (성능 최적화 — MV + 파일 캐시 + 벡터화)
+
+**목표**: DB 전환 후 데이터 60배 증가(171K→2.4M rows, 345→2,628 종목)에 따른 성능 저하 해결
+
+**구현 내용**:
+
+- ✅ **Materialized View 생성** (`scripts/setup_materialized_views.sql`)
+  - `mv_daily_sff`: 3-table JOIN + GROUP BY + DISTINCT ON을 사전 계산
+  - 인덱스 2개 (`stock_code,trade_date DESC` + `trade_date DESC`)
+  - 리프레시 스크립트 (`scripts/refresh_mv.sh`)
+
+- ✅ **MV 자동 분기** (`src/database/connection.py`)
+  - `is_mv_available()`: MV 존재 여부 1회 체크 후 캐싱
+  - MV 없으면 기존 3-table JOIN 자동 fallback
+
+- ✅ **normalizer.py 리팩터링**
+  - 3곳 중복 쿼리 → `_query_raw_data()` 1개로 통합 (MV/원본 자동 분기)
+  - `_query_combined_sff_only()`: MV에서 combined_sff SQL 직접 계산 (3컬럼만 전송 → I/O 2배 절감)
+  - `_calc_date_start()`: Z-Score 최장 기간(500D) + 버퍼 기반 시작일 자동 계산
+  - `_compute_sff()`: MV 데이터(Sff 이미 있음)와 raw 데이터 자동 분기
+
+- ✅ **signal_detector.py 최적화**
+  - `detect_all_signals()`: 데이터 3회 로드 → 1회 로드 + 3함수 전달
+  - 날짜 필터 자동 적용 (end_date - 300일)
+  - MV 경로 추가 (`mv_daily_sff`에서 `foreign_net_amount`/`institution_net_amount` 로드)
+  - **per-stock 루프 → groupby.transform 벡터화** (155초 → 4.6초, 33배 향상)
+
+- ✅ **precomputer.py MV 지원**
+  - `_load_raw_data()`: MV 존재 시 `mv_daily_sff`에서 로드 + start_date 파라미터
+  - `_compute_sff_all_dates()`: MV 데이터의 foreign_sff/institution_sff 재활용
+
+- ✅ **파이프라인 파일 캐시** (`app/utils/data_loader.py`)
+  - `data/cache/pipeline_{date}_{weight}.pkl` 형식으로 결과 저장
+  - 같은 날 재방문 시 DB 쿼리 + 계산 완전 건너뜀
+  - 7일 이상 된 캐시 파일 자동 정리
+
+**성능 개선 결과**:
+
+| 시나리오 | Before | After | 배수 |
+|---------|--------|-------|------|
+| 첫 로드 (파이프라인 전체) | 30초+ | ~20초 | 1.5배 |
+| 재로드 (같은 날) | 30초+ | <0.01초 | 3000배+ |
+| 시그널 탐지 (2,628종목) | 155초 | 4.6초 | 33배 |
+| _get_sff_data I/O | 11.4초 | 5.0초 | 2.3배 |
+
+**파일** (8개):
+```
+scripts/setup_materialized_views.sql   (신규 — MV 생성 SQL)
+scripts/refresh_mv.sh                 (신규 — MV 리프레시 스크립트)
+src/database/connection.py             (is_mv_available 추가)
+src/analyzer/normalizer.py             (_query_raw_data 통합 + MV 분기 + 날짜 필터)
+src/analyzer/signal_detector.py        (1회 로드 + MV + 벡터화)
+src/backtesting/precomputer.py         (MV 지원 + start_date)
+app/utils/data_loader.py               (파일 캐시 레이어)
+.gitignore                             (data/cache/ 추가)
+```
+
+**테스트**: 기존 테스트 전체 통과 (1건 제외 — DB 데이터 확장으로 인한 기존 테스트 가정 불일치, 코드 변경과 무관)
+
+---
 
 ### 2026-03-04 (PostgreSQL 전환 완료 + 코드 리뷰 5건 수정)
 
@@ -1079,5 +1240,5 @@ app/pages/2_🔍_패턴분析.py             (Tab2 캡션 추가)
 
 ---
 
-**프로젝트 버전**: v5.1 (Stage 5-1 완료 — Phase 2 대시보드 4종 포함)
-**마지막 업데이트**: 2026-03-02
+**프로젝트 버전**: v5.1.2 (Stage 5-1 완료 + 성능 최적화 Phase 2)
+**마지막 업데이트**: 2026-03-04

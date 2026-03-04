@@ -9,8 +9,11 @@ DB 연결, Stage 1-3 분석 파이프라인, 백테스트 실행을 캐싱하여
     SQLite app.db (get_app_db_path): watchlist/backtest_history/score_change_log
 """
 
+import os
 import sqlite3
 import sys
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 
@@ -30,9 +33,11 @@ from src.visualizer.performance_optimizer import OptimizedMultiPeriodCalculator
 from src.analyzer.pattern_classifier import PatternClassifier
 from src.analyzer.signal_detector import SignalDetector
 from src.analyzer.integrated_report import IntegratedReport
-from src.backtesting.engine import BacktestConfig, BacktestEngine
-from src.backtesting.metrics import PerformanceMetrics
-from src.backtesting.portfolio import Trade
+
+# 백테스트 모듈은 lazy import (비백테스트 페이지 ~450ms 절감)
+# from src.backtesting.engine import BacktestConfig, BacktestEngine
+# from src.backtesting.metrics import PerformanceMetrics
+# from src.backtesting.portfolio import Trade
 
 
 # ---------------------------------------------------------------------------
@@ -93,12 +98,18 @@ def get_sectors() -> List[str]:
 
 @st.cache_data(ttl=3600)
 def get_date_range() -> Tuple[str, str]:
-    """DB 내 거래 날짜 범위 (min_date, max_date)"""
+    """DB 내 거래 날짜 범위 (min_date, max_date) — MV 우선 사용"""
     engine = get_db_connection()
-    df = pd.read_sql(
-        text("SELECT MIN(time) AS min_date, MAX(time) AS max_date FROM investor_trading"),
-        engine,
-    )
+    try:
+        df = pd.read_sql(
+            text("SELECT MIN(trade_date) AS min_date, MAX(trade_date) AS max_date FROM mv_daily_sff"),
+            engine,
+        )
+    except Exception:
+        df = pd.read_sql(
+            text("SELECT MIN(time) AS min_date, MAX(time) AS max_date FROM investor_trading"),
+            engine,
+        )
     row = df.iloc[0]
     return str(row['min_date']), str(row['max_date'])
 
@@ -107,7 +118,7 @@ def get_date_range() -> Tuple[str, str]:
 # 이상 수급 탐지 (캐싱)
 # ---------------------------------------------------------------------------
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_today_supply_ranking(top_n: int = 50) -> pd.DataFrame:
     """당일 전 종목 외국인/기관 순매수금액 조회 (캐싱)"""
     engine = get_db_connection()
@@ -131,7 +142,7 @@ def get_today_supply_ranking(top_n: int = 50) -> pd.DataFrame:
     return df
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_abnormal_supply_data(
     end_date: Optional[str] = None,
     threshold: float = 2.0,
@@ -179,10 +190,73 @@ def get_abnormal_supply_data(
 
 
 # ---------------------------------------------------------------------------
+# 파이프라인 파일 캐시 (pkl)
+# ---------------------------------------------------------------------------
+
+_CACHE_DIR = str(_PROJECT_ROOT / "data" / "cache")
+
+
+def _get_cache_path(end_date: str, weight: float) -> str:
+    w_int = int(round(weight * 100))
+    return os.path.join(_CACHE_DIR, f"pipeline_{end_date}_{w_int}.pkl")
+
+
+def _load_pipeline_cache(end_date: str, weight: float):
+    """파일 캐시 로드 (없으면 None)"""
+    path = _get_cache_path(end_date, weight)
+    if not os.path.exists(path):
+        return None
+    try:
+        cache = pd.read_pickle(path)
+        if cache.get('end_date') != end_date:
+            return None
+        # weight 검증: 캐시 키 반올림으로 인한 충돌 방지
+        cached_weight = cache.get('institution_weight')
+        if cached_weight is not None and round(cached_weight, 4) != round(weight, 4):
+            return None
+        return cache
+    except Exception:
+        return None
+
+
+def _save_pipeline_cache(end_date, weight, zscore, classified, signals, report):
+    """파이프라인 결과를 pkl 파일로 저장"""
+    os.makedirs(_CACHE_DIR, exist_ok=True)
+    path = _get_cache_path(end_date, weight)
+    pd.to_pickle({
+        'end_date': end_date,
+        'institution_weight': weight,
+        'created_at': datetime.now().isoformat(),
+        'zscore_matrix': zscore,
+        'classified_df': classified,
+        'signals_df': signals,
+        'report_df': report,
+    }, path)
+
+
+def _cleanup_old_cache(max_age_days: int = 7):
+    """오래된 캐시 파일 자동 정리"""
+    if not os.path.exists(_CACHE_DIR):
+        return
+    cutoff = time.time() - max_age_days * 86400
+    for f in os.listdir(_CACHE_DIR):
+        fpath = os.path.join(_CACHE_DIR, f)
+        if os.path.isfile(fpath) and os.path.getmtime(fpath) < cutoff:
+            try:
+                os.remove(fpath)
+            except OSError:
+                pass
+
+
+# 모듈 로드 시 1회 정리
+_cleanup_old_cache()
+
+
+# ---------------------------------------------------------------------------
 # Stage 1-3 분석 파이프라인 (단계별 캐시 분리)
 # ---------------------------------------------------------------------------
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def _stage_zscore(end_date: Optional[str] = None, institution_weight: float = 0.3) -> pd.DataFrame:
     """Stage 1+2: 수급 정규화 + 멀티 기간 Z-Score"""
     engine = get_db_connection()
@@ -198,7 +272,7 @@ def _stage_zscore(end_date: Optional[str] = None, institution_weight: float = 0.
     return zscore_matrix.reset_index()
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def _stage_classify(end_date: Optional[str] = None, institution_weight: float = 0.3) -> pd.DataFrame:
     """Stage 3a: 패턴 분류"""
     zscore_matrix = _stage_zscore(end_date=end_date, institution_weight=institution_weight)
@@ -208,7 +282,7 @@ def _stage_classify(end_date: Optional[str] = None, institution_weight: float = 
     return classifier.classify_all(zscore_matrix)
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def _stage_signals(end_date: Optional[str] = None, institution_weight: float = 0.3) -> pd.DataFrame:
     """Stage 3b: 시그널 탐지"""
     engine = get_db_connection()
@@ -216,7 +290,7 @@ def _stage_signals(end_date: Optional[str] = None, institution_weight: float = 0
     return detector.detect_all_signals(end_date=end_date)
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def _stage_report(end_date: Optional[str] = None, institution_weight: float = 0.3) -> pd.DataFrame:
     """Stage 3c: 통합 리포트"""
     classified_df = _stage_classify(end_date=end_date, institution_weight=institution_weight)
@@ -247,6 +321,9 @@ def run_analysis_pipeline_with_progress(
     """
     Stage 1-3 전체 파이프라인 (단계별 진행률 표시 지원)
 
+    1. 파일 캐시 확인 (pkl) → 히트 시 <1초 반환
+    2. 캐시 미스 → 기존 파이프라인 실행 + 결과 캐시 저장
+
     Args:
         end_date: 분석 기준 날짜
         progress_bar: st.progress 위젯 (None이면 진행률 표시 안 함)
@@ -259,6 +336,15 @@ def run_analysis_pipeline_with_progress(
         if progress_bar is not None:
             progress_bar.progress(pct, text=msg)
 
+    # 1. 파일 캐시 확인
+    if end_date is not None:
+        cache = _load_pipeline_cache(end_date, institution_weight)
+        if cache is not None:
+            _upd(1.0, "✅ 캐시 로드 완료 100%")
+            return (cache['zscore_matrix'], cache['classified_df'],
+                    cache['signals_df'], cache['report_df'])
+
+    # 2. 캐시 미스: 기존 파이프라인 실행
     _upd(0.05, "📐 수급 데이터 정규화 중... 5%")
     zscore_matrix = _stage_zscore(end_date=end_date, institution_weight=institution_weight)
 
@@ -277,6 +363,12 @@ def run_analysis_pipeline_with_progress(
     report_df = _stage_report(end_date=end_date, institution_weight=institution_weight)
 
     _upd(0.85, "📋 리포트 생성 완료 85%")
+
+    # 3. 결과 캐시 저장
+    if end_date is not None:
+        _save_pipeline_cache(end_date, institution_weight,
+                             zscore_matrix, classified_df, signals_df, report_df)
+
     return zscore_matrix, classified_df, signals_df, report_df
 
 
@@ -284,7 +376,7 @@ def run_analysis_pipeline_with_progress(
 # 종목 상세 데이터
 # ---------------------------------------------------------------------------
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_stock_zscore_history(
     stock_code: str,
     end_date: Optional[str] = None,
@@ -305,7 +397,7 @@ def get_stock_zscore_history(
     return normalizer.calculate_zscore(stock_codes=[stock_code], end_date=end_date)
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def get_stock_raw_history(
     stock_code: str,
     end_date: Optional[str] = None,
@@ -340,6 +432,10 @@ def get_stock_raw_history(
     if df.empty:
         return df
 
+    # PostgreSQL DATE → 문자열 통일 (datetime.date 비교 오류 방지)
+    if 'trade_date' in df.columns:
+        df['trade_date'] = df['trade_date'].astype(str)
+
     # 개인 순매수 (외국인+기관+개인 합계 ≈ 0 원리)
     df['individual_net_amount'] = -(df['foreign_net_amount'] + df['institution_net_amount'])
 
@@ -359,7 +455,7 @@ def get_stock_raw_history(
 # 백테스트 실행
 # ---------------------------------------------------------------------------
 
-def _serialize_trades(trades: List[Trade]) -> List[dict]:
+def _serialize_trades(trades) -> List[dict]:
     """Trade 객체 리스트 → dict 리스트 (캐싱 가능 형태)"""
     result = []
     for t in trades:
@@ -370,8 +466,9 @@ def _serialize_trades(trades: List[Trade]) -> List[dict]:
     return result
 
 
-def _deserialize_trades(trade_dicts: List[dict]) -> List[Trade]:
+def _deserialize_trades(trade_dicts: List[dict]):
     """dict 리스트 → Trade 객체 리스트"""
+    from src.backtesting.portfolio import Trade
     trades = []
     for d in trade_dicts:
         d_clean = {k: v for k, v in d.items() if k != 'profit'}
@@ -412,6 +509,7 @@ def run_backtest(
             'initial_capital': float,
         }
     """
+    from src.backtesting.engine import BacktestConfig, BacktestEngine
     pg_engine = get_db_connection()
 
     config = BacktestConfig(
@@ -467,8 +565,9 @@ def run_backtest(
     }
 
 
-def get_metrics_from_result(result: Dict) -> Optional[PerformanceMetrics]:
+def get_metrics_from_result(result: Dict):
     """캐싱된 백테스트 결과에서 PerformanceMetrics 생성"""
+    from src.backtesting.metrics import PerformanceMetrics
     trades = _deserialize_trades(result['trade_dicts'])
     if not trades:
         return None
@@ -479,7 +578,7 @@ def get_metrics_from_result(result: Dict) -> Optional[PerformanceMetrics]:
     )
 
 
-def get_trades_from_result(result: Dict) -> List[Trade]:
+def get_trades_from_result(result: Dict):
     """캐싱된 백테스트 결과에서 Trade 리스트 복원"""
     return _deserialize_trades(result['trade_dicts'])
 
@@ -507,6 +606,7 @@ def run_backtest_with_progress(
     use_divergence: bool = True,
 ) -> Dict:
     """백테스트 실행 (캐시 없음, progress_callback 지원)"""
+    from src.backtesting.engine import BacktestConfig, BacktestEngine
     pg_engine = get_db_connection()
     config = BacktestConfig(
         initial_capital=initial_capital,
@@ -624,6 +724,7 @@ def run_optuna_optimization(
         또는 None (완료된 Trial이 없을 때)
     """
     from src.backtesting.optimizer import OptunaOptimizer
+    from src.backtesting.engine import BacktestConfig
 
     base_config = BacktestConfig(
         strategy=strategy,
