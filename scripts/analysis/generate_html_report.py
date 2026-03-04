@@ -322,7 +322,7 @@ def generate_html_template(df_final, pattern_stats, sector_stats, sector_concent
     <footer class="bg-gray-800 text-white mt-12">
         <div class="max-w-7xl mx-auto px-4 py-6 text-center">
             <p class="text-gray-400">수급 레짐 스캐너 v3.1 | Stage 3 완료</p>
-            <p class="text-gray-500 text-sm mt-2">KOSPI200 + KOSDAQ150 (345개 종목) | 2024-01-02 ~ 2026-01-20</p>
+            <p class="text-gray-500 text-sm mt-2">KOSPI + KOSDAQ 전 종목 | 2022-01-03 ~ 현재</p>
         </div>
     </footer>
 

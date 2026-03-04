@@ -1,8 +1,9 @@
 # 수급 분석 시스템 구현 가이드
 
 > **작성일**: 2026-02-12
-> **상태**: Stage 1, 2, 3 완료
-> **버전**: v2.0
+> **마지막 업데이트**: 2026-03-05
+> **상태**: Stage 1~3 완료, Stage 4(백테스트) 완료, Stage 5-1(Streamlit) 완료
+> **버전**: v3.0
 
 ---
 
@@ -13,6 +14,7 @@
 3. [Stage 2: 시공간 히트맵](#stage-2-시공간-히트맵)
 4. [Stage 3: 패턴 분류 & 시그널 통합](#stage-3-패턴-분류--시그널-통합)
 5. [데이터 플로우](#데이터-플로우)
+6. [성능 최적화](#성능-최적화)
 
 ---
 
@@ -24,645 +26,228 @@
 ### 3단계 아키텍처
 
 ```
-[Stage 1] 데이터 정규화
+[Stage 1] 데이터 정규화 (Sff + 조건부 Z-Score)
     ↓
-[Stage 2] 시공간 히트맵 (6개 기간 × 4가지 정렬)
+[Stage 2] 시공간 히트맵 (7개 기간 × 4가지 정렬)
     ↓
-[Stage 3] 패턴 분류 (3개 바구니 자동 분류)
+[Stage 3] 패턴 분류 (3개 바구니 + sub_type 7종 + 시그널 3종)
 ```
+
+### 데이터 소스
+- **PostgreSQL** (`korea_stock_data`): 시장 데이터 (~10M 레코드, 2,721 종목)
+- **Materialized View** (`mv_daily_sff`): Sff 사전 계산, SQL 함수로 Z-Score/시그널 고속 계산
 
 ---
 
 ## Stage 1: 데이터 정규화
 
-### 목표
-단순 금액 대신 **유통시총 대비 비율(Sff)**과 **변동성 보정(Z-Score)**으로 "진짜 힘" 측정
-
-> **이론 설명**: ANALYSIS_GUIDE.md의 "3. 지표 및 수식 정의" 참조
-
 ### 구현
 
 **파일**: `src/analyzer/normalizer.py`
-
 **핵심 클래스**: `SupplyNormalizer`
 
 ```python
 from src.analyzer.normalizer import SupplyNormalizer
-from src.database.connection import get_connection
+from src.database.connection import get_pg_engine
 
-conn = get_connection()
-normalizer = SupplyNormalizer(conn)
+engine = get_pg_engine()
+normalizer = SupplyNormalizer(engine)
 
 # Sff 계산
 df_sff = normalizer.calculate_sff(stock_codes=['005930'])
 
+# Z-Score 계산 (벡터화)
+df_zscore = normalizer.calculate_zscore(window=60)
+
 # 이상 수급 탐지
 df_abnormal = normalizer.get_abnormal_supply(threshold=2.0, top_n=20)
-print(df_abnormal[['stock_code', 'stock_name', 'sector', 'combined_zscore']])
-
-conn.close()
 ```
+
+> **이론 설명**: ANALYSIS_GUIDE.md의 "3. 지표 및 수식 정의" 참조
 
 ### 출력 인터페이스
 
 **메서드**: `normalizer.get_abnormal_supply(threshold, top_n)`
 
-**반환**: `pd.DataFrame`
-
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
 | stock_code | str | 종목코드 (예: '005930') |
-| stock_name | str | 종목명 (예: '삼성전자') |
-| sector | str | 섹터 (예: '반도체 및 관련장비') |
-| trade_date | str | 거래일 (예: '2026-01-20') |
+| stock_name | str | 종목명 |
+| sector | str | 섹터 |
+| trade_date | str | 거래일 |
 | combined_sff | float | 외국인+기관 Sff (%) |
-| foreign_sff | float | 외국인 Sff (%) |
-| institution_sff | float | 기관 Sff (%) |
 | combined_zscore | float | 외국인+기관 Z-Score |
 | foreign_zscore | float | 외국인 Z-Score |
 | institution_zscore | float | 기관 Z-Score |
 
-**샘플 데이터**:
-```
-stock_code  stock_name  sector  combined_zscore  combined_sff
-036460      한국가스공사  가스    4.299177         0.921185
-014680      한솔케미칼   화학    3.844196         0.434423
-```
+### MV 자동 분기
 
-### 성능
-- 345종목 × 171,227 레코드: **~15초**
-- 벡터화 최적화 완료
+```python
+from src.database.connection import is_mv_available
+
+# MV 있으면 고속 경로, 없으면 3-table JOIN fallback
+if is_mv_available():
+    # mv_daily_sff 사용 (Sff 사전 계산됨)
+else:
+    # investor_trading + stock_prices + stock_master JOIN
+```
 
 ---
 
 ## Stage 2: 시공간 히트맵
 
-### 목표
-6개 기간(1W~2Y)의 수급 흐름을 한눈에 시각화하고, **4가지 정렬 모드**로 투자 스타일별 종목 필터링
-
-### 핵심 개념
-
-#### 1) 6개 기간 정의
-```python
-periods = {
-    '1W': 5,      # 1주일 (5 영업일)
-    '1M': 21,     # 1개월 (21 영업일)
-    '3M': 63,     # 3개월
-    '6M': 126,    # 6개월
-    '1Y': 252,    # 1년
-    '2Y': 504     # 2년
-}
-```
-
-**Note**: 1D(1일)는 표준편차 계산 불가로 제외
-
-#### 2) 4가지 정렬 모드
-
-| 모드 | 공식 | 의미 | 용도 |
-|------|------|------|------|
-| **Recent** | (5D+20D)/2 | 현재 강도 | 지금 매수세 강한 종목 |
-| **Long Divergence** | 5D-200D | 장기 이격도 | 과거→현재 전환점 포착 |
-| **Weighted** | 가중 평균<br>(3.5, 3.0, 2.5, 2.0, 1.5, 1.0, 0.5) | 중장기 트렌드 | 일관된 매집 종목 |
-| **Average** | 단순 평균 | 전체 일관성 | 장기 안정성 |
-
 ### 구현
 
 **파일**:
-- `src/visualizer/performance_optimizer.py` (벡터화 계산)
+- `src/visualizer/performance_optimizer.py` (벡터화 계산 + SQL 분기)
 - `src/visualizer/heatmap_renderer.py` (렌더링)
-- `scripts/analysis/heatmap_generator.py` (CLI)
 
-**핵심 클래스**:
-- `OptimizedMultiPeriodCalculator`: 6개 기간 Z-Score 계산
-- `HeatmapRenderer`: 히트맵 시각화
+**핵심 클래스**: `OptimizedMultiPeriodCalculator`
 
 ```python
-from src.config import DEFAULT_CONFIG
-from src.database.connection import get_connection
-from src.analyzer.normalizer import SupplyNormalizer
 from src.visualizer.performance_optimizer import OptimizedMultiPeriodCalculator
-from src.visualizer.heatmap_renderer import HeatmapRenderer
+from src.analyzer.normalizer import SupplyNormalizer
+from src.database.connection import get_pg_engine
 
-conn = get_connection()
-normalizer = SupplyNormalizer(conn)
+engine = get_pg_engine()
+normalizer = SupplyNormalizer(engine)
 
-# 6개 기간 Z-Score 계산 (벡터화 최적화)
+# 7개 기간 Z-Score 계산
+periods = {'5D': 5, '10D': 10, '20D': 20, '50D': 50, '100D': 100, '200D': 200, '500D': 500}
 optimizer = OptimizedMultiPeriodCalculator(normalizer, enable_caching=True)
-zscore_matrix = optimizer.calculate_multi_period_zscores(DEFAULT_CONFIG['periods'])
+zscore_matrix = optimizer.calculate_multi_period_zscores(periods)
+```
 
-# 히트맵 렌더링 (4가지 정렬 모드 중 선택)
-renderer = HeatmapRenderer(DEFAULT_CONFIG)
-renderer.render_multi_period_heatmap(zscore_matrix, 'output/heatmap.png')
+### SQL 고속 경로
 
-# CSV 저장
-zscore_matrix.to_csv('output/heatmap.csv')
-
-conn.close()
+MV 사용 가능 + 전체 종목 조회 시 SQL 함수로 자동 전환:
+```sql
+-- fn_zscore_latest(weight, target_date): 7개 기간 Z-Score 일괄 계산 (0.38초)
+-- fn_signals_latest(weight, target_date): MA크로스+가속도+동조율 (0.04초)
 ```
 
 ### 출력 인터페이스
 
-**메서드**: `optimizer.calculate_multi_period_zscores(periods)`
-
-**반환**: `pd.DataFrame`
-
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
-| stock_code | int | 종목코드 (예: 5930) |
-| 1W | float | 1주일 Z-Score |
-| 1M | float | 1개월 Z-Score |
-| 3M | float | 3개월 Z-Score |
-| 6M | float | 6개월 Z-Score |
-| 1Y | float | 1년 Z-Score |
-| 2Y | float | 2년 Z-Score |
+| stock_code | str | 종목코드 |
+| 5D ~ 500D | float | 7개 기간 Z-Score |
 | _sort_key | float | 정렬 키 (모드별 상이) |
-
-**샘플 데이터 (Recent 모드)**:
-```
-stock_code    1W     1M     3M     6M     1Y     2Y  _sort_key
-348210      1.17   0.84   0.13   0.55   0.95   1.17   1.004
-131290      0.71   1.11   1.08   0.86   1.23   1.21   0.910
-232140      1.73   0.08   0.00  -0.03   0.07   0.04   0.906
-```
-
-**4개 CSV 파일**:
-```
-output/heatmap_semi_recent.csv      # Recent 모드
-output/heatmap_semi_long_divergence.csv  # Long Divergence 모드
-output/heatmap_semi_weighted.csv    # Weighted 모드
-output/heatmap_semi_average.csv     # Average 모드
-```
-
-> **활용 가이드**: ANALYSIS_GUIDE.md의 "3.3 정렬 키 상세" 및 "6. 점수 해석 가이드" 참조
-
----
-
-### 성능 최적화 과정
-
-#### Before: 순진한 구현 (120초)
-```python
-# 8개 기간마다 DB 쿼리 (8번)
-for period in periods:
-    df = pd.read_sql(f"SELECT ... WHERE lookback={period}", conn)
-    # 종목별 루프 (O(n²))
-    for stock in stock_codes:
-        mean = df[df['stock_code'] == stock]['sff'].mean()
-        std = df[df['stock_code'] == stock]['sff'].std()
-```
-
-**문제점**:
-- DB 쿼리 8번 (중복 로드)
-- 종목별 루프 (O(n²))
-
----
-
-#### After: 최적화 (1.5초)
-
-**최적화 1**: Sff 캐싱 (DB 쿼리 8회 → 1회)
-```python
-# 1번만 로드, 메모리 캐싱
-self._sff_cache = normalizer._get_sff_data(stock_codes)
-
-# 8개 기간 재사용
-for period in periods:
-    result = self._calculate_zscore_vectorized(period)
-```
-
-**최적화 2**: groupby.transform 벡터화 (O(n²) → O(n))
-```python
-# Before: 종목별 루프 (느림)
-for stock in stock_codes:
-    mean = df[df['stock_code'] == stock]['sff'].mean()
-
-# After: 벡터화 (빠름)
-df['rolling_mean'] = df.groupby('stock_code')['combined_sff'].transform(
-    lambda x: x.rolling(window=lookback_days, min_periods=20).mean()
-)
-```
-
-**결과**:
-- 목표: 23초
-- **실제: 1.5초** (93% 초과 달성!)
-
-> **CLI 사용법**: README.md의 "빠른 시작" 및 ANALYSIS_GUIDE.md의 "7.4 필터링 옵션" 참조
+| _today_sff | float | 방향 확신도 계산용 메타데이터 |
 
 ---
 
 ## Stage 3: 패턴 분류 & 시그널 통합
 
-### 목표
-Stage 1~2 결과를 통합하여 **3개 바구니 자동 분류** + **시그널 탐지** + **통합 리포트 생성**
-
-### 핵심 모듈
-
-#### 1. PatternClassifier (패턴 분류)
+### 1. PatternClassifier (패턴 분류)
 **파일**: `src/analyzer/pattern_classifier.py`
 
-**기능**:
-- 4가지 정렬 키 계산 (Recent, Long Divergence, Weighted, Average)
-- 추가 특성 추출 (변동성, 지속성, 가속도)
-- 3개 바구니 자동 분류
-- 패턴 강도 점수 (0~100)
-
-**사용 예시**:
 ```python
 from src.analyzer.pattern_classifier import PatternClassifier
 
 classifier = PatternClassifier()
-classified_df = classifier.classify_all(zscore_matrix)
+classified_df = classifier.classify_all(zscore_matrix, direction='long')
 
-# 결과: stock_code, pattern, score, recent, long_divergence, weighted, average
-print(classified_df[['stock_code', 'pattern', 'score']].head())
+# 출력: stock_code, pattern, sub_type, pattern_label, score, final_score, ...
 ```
 
-**패턴 분류 규칙**:
-1. **급등형**: Long Divergence > 1.0 AND Recent > 0.5
-2. **지속형**: Weighted > 0.8 AND Persistence > 0.7
-3. **전환형**: Weighted > 0.5 AND Long Divergence < 0
+**출력 컬럼**: `pattern`, `sub_type`, `pattern_label`, `score`, `tc`, `short_divergence`, `mid_divergence`
 
-> **투자 전략**: ANALYSIS_GUIDE.md의 "4. 패턴 분류 체계" 참조
-
----
-
-#### 2. SignalDetector (시그널 탐지)
+### 2. SignalDetector (시그널 탐지)
 **파일**: `src/analyzer/signal_detector.py`
 
-**기능**:
-- MA 골든크로스 탐지 (외국인 5일MA > 20일MA)
-- 수급 가속도 계산 (최근 5일 vs 직전 5일)
-- 외인-기관 동조율 계산 (함께 매수한 비율)
-
-**사용 예시**:
 ```python
 from src.analyzer.signal_detector import SignalDetector
-from src.database.connection import get_connection
 
-conn = get_connection()
-detector = SignalDetector(conn)
+detector = SignalDetector(engine)
 signals_df = detector.detect_all_signals()
 
-# 결과: stock_code, ma_cross, acceleration, sync_rate, signal_count, signal_list
-print(signals_df[['stock_code', 'signal_count', 'signal_list']].head())
-
-conn.close()
+# 출력: stock_code, ma_cross, acceleration, sync_rate, signal_count, signal_list
 ```
 
-**시그널 판단 기준**:
-1. **MA 골든크로스**: 외국인 5일MA > 20일MA (크로스 발생일)
-2. **수급 가속도**: 가속도 > 1.5배 (매수세 강화)
-3. **동조율**: 동조율 > 70% (확신도 높음)
+MV 사용 가능 시 SQL 함수(`fn_signals_latest`)로 자동 전환.
 
----
-
-#### 3. IntegratedReport (통합 리포트)
+### 3. IntegratedReport (통합 리포트)
 **파일**: `src/analyzer/integrated_report.py`
 
-**기능**:
-- Stage 1~3 결과 통합
-- 종목별 1줄 요약 카드 생성
-- 진입/청산 포인트 제시
-- CSV 저장 + 콘솔 출력
-
-**사용 예시**:
 ```python
 from src.analyzer.integrated_report import IntegratedReport
 
-report_gen = IntegratedReport(conn)
+report_gen = IntegratedReport(engine)
 report_df = report_gen.generate_report(classified_df, signals_df)
 
 # 필터링
-filtered = report_gen.filter_report(
-    report_df,
-    pattern='급등형',
-    min_score=70,
-    min_signal_count=2,
-    top_n=10
-)
-
-# 요약 카드 출력
+filtered = report_gen.filter_report(report_df, pattern='급등형', min_score=70, top_n=10)
 report_gen.print_summary_card(filtered, top_n=10)
-
-# CSV 저장
-report_gen.export_to_csv(filtered, 'output/regime_report.csv')
 ```
-
-**출력 형식**:
-```
-========================================
-[1] 005930 삼성전자 (급등형, 점수: 85)
-========================================
-섹터: 반도체 및 관련장비
-정렬 키: Recent=0.91, Long Divergence=1.70, Weighted=0.52, Average=0.32
-시그널: MA크로스, 가속도 1.8배 (2개)
-진입: 현재가 진입 가능 (단기 추격 매수, 모멘텀 확인 후 진입)
-손절: -5% 손절
-```
-
----
 
 ### CLI 사용법
 
-**RegimeScanner**: Stage 1~3 통합 실행
-
 ```bash
-# 기본 실행 (전체 종목, 모든 패턴)
+# 기본 실행
 python scripts/analysis/regime_scanner.py
 
-# 급등형 종목만, 점수 70점 이상
-python scripts/analysis/regime_scanner.py --pattern 급등형 --min-score 70
-
-# 지속형 + 시그널 2개 이상, 상위 10개
-python scripts/analysis/regime_scanner.py --pattern 지속형 --min-signals 2 --top 10
-
-# 섹터 필터링 (반도체)
-python scripts/analysis/regime_scanner.py --sector "반도체 및 관련장비"
-
-# CSV 저장 + 요약 카드 출력
-python scripts/analysis/regime_scanner.py --save-csv output/report.csv --print-cards --top 10
-
-# 관심 종목 리스트 출력 (점수 70+, 시그널 2+)
-python scripts/analysis/regime_scanner.py --watchlist
-```
-
----
-
-### 성능
-
-**전체 파이프라인 (Stage 1~3)**:
-- 345종목 처리: 약 **3초**
-- Stage 1 (정규화): ~15초 → 1.5초 (캐싱)
-- Stage 2 (히트맵): ~1.5초
-- Stage 3 (분류+시그널): ~1.5초
-
----
-
-## Stage 3 준비사항 (Deprecated - 구현 완료)
-
-### 입력 데이터
-
-#### 옵션 1: CSV 파일 직접 로드 (권장)
-```python
-import pandas as pd
-
-# 4개 CSV 로드
-df_recent = pd.read_csv('output/heatmap_semi_recent.csv')
-df_long_div = pd.read_csv('output/heatmap_semi_long_divergence.csv')
-df_weighted = pd.read_csv('output/heatmap_semi_weighted.csv')
-df_average = pd.read_csv('output/heatmap_semi_average.csv')
-
-# 통합 DataFrame
-data = {
-    'recent': df_recent.set_index('stock_code')['_sort_key'],
-    'long_divergence': df_long_div.set_index('stock_code')['_sort_key'],
-    'weighted': df_weighted.set_index('stock_code')['_sort_key'],
-    'average': df_average.set_index('stock_code')['_sort_key']
-}
-df_all = pd.DataFrame(data)
-```
-
-**장점**: 빠름 (재계산 불필요)
-**단점**: 최신 데이터 반영 안 됨
-
----
-
-#### 옵션 2: OptimizedMultiPeriodCalculator 재사용
-```python
-from src.visualizer.performance_optimizer import OptimizedMultiPeriodCalculator
-from src.analyzer.normalizer import SupplyNormalizer
-from src.database.connection import get_connection
-
-conn = get_connection()
-normalizer = SupplyNormalizer(conn)
-optimizer = OptimizedMultiPeriodCalculator(normalizer, enable_caching=True)
-
-zscore_matrix = optimizer.calculate_multi_period_zscores(DEFAULT_CONFIG['periods'])
-```
-
-**장점**: 최신 데이터 자동 반영
-**단점**: 1.5초 추가 소요
-
----
-
-### 추출 가능한 특성 (Features)
-
-#### A. Stage 2 출력에서 직접 사용
-1. **Recent**: (1W+1M)/2 - 현재 강도
-2. **Long Divergence**: 5D-200D - 장기 이격도
-3. **Weighted**: 가중 평균 - 중장기 트렌드
-4. **Average**: 단순 평균 - 전체 일관성
-
-#### B. 추가 계산 필요
-```python
-import numpy as np
-
-# 1. 변동성 (Volatility): 6개 기간 표준편차
-df_all['volatility'] = df_all[['1W', '1M', '3M', '6M', '1Y', '2Y']].std(axis=1)
-
-# 2. 지속성 (Persistence): 양수 기간 비율
-df_all['persistence'] = (df_all[['1W', '1M', '3M', '6M', '1Y', '2Y']] > 0).sum(axis=1) / 6
-
-# 3. 단기/장기 비율 (Short/Long Ratio): 최근 가속도
-df_all['sl_ratio'] = (df_all['1W'] + df_all['1M']) / (df_all['1Y'] + df_all['2Y'] + 1e-6)
-```
-
----
-
-### 패턴 분류 규칙 (예시)
-
-```python
-def classify_pattern(row):
-    """
-    3개 바구니 자동 분류
-
-    Returns:
-        str: '지속형', '급등형', '전환형'
-    """
-    # Pattern 1: 급등 돌파형
-    if row['long_divergence'] > 1.0 and row['recent'] > 0.5:
-        return '급등형'
-
-    # Pattern 2: 지속 매집형
-    if row['weighted'] > 0.8 and row['persistence'] > 0.7:
-        return '지속형'
-
-    # Pattern 3: 조정 반등형
-    if row['weighted'] > 0.5 and row['long_divergence'] < 0:
-        return '전환형'
-
-    return '기타'
-
-df_all['pattern'] = df_all.apply(classify_pattern, axis=1)
-```
-
----
-
-### 코드 의존성
-
-#### 필수 import
-```python
-from src.config import DEFAULT_CONFIG
-from src.database.connection import get_connection
-from src.analyzer.normalizer import SupplyNormalizer
-from src.visualizer.performance_optimizer import OptimizedMultiPeriodCalculator
-import pandas as pd
-import numpy as np
-```
-
-#### 사용 가능한 메서드
-```python
-# Stage 1: 이상 수급 탐지
-normalizer.calculate_sff(stock_codes)
-normalizer.get_abnormal_supply(threshold, top_n)
-
-# Stage 2: 다기간 Z-Score
-optimizer.calculate_multi_period_zscores(periods)
+# 필터링 + 저장
+python scripts/analysis/regime_scanner.py --pattern 급등형 --min-score 70 --save-csv output/report.csv --print-cards
 ```
 
 ---
 
 ## 데이터 플로우
 
-### 전체 흐름
-
 ```
-[DB] investor_flows 테이블 (171,227 레코드)
-    ↓
+[PostgreSQL] investor_trading + stock_prices + stock_master (~10M 레코드)
+    ↓ (MV 사용 시: mv_daily_sff → Sff 사전 계산됨)
 [Stage 1] SupplyNormalizer
     ├── Sff 계산 (유통시총 대비 %)
-    ├── Z-Score 계산 (변동성 보정)
-    └── 출력: DataFrame (10개 컬럼)
-        └── combined_zscore, foreign_zscore, institution_zscore
+    ├── 조건부 Z-Score (부호 전환 시 과잉 반응 방지)
+    └── 출력: DataFrame (combined_zscore, foreign_zscore, institution_zscore)
     ↓
 [Stage 2] OptimizedMultiPeriodCalculator
-    ├── 6개 기간 확장 (1W~2Y)
-    ├── 벡터화 Z-Score 계산 (1.5초)
-    ├── 4가지 정렬 키 생성 (Recent, Long Divergence, Weighted, Average)
-    └── 출력: DataFrame (8개 컬럼) + 4개 CSV
-        └── stock_code, 1W, 1M, 3M, 6M, 1Y, 2Y, _sort_key
+    ├── 7개 기간 Z-Score (5D~500D)
+    ├── 4가지 정렬 키 (Recent, Momentum, Weighted, Average)
+    ├── 방향 확신도 (tanh 기반)
+    └── SQL 고속 경로 (fn_zscore_latest: 1.2초)
     ↓
-[Stage 3] PatternClassifier (예정)
-    ├── 입력 1: Stage 2의 4개 CSV (4가지 정렬 키)
-    ├── 입력 2: Stage 1의 이상 수급 결과 (최신 Z-Score)
-    ├── 처리:
-    │   ├── 4가지 정렬 키 통합
-    │   ├── 추가 특성 계산 (변동성, 지속성, 가속도)
-    │   ├── 패턴 분류 규칙 적용
-    │   └── MA 골든크로스, 동조율 추가
-    └── 출력: DataFrame
-        ├── pattern: '지속형', '급등형', '전환형'
-        ├── score: 0~100 (패턴 강도)
-        └── signals: ['MA크로스', '가속도', '동조율'] (리스트)
+[Stage 3] PatternClassifier + SignalDetector + IntegratedReport
+    ├── 3개 바구니 분류 (급등형/지속형/전환형)
+    ├── sub_type 7종 (장기기반/단기돌파/V자반등/전면수급/수급약화/감속/단기반등)
+    ├── tc(시간 일관성) + divergence(이격도) 보정
+    ├── 시그널 3종 (MA크로스/가속도/동조율)
+    └── 출력: final_score = score + signal_count × 5
 ```
+
+### Stage별 성능
+
+| Stage | 처리 | SQL 경로 | Python 경로 |
+|-------|------|----------|-------------|
+| **1+2** | 2,721종목 Z-Score | **~1.2초** | ~17초 |
+| **3a** | 패턴 분류 | ~0.1초 | ~0.1초 |
+| **3b** | 시그널 탐지 | **~0.3초** | ~4.6초 |
+| **전체** | Stage 1~3 | **~2.2초** | ~22초 |
+| **캐시 히트** | 파일 캐시 로드 | **<0.01초** | — |
 
 ---
 
-### Stage별 I/O 스펙
+## 성능 최적화
 
-| Stage | 입력 | 출력 | 소요시간 |
-|-------|------|------|----------|
-| **1** | investor_flows (DB) | DataFrame (10 cols) | ~15초 |
-| **2** | Stage 1 로직 재사용 | DataFrame (8 cols) + 4 CSV | ~1.5초 |
-| **3** | Stage 2 Z-Score 매트릭스 | DataFrame (pattern, score, signals) | ~1.5초 |
-| **전체** | DB → 통합 리포트 | CSV + 콘솔 출력 | **~3초** |
+### 최적화 이력
 
----
+1. **MV (Materialized View)**: 3-table JOIN → 사전 계산 뷰 (I/O 2배 절감)
+2. **groupby.transform 벡터화**: per-stock 루프 → 벡터 연산 (33~75배)
+3. **SQL 함수**: Python Z-Score/시그널 → PostgreSQL LATERAL+FILTER (14~15배)
+4. **파일 캐시**: 같은 날 재방문 시 DB 쿼리 건너뜀 (3000배+)
+5. **lazy import**: 비백테스트 페이지 임포트 비용 ~450ms 절감
 
-## 실전 활용 예시
+### 백테스트 성능
 
-### 케이스 1: 급등 돌파형 발견
-
-**종목**: 232140 (와이씨)
-
-**4가지 정렬 키**:
-```
-recent: 0.906 (3위)   ← 현재 강도 높음
-long_divergence: 1.696 (1위) ← 장기 이격도 최고!
-weighted: 0.519 (중간) ← 장기 트렌드 보통
-average: 0.315 (중간)  ← 전체 일관성 보통
-```
-
-**6개 기간 Z-Score**:
-```
-1W: 1.73  ← 최근 급등
-1M: 0.08
-3M: 0.00
-6M: -0.03
-1Y: 0.07
-2Y: 0.04  ← 과거 약함
-```
-
-**해석**: "과거 2년간 약했지만 최근 1주일 급등" = **전환점 포착!**
-
-**전략**: 단기 추격 매수, 손절 설정 필수
+- **BacktestPrecomputer**: 벡터화 사전 계산으로 165~262배 향상
+  - 38일: 177초 → 1.1초
+  - 63일: 393초 → 1.5초
+  - 1년: ~4초
 
 ---
 
-### 케이스 2: 지속 매집형 발견
-
-**종목**: 357780 (솔브레인)
-
-**4가지 정렬 키**:
-```
-recent: 0.880 (6위)    ← 현재 강도 중간
-long_divergence: -1.103 (하위) ← 장기 이격도 낮음 (최근 약화)
-weighted: 1.113 (1위)  ← 장기 트렌드 최고!
-average: 1.288 (1위)   ← 전체 일관성 최고!
-```
-
-**6개 기간 Z-Score**:
-```
-1W: 0.68
-1M: 1.08
-3M: 1.22
-6M: 1.32
-1Y: 1.65
-2Y: 1.78  ← 꾸준한 상승
-```
-
-**해석**: "2년간 일관된 매집, 최근 약간 약화" = **조정 후 재진입 타이밍!**
-
-**전략**: 조정 구간 저가 매수, 장기 보유
-
----
-
-## 다음 단계 (Stage 3)
-
-### 구현 파일
-1. `src/analyzer/pattern_classifier.py` - 패턴 분류 로직
-2. `src/analyzer/integrated_report.py` - Stage 1~3 통합 리포트
-3. `scripts/analysis/regime_scanner.py` - CLI 도구
-
-### 추가 기능
-1. **MA 골든크로스**: 외국인 5일 MA > 20일 MA 탐지
-2. **수급 가속도**: 최근 5일 vs 직전 5일 비교
-3. **외인-기관 동조율**: 함께 매수한 비율 점수화
-
-### 최종 출력
-```python
-# 종목별 1줄 요약 카드
-{
-    'stock_code': '232140',
-    'stock_name': '와이씨',
-    'pattern': '급등형',
-    'score': 85,
-    'signals': ['MA크로스', '가속도 1.8배', '동조율 72%'],
-    'entry_point': '현재가 진입 가능',
-    'stop_loss': '-5% 손절'
-}
-```
-
----
-
-**문서 버전**: v2.0
-**최종 업데이트**: 2026-02-12
-**작성자**: Claude Code + User
-
----
-
-## 다음 단계 (Stage 4+)
-
-Stage 3 완료로 **핵심 기능 구현 완료**. 선택적 고도화:
-1. **백테스팅 엔진**: 과거 데이터로 전략 검증
-2. **알림 시스템**: 새로운 시그널 발생 시 알림
-3. **웹 대시보드**: 실시간 모니터링 UI
-4. **머신러닝**: 패턴 자동 학습 및 최적화
+**문서 버전**: v3.0
+**최종 업데이트**: 2026-03-05
+**작성자**: Claude + unanimous0

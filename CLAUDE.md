@@ -1,16 +1,14 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- **현재 작업**: 성능 최적화 Phase 3 완료 (벡터화 Z-Score + MV 날짜 + lazy import) — 490초→8초
-- **마지막 업데이트**: 2026-03-04
-- **DB 전환**: SQLite(`data/processed/investor_data.db`) → PostgreSQL(`korea_stock_data`) 완료
-  - 소스 전환 완료: `connection.py`, `normalizer.py`, `precomputer.py`, `engine.py`, `signal_detector.py`, `data_loader.py`, `optimizer.py`, `walk_forward.py`, `backtest_runner.py`
-  - PostgreSQL `datetime.date` → `str` 변환 처리 (precomputer, normalizer)
+- **현재 작업**: DB 전환 정리 + 문서 업데이트 + normalizer 단일종목 Z-Score 날짜범위 수정
+- **마지막 업데이트**: 2026-03-05
+- **DB**: PostgreSQL(`korea_stock_data`) — 2022-01-03 ~ 2026-03-03, ~10M rows, 2,721종목
   - 앱 전용 데이터(watchlist/backtest_history/score_change_log): `data/app.db`(SQLite) 분리
   - 환경변수: `KOREA_STOCK_DB_HOST`(기본 localhost), `KOREA_STOCK_DB_PORT`(기본 5432)
-  - 삭제된 파일: `scripts/crawlers/` (3개), `scripts/loaders/` (3개), `src/database/schema.py`
-- **백테스트 권장 시작일**: 2025-01-01 이후 (DB가 2024-01-02 시작이므로 1Y 데이터 확보)
-- **다음 시작점**: Stage 5-1 전 기능 완료 (Phase 2 포함) — Stage 5-2(자동화 파이프라인) 또는 데이터 확장(23년/시가) 선택
+  - PENSION(연기금)은 INSTITUTION에 이미 포함, RETAIL(개인)은 DB에 참고용 존재
+- **백테스트 권장 시작일**: 2023-01-01 이후 (DB가 2022-01-03 시작이므로 1Y 데이터 확보)
+- **다음 시작점**: Stage 5-2(자동화 파이프라인) 또는 추가 기능 개발
 - **시각화**: matplotlib 5종 (PNG/PDF) + Plotly 5종 (Streamlit 인터랙티브)
 - **Streamlit**: `venv/bin/streamlit run app/streamlit_app.py` → http://localhost:8501
 - **현재 브랜치**: main
@@ -28,41 +26,20 @@
                `app/utils/data_loader.py` (`run_optuna_optimization()` 기본값)
                `app/pages/3_📈_백테스트.py` (슬라이더 기본값)
 
-### TODO (수급 DB 교체 시 — 22년 데이터 전환)
+### TODO (수급 DB 교체 시)
 > **⚠️ 반드시 수행**: 수급 DB가 바뀌면 Optuna study 결과도 무효화됨
-
-**배경**: Optuna study 이름은 최적화 기간만 보고 생성됨 (`opt__long__20250101__20250930__sharpe_ratio`)
-- 기저 데이터(수급 DB)가 바뀌어도 이름이 동일 → 이전 DB 기반 trial 위에 누적됨
-- 22년 데이터 추가 시 Z-Score 계산 기준 자체가 달라지므로 기존 trial은 무효
-
-**DB 교체 시 수행 순서**:
-```bash
-# 1. 기존 Optuna study 삭제
-rm data/optuna_studies.db
-
-# 2. git에 반영 (양쪽 컴퓨터 동기화)
-git add data/optuna_studies.db
-git commit -m "Optuna study 초기화 (22년 DB 전환)"
-git push
-```
 
 **Optuna study DB 관리 정책**:
 - `data/optuna_studies.db` — git으로 관리 (집↔회사 컴퓨터 간 공유)
 - study 이름 = `opt__{strategy}__{시작일}__{종료일}__{metric}` (기간+전략+지표 조합)
 - 같은 컴퓨터에서 재시작/새로고침해도 누적 trial 유지됨
-- **DB 교체 시에만** 위 삭제 절차 수행
+- **DB 교체 시** `rm data/optuna_studies.db` 후 새로 최적화
+- ✅ 2022년 데이터 전환 시 Optuna study 초기화 완료 (2026-03-04)
 
 ### TODO (데이터 개선 시)
 - [x] **공유 한국주식 DB 연동** → 크롤링 제거 + 다중 프로젝트 공유 ✅ (2026-03-04 완료)
-  - PostgreSQL `korea_stock_data` DB 연동 완료
-  - `src/database/connection.py` → `get_pg_engine()` 싱글턴
-  - 크롤러/로더 스크립트 삭제 (`scripts/crawlers/`, `scripts/loaders/`)
-- [ ] **23년 데이터 추가** → 백테스트 기간 확장 (현재 2024-01-02부터 시작)
-  - 23년 데이터 추가 시 2024년 백테스트도 2Y Z-Score 완전 활용 가능
-- [ ] **시가 데이터 추가** → 진입/청산 타이밍 개선
-  - 현재: 진입(다음 날 종가), 청산(반대 수급 = 다음 날 종가, 가격 기준 = 당일 종가)
-  - 변경 후: 진입(다음 날 시가), 청산(반대 수급 = 다음 날 시가, 가격 기준 = 도달 시)
-  - 영향: 더 현실적인 백테스트 결과 (시가가 종가보다 유리한 경우 많음)
+- [x] **22~23년 데이터 추가** → 백테스트 기간 확장 ✅ (2026-03-04 완료, DB: 2022-01-03~)
+- [x] **시가 데이터 추가** → 진입/청산 타이밍 개선 ✅ (2026-03-04 완료, DB에 open_price 포함)
 
 ### 주요 성과
 
@@ -433,42 +410,7 @@ venv/bin/streamlit run app/streamlit_app.py
 #### 5-2. 스케줄러 기반 자동화 파이프라인
 **파일**: `scripts/automation/daily_scheduler.py`
 
-> ⚠️ **데이터 소스 전환 계획**
-> 현재는 이 프로젝트 내에서 직접 크롤링하여 `investor_data.db`에 저장하는 구조이지만,
-> **별도로 구축 중인 한국주식 공유 DB**(여러 프로젝트에서 공동 사용)가 완성되면
-> 크롤링 단계를 제거하고 **공유 DB에서 데이터를 조회**하는 방식으로 전환할 예정이다.
-> 이 경우 `src/database/connection.py`의 연결 대상만 공유 DB로 교체하면 된다.
-
-**자동화 흐름 (현재)**:
-```
-[일별 자동 실행 - 장 마감 후 16:30]
-
-1. 데이터 크롤링 (→ 공유 DB 전환 시 이 단계 제거)
-   - 수급 데이터 (외국인/기관)
-   - 주가 데이터
-   - 유통주식 수
-   ↓
-2. DB 저장 (→ 공유 DB 전환 시 이 단계 제거)
-   ↓
-3. Stage 1-3 분석 실행
-   - 정규화 (Sff/Z-Score)
-   - 히트맵 생성
-   - 패턴 분류
-   ↓
-4. 고득점 종목 추출 (70점 이상)
-   ↓
-5. AI 기반 종목 분석
-   - Gemini API: 뉴스 분석
-   - Claude API: 증권사 리포트 분석
-   - 종합 보고서 생성
-   ↓
-6. 결과 저장 및 알림
-   - DB 저장
-   - HTML 리포트 생성
-   - Slack/이메일 알림 (선택)
-```
-
-**자동화 흐름 (공유 DB 전환 후)**:
+**자동화 흐름**:
 ```
 [일별 자동 실행 - 장 마감 후 16:30]
 
@@ -571,9 +513,7 @@ venv/bin/streamlit run app/streamlit_app.py
 - Stage 5는 Stage 4 완료 후 진행 권장
 - 웹 서비스 구독 모델 구현 시 서버 필요 (AWS/GCP)
 - 초기에는 Streamlit Cloud 무료 호스팅으로 시작 가능
-- **공유 DB 전환 시**: `src/database/connection.py`의 DB 경로/접속 설정만 변경하면 됨
-  - 현재: `data/processed/investor_data.db` (로컬 SQLite)
-  - 전환 후: 공유 한국주식 DB (PostgreSQL 등) 접속 정보로 교체
+- **DB**: PostgreSQL 공유 DB 전환 완료 (`src/database/connection.py` → `get_pg_engine()`)
 
 ---
 
@@ -714,11 +654,12 @@ LP_MM_TRADING/
 ---
 
 ## [Data]
-- **~2,427,520 레코드** (2022-01-03 ~ 2026-02-27, MV 기준)
-- **2,628개 종목** (KOSPI + KOSDAQ 활성 종목)
+- **~10,000,000 레코드** (2022-01-03 ~ 2026-03-03, PostgreSQL)
+- **2,721개 종목** (KOSPI + KOSDAQ 전 종목)
 - **1,609개+ 종목 마스터** (섹터 정보 97.9% 커버리지)
-- **13개 컬럼** (수급 + 주가 + 유통주식)
+- **컬럼**: 수급(외국인/기관/연기금/개인) + 주가(시가/고가/저가/종가) + 유통주식
 - **Materialized View**: `mv_daily_sff` (Sff 사전 계산, 장 마감 후 리프레시)
+- **참고**: PENSION(연기금)은 INSTITUTION에 포함됨, RETAIL(개인)은 참고용
 
 ---
 
@@ -858,6 +799,59 @@ short 정렬/분류: adjusted_z = z × max(-confidence, 0)   ← 매도 방향�
 ## [Progress History]
 
 > 전체 이력은 **CHANGELOG.md** 참조. 아래는 최근 항목만 기록.
+
+### 2026-03-05 (DB 전환 정리 + 문서 업데이트 + normalizer 버그 수정)
+
+**목표**: PostgreSQL 전환 후 레거시 파일/하드코딩 정리 + 문서 최신화 + normalizer 단일종목 Z-Score 날짜범위 버그 수정
+
+**구현 내용**:
+
+- ✅ **Phase 1: 레거시 파일 삭제** (5개)
+  - `data/processed/investor_data.db` (38MB 옛 SQLite DB)
+  - `data/raw/` (9.2MB 옛 크롤링 엑셀 4개)
+  - `data/optuna_studies.db` (1.1MB DB 변경으로 무효)
+  - `scripts/migrations/migrate_add_columns.py`
+  - `data/sector_export.csv` (grep 확인 후 미사용 확인)
+
+- ✅ **Phase 2: 하드코딩 날짜/종목수 업데이트** (3개 스크립트)
+  - `backtest_runner.py`: `--start` default `2024-01-02` → `2022-01-03`, docstring 예시 날짜
+  - `generate_md_report.py`, `generate_excel_report.py`, `generate_html_report.py`: 345종목 → 동적/전 종목
+
+- ✅ **Phase 3-4: 문서 업데이트**
+  - `CLAUDE.md`: Status 섹션 (DB 정보, TODO 완료 처리, Stage 5-2 정리)
+  - `DATABASE_README.md`: PostgreSQL + SQLite 이중 DB 구조로 전면 개편
+  - `README.md`: 프로젝트 소개 최신화 (기능/데이터/구조/기술스택)
+
+- ✅ **[버그수정] normalizer 단일종목 Z-Score 날짜범위** (`normalizer.py:354-356`)
+  - **문제**: 종목 상세에서 z_score_window=40~50 설정 시 Z-Score 추이 차트가 짧게 잘림
+  - **원인**: `_calc_date_start(end_date, max_period=window)` — 단일 종목도 날짜범위 제한 적용
+  - **수정**: `if effective_end and not stock_codes:` — 전체 종목 조회 시에만 날짜 최적화 적용
+  - 단일/소수 종목은 전체 이력 로드 (추이 차트용)
+
+- ✅ **백테스트 기본 시작일 변경** (`app/pages/3_📈_백테스트.py`)
+  - 최적화 시작일 default: `2025-01-01` → `2023-01-02` (DB 확장 반영)
+
+- ✅ **Z-Score include/exclude 분석**: 당일 값 포함 vs 제외 비교
+  - 대형주: 0.2~0.6σ 차이 (무시 가능)
+  - 소형주(퍼시스 등): 78σ 차이 (제외 시 극단값)
+  - **결론**: 현재 방식(당일 포함) 유지
+
+**파일** (8개):
+```
+src/analyzer/normalizer.py             (단일종목 날짜범위 버그 수정)
+app/pages/3_📈_백테스트.py              (기본 시작일 2023-01-02)
+scripts/analysis/backtest_runner.py    (default 2022-01-03 + docstring)
+scripts/analysis/generate_md_report.py (345→동적)
+scripts/analysis/generate_excel_report.py (345→전 종목)
+scripts/analysis/generate_html_report.py  (345→전 종목)
+DATABASE_README.md                     (PostgreSQL+SQLite 이중 DB 전면 개편)
+README.md                             (프로젝트 소개 최신화)
+삭제: data/processed/, data/raw/, data/optuna_studies.db, data/sector_export.csv, scripts/migrations/
+```
+
+**테스트**: 294개 통과 (100%), slow 6개 제외
+
+---
 
 ### 2026-03-04 (성능 최적화 Phase 3 — 벡터화 Z-Score + 부가 병목 해소)
 
@@ -1074,165 +1068,6 @@ pytest.ini                             (신규 — slow 마크 등록)
 
 ---
 
-### 2026-03-01 (페이지 재편 + UI 개선)
-
-**목표**: 메인 페이지를 final_score 단일 랭킹 중심으로 재설계 + 이상수급/수급순위를 별도 페이지로 분리
-
-**구현 내용**:
-
-- ✅ **메인 페이지 → "수급 TOP N" 랭킹 + 드릴다운** (`streamlit_app.py` 전면 개편)
-  - KPI 5개 + `final_score` 내림차순 TOP N 테이블 + 드릴다운 패널
-  - 드릴다운: 패턴 배너 + 점수 산출 근거(6개 컴포넌트) + 멀티기간 Z-Score 바차트 + 이상수급 여부 + 종목상세 링크
-  - 테이블 클릭 → 드릴다운 자동 연동 (`on_select="rerun"` + `session_state` 동기화)
-  - 하단 패턴 분석 요약 (파이차트 + 히스토그램)
-
-- ✅ **이상 수급 페이지 신규** (`7_⚡_이상수급.py`)
-  - 메인에서 분리된 참고 데이터 4탭: 이상수급 / 당일수급순위 / 수급금액 / 고득점변동알림
-  - 수급 금액 탭: 종목상세와 동일한 차트+HTML 테이블 (이상수급 종목 우선 표시)
-  - 탭 이모지 제거, 관심종목 탭 제거 (다른 페이지에 존재)
-
-- ✅ **UI 개선 4건**
-  - "수급 왕" → "수급" 명칭 변경
-  - 랭킹 테이블 15행 스크롤 (`height=600`)
-  - 테이블 클릭→드릴다운 동기화 (`session_state['drill_select']` 직접 업데이트)
-  - 드릴다운 섹션 `st.subheader` 적용 (다른 섹션과 글씨 크기 통일)
-
-**pages.toml 업데이트**: 수급 왕(:material/trophy:) + 이상 수급(:material/bolt:) 메뉴 추가
-
-**파일** (3개):
-```
-app/streamlit_app.py           (메인 페이지 전면 재설계)
-app/pages/7_⚡_이상수급.py      (신규 — 이상수급/수급순위/수급금액/변동알림)
-.streamlit/pages.toml          (메뉴 구조 업데이트)
-```
-
-**테스트**: 300개 (100% 통과)
-
----
-
-### 2026-02-27 (복합 패턴 분류 시스템 — sub_type 7종 구현)
-
-**목표**: 기본 패턴(4종) 위에 세부 한정자(7종)를 추가하여 동일 패턴 내 품질 차이 표현
-
-**배경**:
-- "급등형" 안에 장기매집 위 단기폭발(★★★★★)과 단기반등 함정(★)이 공존
-- 지속형→급등형 전환(단기돌파) 시 500D가 이미 높아 momentum이 작음 → 급등형 탈락
-- 복수 조건 충족 종목도 첫 매칭 패턴만 표시 → 정보 손실
-
-**3컬럼 시스템**: `pattern` (기존) + `sub_type` (한정자) + `pattern_label` (합성 표시)
-
-**복합 패턴 7종**:
-
-| # | 기본 패턴 | sub_type | 조건 | 점수 보정 |
-|---|----------|----------|------|----------|
-| ① | 급등형 | 장기기반 | 200D>0.3 AND 100D>0.3 | +5 |
-| ② | 지속형 | 단기돌파 | 5D>1.0 AND short_divergence>0.5 | +5 |
-| ③ | 전환형 | V자반등 | 5D>1.0 AND recent>0.5 | +3 |
-| ④ | 지속형 | 전면수급 | 5D~200D 모두 Z>0 AND std<0.5 | +3 |
-| ⑤ | 지속형 | 수급약화 | short_divergence<-0.3 AND 5D<20D | -5 |
-| ⑥ | 급등형 | 감속 | short_divergence<-0.3 | -5 |
-| ⑦ | 급등형 | 단기반등 | 200D<-0.3 OR 100D<-0.3 | -8 |
-
-**판정 우선순위** (위험 먼저):
-- 급등형: ⑦단기반등 → ⑥감속 → ①장기기반 → None
-- 지속형: ②단기돌파 → ④전면수급 → ⑤수급약화 → None
-- 전환형: ③V자반등 → None
-
-**구현 내용**:
-
-- ✅ **Phase 1: 핵심 로직** (`pattern_classifier.py`)
-  - `_get_default_config()`: `sub_type_thresholds` + `sub_type_score_bonus` 딕셔너리 추가
-  - `_classify_sub_type(pattern, row, config)`: 신규 static 메서드 — 기본 패턴별 조건 분기
-  - `classify_all()`: sub_type/pattern_label 컬럼 추가 + sub_type 점수 보정 (tc_bonus와 별개)
-  - 출력 컬럼: `result_cols`에 `sub_type`, `pattern_label` 추가
-
-- ✅ **Phase 2: UI 업데이트** (4개 파일)
-  - `app/pages/2_🔍_패턴분석.py`: 사이드바 sub_type 멀티셀렉트 필터 + 종목리스트 pattern_label 표시 + 교차테이블 pattern_label 기준
-  - `app/utils/charts.py`: 히트맵 호버 pattern_label 사용 + Treemap pattern_label 사용
-  - `app/pages/1_📊_히트맵.py`: 미니 상세 패널 pattern_label 표시
-  - `app/streamlit_app.py`: 관심종목 테이블 pattern_label 표시 + 저장 관심종목 조인에 pattern_label 포함
-
-- ✅ **Phase 3: 테스트** (11개 신규)
-  - `TestSubType` 클래스: 7개 sub_type 각각 단위 테스트 + None 케이스 + pattern_label 포맷 + 점수 보정 + classify_all 출력 컬럼
-
-**하위 호환**: `pattern` 컬럼 기존과 동일 유지, `sub_type`이 None이면 `pattern_label == pattern`
-
-**파일** (7개):
-```
-src/analyzer/pattern_classifier.py    (sub_type 핵심 로직)
-app/utils/charts.py                   (호버/Treemap pattern_label)
-app/pages/2_🔍_패턴분석.py            (sub_type 필터 + pattern_label 표시)
-app/pages/1_📊_히트맵.py              (미니 상세 pattern_label)
-app/streamlit_app.py                  (관심종목 pattern_label)
-tests/test_pattern_classifier.py      (TestSubType 11개)
-CLAUDE.md                             (진행 기록)
-```
-
-**테스트**: 287개 (100% 통과) — 기존 276 + 신규 11
-
----
-
-### 2026-02-26 (코드 리뷰 + 버그수정 5건)
-
-**목표**: Phase 1+2 구현 완료 후 전체 코드베이스 정밀 검토 — 로직·설계·파이프라인·누락·중복 관점
-
-**검토 방법**: 5개 병렬 에이전트 실행 후 수동 검증으로 False Positive 필터링
-
-| 검토 영역 | 대상 파일 |
-|----------|---------|
-| 핵심 분석 파이프라인 | normalizer, pattern_classifier, signal_detector, performance_optimizer |
-| 백테스팅 시스템 | engine, precomputer, portfolio, optimizer, walk_forward, metrics |
-| Streamlit 앱 + data_loader | streamlit_app, data_loader |
-| Streamlit 페이지 | backtest, stock_detail, stock_compare, heatmap, pattern_analysis |
-| 차트 + 시각화 | charts, plotly_visualizer |
-
-**확인된 실제 버그 3건 + UI 불일치 2건**:
-
-- ✅ **[버그] MDD 공식 오류** (`plotly_visualizer.py:563`)
-  - **문제**: `_build_kpi_html()`의 KPI 카드 MDD 값이 실제보다 작게 표시됨
-  - **원인**: `(v - np.maximum.accumulate(v)).min() / np.maximum.accumulate(v).max()` — 분모에 전체 구간 최대값(글로벌 max) 사용
-  - **예시**: `[100→150→100→200]` 시 trough=-50, 분모=200 → -25% (오류) vs 분모=150 → -33.3% (정상)
-  - **수정**: 원소별 분모로 교체 `((v - _running_max) / _running_max).min() * 100`
-  - **영향**: KPI 카드의 MDD 표시값만 영향 (백테스트 내부 계산 경로와 별개)
-
-- ✅ **[버그] snapshot_scores() 중복 레코드** (`data_loader.py`)
-  - **문제**: 같은 날 다른 브라우저 세션에서 홈 페이지 방문 시 동일 `analysis_date`로 중복 이벤트 삽입
-  - **원인**: INSERT 전 존재 여부 확인 없음 → 직전 스냅샷 기준 재비교 → 동일 이벤트 재삽입
-  - **수정**: 함수 시작 시 `COUNT(*) WHERE analysis_date = ?` 체크 → 이미 있으면 조기 반환
-
-- ✅ **[버그] snapshot_scores() 날짜 레이블 오류** (`streamlit_app.py`)
-  - **문제**: `snapshot_scores(report_df, end_date_str)` 호출 — `end_date_str`은 "이상 수급 기준일" (과거 날짜일 수 있음)
-  - **원인**: `report_df`는 항상 최신 분석 결과인데, 날짜는 이상 수급 사이드바 기준일로 레이블링
-  - **수정**: `_, _latest_date = get_date_range()` → `snapshot_scores(report_df, _latest_date)`
-
-- ✅ **[UI] Z-Score 슬라이더 최댓값 불일치** (`6_🔀_종목비교.py:61`)
-  - **문제**: 종목 비교 페이지 Z-Score 기준 기간 슬라이더 최댓값 500 (다른 페이지는 1300)
-  - **수정**: `max=500` → `max=1300`
-
-- ✅ **[UI] 패턴분석 Tab2 캡션 누락** (`2_🔍_패턴분析.py`)
-  - **문제**: 패턴별 통계 탭이 사이드바 필터를 반영하지 않는데 사용자가 필터 적용된 것으로 오해 가능
-  - **수정**: `st.caption("※ 사이드바 필터와 무관하게 전체 분석 종목 기준으로 집계됩니다.")` 추가
-
-**False Positive 목록** (에이전트 보고 후 수동 검증으로 정상 확인):
-- `max_hold_days _ni sync 없음`: `number_input` 단독 위젯 (슬라이더 쌍 없음) → `_ni` 키 불필요 ✓
-- `fig_monthly_returns 첫 달 누락`: `shift(1)` 후 신규 Series에 `iloc[0] = initial_capital` 할당 → 뷰 아님 ✓
-- `DataFrame.get()` 미지원: pandas 공식 API (`DataFrame.get(key, default)`) → 정상 ✓
-- Plotly 3D customdata: `%{customdata[i]}` 문법 지원됨 → 정상 ✓
-- `individual_net_amount` 컬럼 없음: DB 스키마 확인 결과 `investor_flows` 테이블에 없음 → `-(foreign+institution)` 근사값 사용은 의도된 설계 ✓
-
-**파일** (5개):
-```
-src/backtesting/plotly_visualizer.py   (MDD 공식 수정: 원소별 running_max 분모)
-app/utils/data_loader.py               (snapshot_scores: analysis_date 중복 가드)
-app/streamlit_app.py                   (snapshot_scores 호출 시 max_date 사용)
-app/pages/6_🔀_종목비교.py             (Z-Score 슬라이더 max 500→1300)
-app/pages/2_🔍_패턴분析.py             (Tab2 캡션 추가)
-```
-
-**테스트**: 276개 (100% 통과, 버그 수정은 UI/날짜 레이어 — 기존 분석 로직 무변경)
-
----
-
 ## [Reference]
 - **IMPLEMENTATION_GUIDE.md**: Stage 1~2 상세 구현 내용
 - **DATABASE_README.md**: DB 스키마 및 사용법
@@ -1240,5 +1075,5 @@ app/pages/2_🔍_패턴분析.py             (Tab2 캡션 추가)
 
 ---
 
-**프로젝트 버전**: v5.1.2 (Stage 5-1 완료 + 성능 최적화 Phase 2)
-**마지막 업데이트**: 2026-03-04
+**프로젝트 버전**: v5.1.3 (DB 전환 정리 + 문서 업데이트)
+**마지막 업데이트**: 2026-03-05

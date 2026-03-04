@@ -163,7 +163,7 @@ if use_split:
     _max_value = _max_dt.replace(month=12, day=31)
     opt_start_date = st.sidebar.date_input(
         "최적화 시작일",
-        value=datetime.strptime("2025-01-01", "%Y-%m-%d"),
+        value=datetime.strptime("2023-01-02", "%Y-%m-%d"),
         min_value=datetime.strptime(min_date, "%Y-%m-%d"),
         max_value=_max_value,
         key="w_opt_start",
@@ -195,7 +195,7 @@ else:
     _max_value = _max_dt.replace(month=12, day=31)
     _start = st.sidebar.date_input(
         "시작일",
-        value=datetime.strptime("2025-01-01", "%Y-%m-%d"),
+        value=datetime.strptime("2023-01-02", "%Y-%m-%d"),
         min_value=datetime.strptime(min_date, "%Y-%m-%d"),
         max_value=_max_value,
     )

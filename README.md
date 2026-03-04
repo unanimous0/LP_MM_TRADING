@@ -4,68 +4,67 @@
 
 ## 프로젝트 개요
 
-Z-Score 정규화를 통해 시총/변동성 왜곡을 제거하고, 6개 기간(1주~2년) 수급 트렌드를 분석하여 3가지 투자 패턴(급등형/지속형/전환형)으로 종목을 자동 분류합니다.
+Z-Score 정규화를 통해 시총/변동성 왜곡을 제거하고, 7개 기간(5D~500D) 수급 트렌드를 분석하여 3가지 투자 패턴(급등형/지속형/전환형)으로 종목을 자동 분류합니다.
 
-## 주요 기능 (Stage 1~3 완료 ✅)
+## 주요 기능
 
-- ✅ **데이터 정규화**: Sff(Supply Float Factor) + Z-Score 변환
-- ✅ **시공간 분석**: 6개 기간 히트맵 + 4가지 정렬 모드
-- ✅ **패턴 분류**: 3개 바구니 자동 분류 (0~100점 점수화)
-- ✅ **시그널 탐지**: MA 골든크로스, 수급 가속도, 동조율
-- ✅ **통합 리포트**: CSV + Excel (6개 시트) 자동 생성
-- ⏳ **백테스팅**: 과거 수익률 검증 (Stage 4, 개발 예정)
+- **데이터 정규화**: Sff(Supply Float Factor) + Z-Score 변환 (외국인 중심 조건부 합산)
+- **시공간 분석**: 7개 기간 히트맵 + 4가지 정렬 모드
+- **패턴 분류**: 3개 바구니 자동 분류 (0~100점 점수화) + 7종 복합 패턴(sub_type)
+- **시그널 탐지**: MA 골든크로스, 수급 가속도, 동조율
+- **백테스팅**: 롱/숏/병행 전략, Optuna 최적화, Walk-Forward 검증
+- **Streamlit 대시보드**: 인터랙티브 차트, 히트맵, 종목 비교, 이상 수급, 백테스트 UI
 
 ## 설치 방법
 
-### 1. 저장소 클론
 ```bash
-git clone https://github.com/unanimous0/Investor_Analysis.git
-cd Investor_Analysis
-```
-
-### 2. 가상환경 생성 및 활성화
-```bash
+git clone <repository>
+cd LP_MM_TRADING
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-### 3. 의존성 설치
+### 데이터베이스 연결
+
+PostgreSQL 공유 DB 필요 (별도 프로젝트에서 관리):
 ```bash
-pip install -r requirements.txt
+# 기본값: korea_stock_reader@localhost:5432/korea_stock_data
+# 환경변수로 변경:
+export KOREA_STOCK_DB_HOST=your-server
+export KOREA_STOCK_DB_PORT=5432
 ```
 
 ## 빠른 시작
 
-### 1. 전체 파이프라인 실행
+### Streamlit 대시보드
 ```bash
-# CSV + Excel 리포트 자동 생성
-bash scripts/analysis/run_all.sh
+venv/bin/streamlit run app/streamlit_app.py
+# → http://localhost:8501
 ```
 
-### 2. 개별 분석 실행
+### CLI 분석
 ```bash
-# Stage 1: 이상 수급 탐지
+# 이상 수급 탐지
 python scripts/analysis/abnormal_supply_detector.py
 
-# Stage 2: 히트맵 생성
-python scripts/analysis/heatmap_generator.py
-
-# Stage 3: 통합 레짐 스캐너
+# 통합 레짐 스캐너
 python scripts/analysis/regime_scanner.py --save-csv --print-cards --top 20
+
+# 백테스트
+python scripts/analysis/backtest_runner.py --start 2023-01-01 --end 2025-12-31
+
+# Optuna 최적화
+python scripts/analysis/backtest_runner.py --optimize --n-trials 100
 ```
 
-자세한 사용법은 **IMPLEMENTATION_GUIDE.md** 참조
+자세한 사용법은 **ANALYSIS_GUIDE.md** 참조
 
-## 분석 결과 (2026-02-13 기준)
+## 데이터
 
-- **분석 종목**: 338개 (KOSPI200 + KOSDAQ150)
-- **분석 기간**: 2024-01-02 ~ 2026-01-20 (약 2년)
-- **핵심 발견**:
-  - 고득점(70점+) 종목의 95.5%가 지속형 → 중장기 수급이 핵심
-  - 시그널 2개 이상 종목 평균 점수 +16.4% (강한 진입 타이밍)
-  - 실전 투자 대상: 44개 (13%, 70점+ 지속형)
-
-자세한 분석 결과는 **ANALYSIS_REPORT.md** 참조
+- **~10,000,000 레코드** (PostgreSQL)
+- **2,721개 종목** (KOSPI + KOSDAQ 전 종목)
+- **기간**: 2022-01-03 ~ 2026-03-03
 
 ## 프로젝트 구조
 
@@ -73,29 +72,32 @@ python scripts/analysis/regime_scanner.py --save-csv --print-cards --top 20
 LP_MM_TRADING/
 ├── CLAUDE.md                   # 프로젝트 상태 및 진행 현황
 ├── README.md                   # 프로젝트 소개 (이 파일)
-├── ANALYSIS_REPORT.md          # 분석 결과 보고서 (통계, 인사이트)
-├── IMPLEMENTATION_GUIDE.md     # 구현 가이드 (Stage 1~3 사용법)
 ├── DATABASE_README.md          # 데이터베이스 스키마
 ├── requirements.txt            # 의존성 목록
-├── data/processed/            # SQLite DB (171,227 레코드)
-├── src/                       # 소스 코드
-│   ├── database/              # DB 연결 및 스키마
-│   ├── analyzer/              # 분석 모듈 (정규화, 패턴 분류, 시그널)
-│   └── visualizer/            # 시각화 모듈 (히트맵)
-├── scripts/                   # 실행 스크립트
-│   ├── analysis/              # 분석 CLI 도구
-│   ├── crawlers/              # 데이터 크롤러
-│   └── loaders/               # 데이터 로더
-└── tests/                     # 테스트 (105개, 100% 통과)
+├── data/
+│   └── app.db                  # 앱 전용 SQLite (관심종목/백테스트 히스토리)
+├── app/                        # Streamlit 웹 대시보드
+│   ├── streamlit_app.py        # 메인 엔트리포인트
+│   ├── utils/data_loader.py    # 캐시 데이터 로더
+│   └── pages/                  # 멀티페이지 (히트맵/패턴분석/백테스트/종목상세 등)
+├── src/                        # 소스 코드
+│   ├── database/               # DB 연결 (PostgreSQL + SQLite)
+│   ├── analyzer/               # 분석 모듈 (정규화, 패턴 분류, 시그널)
+│   ├── backtesting/            # 백테스트 (엔진, 최적화, 시각화)
+│   └── visualizer/             # 히트맵 시각화
+├── scripts/analysis/           # CLI 도구
+└── tests/                      # 테스트 (294개, 100% 통과)
 ```
 
 ## 기술 스택
 
 - Python 3.10+
-- SQLite (데이터베이스)
+- PostgreSQL (시장 데이터), SQLite (앱 전용 데이터)
 - pandas, numpy (데이터 분석)
-- matplotlib, seaborn (시각화)
-- openpyxl (Excel 리포트)
+- Streamlit (웹 대시보드)
+- Plotly (인터랙티브 차트)
+- matplotlib, seaborn (CLI 시각화)
+- Optuna (Bayesian Optimization)
 - pytest (테스트)
 
 ## 문서 가이드
@@ -103,8 +105,7 @@ LP_MM_TRADING/
 | 문서 | 용도 |
 |------|------|
 | **CLAUDE.md** | 프로젝트 상태, 진행 현황, Quick Start, 다음 단계 |
-| **ANALYSIS_REPORT.md** | 분석 결과, 통계, 인사이트, 실전 투자 전략 |
-| **IMPLEMENTATION_GUIDE.md** | Stage 1~3 상세 구현, API 사용법, 코드 예시 |
+| **ANALYSIS_GUIDE.md** | 분석 사용법 가이드 |
 | **DATABASE_README.md** | 데이터베이스 스키마, 테이블 구조, 쿼리 예시 |
 
 ## 라이선스
@@ -117,4 +118,4 @@ unanimous0
 
 ---
 
-**마지막 업데이트**: 2026-02-13 (Stage 3 완료 + Excel 리포트 추가)
+**마지막 업데이트**: 2026-03-04 (Stage 5-1 완료 + DB 전환 정리)

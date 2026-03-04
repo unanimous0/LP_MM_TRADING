@@ -352,7 +352,9 @@ class SupplyNormalizer:
                     effective_end = None
 
             effective_start = None
-            if effective_end:
+            if effective_end and not stock_codes:
+                # 전체 종목 조회 시에만 날짜 범위 최적화 (데이터 로드량 절감)
+                # 단일/소수 종목은 전체 이력 로드 (추이 차트용)
                 effective_start = self._calc_date_start(effective_end, max_period=window)
 
             df = self._query_raw_data(stock_codes, effective_start, effective_end)

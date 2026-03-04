@@ -8,7 +8,7 @@ Usage:
     python scripts/analysis/backtest_runner.py
 
     # 전체 기간
-    python scripts/analysis/backtest_runner.py --start 2024-01-02 --end 2026-01-20
+    python scripts/analysis/backtest_runner.py --start 2022-01-03 --end 2026-03-03
 
     # 특정 패턴만
     python scripts/analysis/backtest_runner.py --pattern 급등형
@@ -35,7 +35,7 @@ Usage:
     python scripts/analysis/backtest_runner.py --optimize --opt-save-csv output/optimization.csv
 
     # Walk-Forward Analysis (기본: 6개월 학습, 1개월 검증, Optuna 50 trials)
-    python scripts/analysis/backtest_runner.py --walk-forward --start 2024-01-01 --end 2024-12-31
+    python scripts/analysis/backtest_runner.py --walk-forward --start 2023-01-01 --end 2025-12-31
 
     # Walk-Forward (Optuna trials 수 지정)
     python scripts/analysis/backtest_runner.py --walk-forward --n-trials 100
@@ -235,7 +235,7 @@ def main():
   python scripts/analysis/backtest_runner.py
 
   # 전체 기간
-  python scripts/analysis/backtest_runner.py --start 2024-01-02 --end 2026-01-20
+  python scripts/analysis/backtest_runner.py --start 2022-01-03 --end 2026-03-03
 
   # 급등형 종목만
   python scripts/analysis/backtest_runner.py --pattern 급등형
@@ -268,7 +268,7 @@ def main():
   python scripts/analysis/backtest_runner.py --optimize --opt-save-csv output/optimization.csv
 
   # Walk-Forward Analysis (Optuna, 기본 50 trials)
-  python scripts/analysis/backtest_runner.py --walk-forward --start 2024-01-01 --end 2024-12-31
+  python scripts/analysis/backtest_runner.py --walk-forward --start 2023-01-01 --end 2025-12-31
 
   # Walk-Forward (100 trials, 4 workers 병렬)
   python scripts/analysis/backtest_runner.py --walk-forward --n-trials 100 --workers 4
@@ -276,7 +276,7 @@ def main():
     )
 
     # 기간 설정
-    parser.add_argument('--start', default='2024-01-02', help='시작일 (YYYY-MM-DD)')
+    parser.add_argument('--start', default='2022-01-03', help='시작일 (YYYY-MM-DD)')
     parser.add_argument('--end', default='2024-03-31', help='종료일 (YYYY-MM-DD)')
 
     # 진입 조건

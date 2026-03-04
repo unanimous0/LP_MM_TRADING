@@ -2,6 +2,97 @@
 
 > CLAUDE.md에서 분리된 과거 작업 이력. 최근 항목은 CLAUDE.md [Progress History] 섹션 참조.
 
+### 2026-03-05 (DB 전환 정리 + 문서 업데이트 + normalizer 버그 수정)
+
+**목표**: PostgreSQL 전환 후 레거시 파일/하드코딩 정리 + 문서 최신화 + normalizer 단일종목 Z-Score 날짜범위 버그 수정
+
+**구현 내용**:
+
+- ✅ **Phase 1: 레거시 파일 삭제** (5개)
+  - `data/processed/investor_data.db` (38MB 옛 SQLite DB)
+  - `data/raw/` (9.2MB 옛 크롤링 엑셀 4개)
+  - `data/optuna_studies.db` (1.1MB DB 변경으로 무효)
+  - `scripts/migrations/migrate_add_columns.py`
+  - `data/sector_export.csv` (grep 확인 후 미사용 확인)
+
+- ✅ **Phase 2: 하드코딩 날짜/종목수 업데이트** (3개 스크립트)
+  - `backtest_runner.py`: `--start` default `2024-01-02` → `2022-01-03`, docstring 예시 날짜
+  - `generate_md_report.py`, `generate_excel_report.py`, `generate_html_report.py`: 345종목 → 동적/전 종목
+
+- ✅ **Phase 3-4: 문서 업데이트**
+  - `CLAUDE.md`: Status 섹션 (DB 정보, TODO 완료 처리, Stage 5-2 정리)
+  - `DATABASE_README.md`: PostgreSQL + SQLite 이중 DB 구조로 전면 개편
+  - `README.md`: 프로젝트 소개 최신화 (기능/데이터/구조/기술스택)
+
+- ✅ **[버그수정] normalizer 단일종목 Z-Score 날짜범위** (`normalizer.py:354-356`)
+  - **문제**: 종목 상세에서 z_score_window=40~50 설정 시 Z-Score 추이 차트가 짧게 잘림
+  - **원인**: `_calc_date_start(end_date, max_period=window)` — 단일 종목도 날짜범위 제한 적용
+  - **수정**: `if effective_end and not stock_codes:` — 전체 종목 조회 시에만 날짜 최적화 적용
+
+- ✅ **백테스트 기본 시작일 변경** (`app/pages/3_📈_백테스트.py`)
+  - 최적화 시작일 default: `2025-01-01` → `2023-01-02` (DB 확장 반영)
+
+- ✅ **Z-Score include/exclude 분석**: 당일 값 포함 vs 제외 비교 → 현재 방식(당일 포함) 유지 결정
+
+**파일** (8개 + 삭제 5개):
+```
+src/analyzer/normalizer.py, app/pages/3_📈_백테스트.py, scripts/analysis/backtest_runner.py,
+scripts/analysis/generate_md_report.py, generate_excel_report.py, generate_html_report.py,
+DATABASE_README.md, README.md
+삭제: data/processed/, data/raw/, data/optuna_studies.db, data/sector_export.csv, scripts/migrations/
+```
+
+**테스트**: 294개 통과 (100%), slow 6개 제외
+
+---
+
+### 2026-03-01 (페이지 재편 + UI 개선)
+
+**목표**: 메인 페이지를 final_score 단일 랭킹 중심으로 재설계 + 이상수급/수급순위를 별도 페이지로 분리
+
+**구현 내용**:
+
+- ✅ **메인 페이지 → "수급 TOP N" 랭킹 + 드릴다운** (`streamlit_app.py` 전면 개편)
+  - KPI 5개 + `final_score` 내림차순 TOP N 테이블 + 드릴다운 패널
+  - 드릴다운: 패턴 배너 + 점수 산출 근거(6개 컴포넌트) + 멀티기간 Z-Score 바차트 + 이상수급 여부 + 종목상세 링크
+  - 테이블 클릭 → 드릴다운 자동 연동 (`on_select="rerun"` + `session_state` 동기화)
+  - 하단 패턴 분석 요약 (파이차트 + 히스토그램)
+
+- ✅ **이상 수급 페이지 신규** (`7_⚡_이상수급.py`)
+  - 메인에서 분리된 참고 데이터 4탭: 이상수급 / 당일수급순위 / 수급금액 / 고득점변동알림
+
+- ✅ **UI 개선 4건**: "수급 왕"→"수급" 명칭 변경, 랭킹 테이블 스크롤, 드릴다운 동기화, subheader 통일
+
+**파일** (3개): `streamlit_app.py`, `7_⚡_이상수급.py`, `pages.toml`
+
+**테스트**: 300개 (100% 통과)
+
+---
+
+### 2026-02-27 (복합 패턴 분류 시스템 — sub_type 7종 구현)
+
+**목표**: 기본 패턴(4종) 위에 세부 한정자(7종)를 추가하여 동일 패턴 내 품질 차이 표현
+
+**3컬럼 시스템**: `pattern` (기존) + `sub_type` (한정자) + `pattern_label` (합성 표시)
+
+**복합 패턴 7종**: ①장기기반(+5) / ②단기돌파(+5) / ③V자반등(+3) / ④전면수급(+3) / ⑤수급약화(-5) / ⑥감속(-5) / ⑦단기반등(-8)
+
+**구현**: pattern_classifier.py (핵심로직) + 4개 UI 파일 (패턴분석/히트맵/차트/관심종목) + 11개 테스트
+
+**테스트**: 287개 (100% 통과)
+
+---
+
+### 2026-02-26 (코드 리뷰 + 버그수정 5건)
+
+**목표**: 전체 코드베이스 정밀 검토 (5개 병렬 에이전트 → 수동 검증)
+
+**수정**: MDD 공식 오류 / snapshot_scores 중복 레코드 / snapshot_scores 날짜 레이블 / Z-Score 슬라이더 max 불일치 / 패턴분석 Tab2 캡션
+
+**테스트**: 276개 (100% 통과)
+
+---
+
 ### 2026-02-26 (Phase 2: 대시보드 개선 4종 — 관심종목/비교/알림/히스토리)
 
 **목표**: 사용자 편의성 향상을 위한 4가지 대시보드 기능 구현

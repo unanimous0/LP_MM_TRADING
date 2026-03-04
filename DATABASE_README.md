@@ -2,209 +2,142 @@
 
 ## Overview
 
-This project uses SQLite database to store and manage investor flow data for KOSPI200 and KOSDAQ150 stocks.
-
-**Database File:** `data/processed/investor_data.db`
+This project uses **two databases**:
+1. **PostgreSQL** (`korea_stock_data`): 시장 데이터 (수급, 주가, 종목 마스터) — 공유 DB, 별도 프로젝트에서 관리
+2. **SQLite** (`data/app.db`): 앱 전용 데이터 (관심종목, 백테스트 히스토리, 점수 변동 로그)
 
 ---
 
-## Database Schema
+## PostgreSQL — 시장 데이터
 
-### Tables
+### 연결 설정
+```python
+from src.database.connection import get_pg_engine
 
-#### 1. markets
-시장 구분 테이블 (KOSPI200, KOSDAQ150)
+engine = get_pg_engine()  # 싱글턴 엔진
+```
+
+환경변수:
+- `KOREA_STOCK_DB_HOST` (기본: localhost)
+- `KOREA_STOCK_DB_PORT` (기본: 5432)
+- 사용자: `korea_stock_reader` (읽기 전용)
+
+### 주요 테이블
+
+#### investor_trading
+투자자별 수급 데이터
 
 | Column | Type | Description |
 |--------|------|-------------|
-| market_id | INTEGER (PK) | 시장 ID (1=KOSPI200, 2=KOSDAQ150) |
-| market_name | TEXT (UNIQUE) | 시장명 |
-| description | TEXT | 설명 |
-| created_at | TIMESTAMP | 생성일시 |
+| stock_code | TEXT | 종목코드 (6자리) |
+| trade_date | DATE | 거래일 |
+| investor_type | TEXT | 투자자 유형 (FOREIGN/INSTITUTION/PENSION/RETAIL) |
+| net_buy_volume | BIGINT | 순매수 수량 |
+| net_buy_amount | BIGINT | 순매수 금액 (원) |
 
-#### 2. stocks
+> **참고**: PENSION(연기금)은 INSTITUTION에 이미 포함됨. RETAIL(개인)은 참고용.
+
+#### stock_prices
+일별 주가 데이터
+
+| Column | Type | Description |
+|--------|------|-------------|
+| stock_code | TEXT | 종목코드 |
+| trade_date | DATE | 거래일 |
+| open_price | INTEGER | 시가 |
+| high_price | INTEGER | 고가 |
+| low_price | INTEGER | 저가 |
+| close_price | INTEGER | 종가 |
+| volume | BIGINT | 거래량 |
+
+#### stock_master
 종목 마스터 테이블
 
 | Column | Type | Description |
 |--------|------|-------------|
-| stock_code | TEXT (PK) | 종목코드 (6자리) |
+| stock_code | TEXT (PK) | 종목코드 |
 | stock_name | TEXT | 종목명 |
-| market_id | INTEGER (FK) | 시장 ID |
-| sector | TEXT | 섹터 (추후 추가) |
-| is_active | BOOLEAN | 활성 여부 |
-| created_at | TIMESTAMP | 생성일시 |
+| market | TEXT | 시장 (KOSPI/KOSDAQ) |
+| sector | TEXT | 섹터 |
+| shares_outstanding | BIGINT | 유통주식수 |
 
-#### 3. investor_flows
-투자자 수급 데이터 (메인 테이블)
+### Materialized View
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | INTEGER (PK) | 자동 증가 ID |
-| trade_date | DATE | 거래일 |
-| stock_code | TEXT (FK) | 종목코드 |
-| foreign_net_volume | BIGINT | 외국인 순매수 수량 |
-| foreign_net_amount | BIGINT | 외국인 순매수 금액 |
-| institution_net_volume | BIGINT | 기관 순매수 수량 |
-| institution_net_amount | BIGINT | 기관 순매수 금액 |
-| market_cap | BIGINT | 시가총액 |
-| created_at | TIMESTAMP | 생성일시 |
+#### mv_daily_sff
+Sff(Supply Flow Force) 사전 계산 뷰 — 3-table JOIN + GROUP BY 결과를 캐싱
 
-**단위:**
-- foreign_net_volume, institution_net_volume: 주 (원 단위 환산)
-- foreign_net_amount, institution_net_amount: 원 (₩)
-- market_cap: 원 (₩)
+```sql
+-- 리프레시 (장 마감 후)
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_daily_sff;
+```
 
-**주의:** 엑셀 원본 파일은 천원(1,000원) 단위이지만,
-데이터베이스에는 원 단위로 변환되어 저장됩니다.
-(2026-02-09 마이그레이션 완료)
+리프레시 스크립트: `scripts/refresh_mv.sh`
+생성 SQL: `scripts/setup_materialized_views.sql`
 
-**Constraints:**
-- UNIQUE(trade_date, stock_code) - 중복 방지
+### SQL 함수
 
-**Indexes:**
-- idx_flows_stock_date: (stock_code, trade_date)
-- idx_flows_date_stock: (trade_date, stock_code)
-- idx_flows_date: (trade_date)
+- `fn_zscore_latest(weight, target_date)`: 7개 기간 Z-Score 일괄 계산
+- `fn_signals_latest(weight, target_date)`: MA 크로스오버 + 가속도 + 동조율
 
 ---
 
-## Usage
+## SQLite — 앱 전용 데이터
 
-### 1. Create Database Schema
-```python
-from src.database.schema import create_database
+**파일**: `data/app.db`
 
-create_database()
-```
+### 테이블
 
-### 2. Load Initial Data
-```bash
-python scripts/load_initial_data.py
-```
-
-### 3. Load Daily Data (Incremental Update)
-```bash
-# Load new daily data
-python scripts/load_daily_data.py data/투자자수급_20260209.xlsx data/시가총액_20260209.xlsx
-
-# Preview without inserting (dry-run mode)
-python scripts/load_daily_data.py data/투자자수급_20260209.xlsx data/시가총액_20260209.xlsx --dry-run
-```
-
-**Features:**
-- Automatically skips duplicate records (based on trade_date + stock_code)
-- Case-insensitive stock name mapping
-- Detailed report showing inserted/skipped/failed records
-- Safe to run multiple times (idempotent)
-
-### 4. Query Data
-```python
-from src.database.connection import get_connection
-import pandas as pd
-
-conn = get_connection()
-
-# Example: Get Samsung Electronics data for the last 30 days
-df = pd.read_sql("""
-    SELECT
-        s.stock_name,
-        f.trade_date,
-        f.foreign_net_volume,
-        f.foreign_net_amount,
-        f.institution_net_volume,
-        f.institution_net_amount,
-        f.market_cap
-    FROM investor_flows f
-    JOIN stocks s ON f.stock_code = s.stock_code
-    WHERE f.stock_code = '005930'
-    ORDER BY f.trade_date DESC
-    LIMIT 30
-""", conn)
-
-conn.close()
-```
-
-### 5. Validate Data
-```python
-from src.data_loader.validator import validate_data
-from src.database.connection import get_connection
-
-conn = get_connection()
-validate_data(conn)
-conn.close()
-```
+| 테이블 | 용도 |
+|--------|------|
+| `watchlist` | 관심종목 저장 |
+| `backtest_history` | 백테스트 결과 히스토리 |
+| `score_change_log` | 고득점 종목 변동 이벤트 |
 
 ---
 
 ## Current Data Status
 
-- **Total Stocks:** 1,609 (from 종목코드_이름_맵핑.xlsx)
-- **Active Stocks in Data:** 345 (KOSPI200 + KOSDAQ150)
-- **Total Records:** 172,155
-- **Date Range:** 2024-01-02 ~ 2026-01-20 (approximately 500 trading days)
-- **Database Size:** ~50MB
+- **Total Records:** ~10,000,000 (PostgreSQL)
+- **Active Stocks:** 2,721 (KOSPI + KOSDAQ 전 종목)
+- **Date Range:** 2022-01-03 ~ 2026-03-03
+- **Stock Master:** 1,609+ (섹터 정보 97.9% 커버리지)
 
 ---
 
 ## Query Examples
 
-### Get top 10 stocks by foreign net buying
-```sql
-SELECT
-    s.stock_name,
-    SUM(f.foreign_net_amount) as total_foreign_buying
-FROM investor_flows f
-JOIN stocks s ON f.stock_code = s.stock_code
-WHERE f.trade_date >= '2026-01-01'
-GROUP BY f.stock_code, s.stock_name
-ORDER BY total_foreign_buying DESC
-LIMIT 10;
+### PostgreSQL 쿼리
+```python
+from src.database.connection import get_pg_engine
+import pandas as pd
+
+engine = get_pg_engine()
+
+# 삼성전자 최근 30일 수급
+df = pd.read_sql("""
+    SELECT trade_date, investor_type, net_buy_amount
+    FROM investor_trading
+    WHERE stock_code = '005930'
+    ORDER BY trade_date DESC
+    LIMIT 30
+""", engine)
 ```
 
-### Get daily summary for a specific date
-```sql
-SELECT
-    COUNT(DISTINCT stock_code) as stock_count,
-    SUM(foreign_net_amount) as total_foreign,
-    SUM(institution_net_amount) as total_institution
-FROM investor_flows
-WHERE trade_date = '2026-01-20';
-```
+### MV 사용 여부 확인
+```python
+from src.database.connection import is_mv_available
 
-### Calculate 5-day moving average
-```sql
-SELECT
-    trade_date,
-    stock_code,
-    foreign_net_amount,
-    AVG(foreign_net_amount) OVER (
-        PARTITION BY stock_code
-        ORDER BY trade_date
-        ROWS BETWEEN 4 PRECEDING AND CURRENT ROW
-    ) as ma_5day
-FROM investor_flows
-WHERE stock_code = '005930'
-ORDER BY trade_date DESC
-LIMIT 30;
+if is_mv_available():
+    print("MV 사용 가능 — 고속 경로")
+else:
+    print("MV 없음 — 원본 테이블 JOIN 사용")
 ```
 
 ---
 
 ## Notes
 
-1. **종목코드 패딩:** All stock codes are 6 digits (e.g., '000660' not '660')
-2. **NULL 처리:** Some records may have NULL values in volume/amount fields
-3. **트랜잭션:** Use `conn.commit()` after bulk inserts
-4. **인덱스 유지:** Run `ANALYZE` periodically for statistics update
-
----
-
-## Future Enhancements
-
-- [x] Add daily incremental update script
-- [ ] Implement sector classification
-- [ ] Add data archiving for old records
-- [ ] Create query builder utility
-- [ ] Add PostgreSQL migration option
-- [ ] Add batch processing for multiple daily files
-- [ ] Add automatic backup before updates
+1. **종목코드 패딩:** 6자리 문자열 (e.g., '000660')
+2. **datetime.date 변환:** PostgreSQL은 DATE를 `datetime.date`로 반환 → 필요시 `.astype(str)` 변환
+3. **MV 자동 분기:** `is_mv_available()` 결과에 따라 MV/원본 테이블 자동 선택
+4. **크롤링 불필요:** 데이터는 공유 DB에서 자동 갱신됨

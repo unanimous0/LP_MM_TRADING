@@ -75,7 +75,7 @@ def generate_markdown_content(df, signal_bonus):
 
 **생성일**: {datetime.now().strftime('%Y-%m-%d %H:%M')}
 **분석 시스템**: 수급 레짐 스캐너 v3.1 (Stage 3 완료)
-**데이터**: KOSPI200 + KOSDAQ150 (345개 종목) | 2024-01-02 ~ 2026-01-20
+**데이터**: KOSPI + KOSDAQ ({len(df):,}개 종목) | 2022-01-03 ~ 현재
 
 ---
 
