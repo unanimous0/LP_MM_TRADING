@@ -2,6 +2,19 @@
 
 > CLAUDE.md에서 분리된 과거 작업 이력. 최근 항목은 CLAUDE.md [Progress History] 섹션 참조.
 
+### 2026-03-05 (시총/시총순위 + 매도 방향 + 시총 필터)
+
+**구현 내용**:
+- `get_market_cap_latest()`: `market_cap_daily` 최신 시총+순위 조회 (억/조 포맷)
+- 메인/패턴분석 테이블에 시총, 시총순위 컬럼 추가
+- 사이드바 "분석 방향": 매수(Long)/매도(Short) 전환 → `PatternClassifier.classify_all(direction=...)` 연동
+- 사이드바 "시총 필터": 전체/100위/200위/500위 이내 선택
+- 파이프라인 `direction` 파라미터 전파 (캐시 키 포함)
+
+**파일**: `data_loader.py`, `streamlit_app.py`, `2_🔍_패턴분석.py`
+
+---
+
 ### 2026-03-05 (DB 전환 정리 + 문서 업데이트 + normalizer 버그 수정)
 
 **목표**: PostgreSQL 전환 후 레거시 파일/하드코딩 정리 + 문서 최신화 + normalizer 단일종목 Z-Score 날짜범위 버그 수정

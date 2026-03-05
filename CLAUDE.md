@@ -1,7 +1,7 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- **현재 작업**: DB 전환 정리 + 문서 업데이트 + normalizer 단일종목 Z-Score 날짜범위 수정
+- **현재 작업**: 시총/시총순위 컬럼 + 매도 방향 분석 + 시총 필터 추가
 - **마지막 업데이트**: 2026-03-05
 - **DB**: PostgreSQL(`korea_stock_data`) — 2022-01-03 ~ 2026-03-03, ~10M rows, 2,721종목
   - 앱 전용 데이터(watchlist/backtest_history/score_change_log): `data/app.db`(SQLite) 분리
@@ -156,6 +156,11 @@
   - `pattern_classifier.py` 폴백: 200D→100D→50D→20D (500D 제거)
   - 히트맵 정렬(`charts.py`, `heatmap_renderer.py`)도 200D 기준으로 통일
   - 스크립트/문서 10곳 일괄 수정
+- **시총/시총순위 컬럼**: `market_cap_daily` 테이블 연동 → 메인/패턴분석 테이블에 시총(억/조)+순위 표시
+- **매도(Short) 방향 분석**: 사이드바 "분석 방향" 셀렉트박스 → 순매수/순매도 상위 종목 전환
+  - 파이프라인 `direction` 파라미터 전파 (`data_loader` → `_stage_classify` → `PatternClassifier`)
+  - 파일 캐시 키에 direction 포함 (long/short 별도 캐시)
+- **시총 필터**: 전체/100위/200위/500위 이내 선택 → 대형주 위주 필터링
 - 294개 테스트 (100% 통과, slow 6개 제외)
 
 **핵심 인사이트**:
@@ -797,6 +802,45 @@ short 정렬/분류: adjusted_z = z × max(-confidence, 0)   ← 매도 방향�
 ## [Progress History]
 
 > 전체 이력은 **CHANGELOG.md** 참조. 아래는 최근 항목만 기록.
+
+### 2026-03-05 (시총/시총순위 + 매도 방향 + 시총 필터)
+
+**목표**: 메인/패턴분석 테이블에 시총 정보 추가 + 순매도 상위 종목 분석 지원 + 대형주 필터링
+
+**구현 내용**:
+
+- ✅ **`get_market_cap_latest()`** (`data_loader.py`)
+  - `market_cap_daily` 최신 날짜 기준 전체 종목 시총 + `RANK() OVER` 순위 조회
+  - 억/조 포맷: 1조 이상 → `"1,019.4조"`, 미만 → `"1,234억"`
+  - `@st.cache_data(ttl=3600)` 적용
+
+- ✅ **메인 페이지 시총 컬럼** (`streamlit_app.py`)
+  - 시총 데이터 `report_df`에 merge → 필터링 전 단계에서 병합
+  - `_show_cols` 끝에 `market_cap_str`, `market_cap_rank` 추가
+  - `_col_cfg`: TextColumn('시총'), NumberColumn('시총순위', format='%d위')
+
+- ✅ **패턴분석 HTML 테이블 시총 컬럼** (`2_🔍_패턴분석.py`)
+  - `headers`에 '시총', '시총순위' 추가
+  - 루프 내 `<td>` 셀 2개 생성 (억/조 포맷 + X위 포맷)
+
+- ✅ **매도(Short) 방향 분석** (메인 + 패턴분석)
+  - 사이드바 "분석 방향" 셀렉트박스: 매수(Long) / 매도(Short)
+  - `run_analysis_pipeline_with_progress(direction=...)` 파라미터 전파
+  - `_stage_classify()` → `PatternClassifier.classify_all(direction=...)` 연동
+  - 파일 캐시 키에 direction 포함 (`pipeline_{date}_{weight}_short.pkl`)
+
+- ✅ **시총 필터** (메인 + 패턴분석)
+  - 사이드바 "시총 필터" 셀렉트박스: 전체 / 100위 / 200위 / 500위 이내
+  - `market_cap_rank <= N` 조건으로 필터링
+
+**파일** (3개):
+```
+app/utils/data_loader.py              (get_market_cap_latest + direction 파라미터 전파 + 캐시 키)
+app/streamlit_app.py                  (시총 컬럼 + 매도 방향 + 시총 필터 사이드바)
+app/pages/2_🔍_패턴분석.py            (시총 컬럼 + 매도 방향 + 시총 필터 사이드바)
+```
+
+---
 
 ### 2026-03-05 (DB 전환 정리 + 문서 업데이트 + normalizer 버그 수정)
 
