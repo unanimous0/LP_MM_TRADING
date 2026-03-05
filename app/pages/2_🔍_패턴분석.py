@@ -23,6 +23,7 @@ from utils.data_loader import (
     run_analysis_pipeline_with_progress, get_sectors, get_date_range,
     get_stock_list, get_db_connection,
     get_watchlist, add_to_watchlist, remove_from_watchlist,
+    get_market_cap_latest,
 )
 from utils.charts import (
     create_sector_avg_score_chart,
@@ -270,7 +271,7 @@ def _build_stock_table_html(display_df, classified_df, pat_col):
 </style>
 """
 
-    headers = ['종목코드', '종목명', '섹터', '패턴', '시그널', '5D Z', '종합점수']
+    headers = ['종목코드', '종목명', '섹터', '패턴', '시그널', '5D Z', '종합점수', '시총', '시총순위']
     header_html = ''.join(f'<th>{h}</th>' for h in headers)
 
     rows_html = []
@@ -299,10 +300,16 @@ def _build_stock_table_html(display_df, classified_df, pat_col):
         bar_w = max(0, min(100, fs / 115 * 100))
         score_td = f'<td class="hc"><span class="score-bar" style="width:{bar_w:.0f}px;"></span>{fs:.1f}{tt_div}</td>'
 
+        # 시총 / 시총순위
+        mcap_str = _esc(str(row.get('market_cap_str', '-') or '-'))
+        mcap_rank = row.get('market_cap_rank', float('nan'))
+        mcap_rank_str = f'{int(mcap_rank)}위' if pd.notna(mcap_rank) else '-'
+
         rows_html.append(
             f'<tr>'
             f'<td>{code}</td><td>{name}</td><td>{sector}</td>'
             f'<td>{pat}</td><td>{sig}</td>{z5d_td}{score_td}'
+            f'<td>{mcap_str}</td><td>{mcap_rank_str}</td>'
             f'</tr>'
         )
 
@@ -352,6 +359,17 @@ end_date_str = end_date.strftime("%Y-%m-%d")
 
 st.sidebar.divider()
 
+direction = st.sidebar.selectbox(
+    "분석 방향", ["매수 (Long)", "매도 (Short)"], index=0,
+    help="매수: 외국인/기관 순매수 상위 종목 · 매도: 순매도 상위 종목",
+)
+_direction = 'long' if '매수' in direction else 'short'
+
+mcap_filter = st.sidebar.selectbox(
+    "시총 필터", ["전체", "시총 100위 이내", "시총 200위 이내", "시총 500위 이내"], index=0,
+    help="대형주 위주로 필터링합니다.",
+)
+
 sectors = get_sectors()
 selected_sector = st.sidebar.selectbox("섹터", ["전체"] + sectors)
 
@@ -365,6 +383,7 @@ _prog = st.progress(0, text="분석 준비 중... 0%")
 zscore_matrix, classified_df, signals_df, report_df = run_analysis_pipeline_with_progress(
     end_date=end_date_str, progress_bar=_prog,
     institution_weight=institution_weight,
+    direction=_direction,
 )
 _prog.empty()
 
@@ -407,7 +426,21 @@ if not classified_df.empty and '5D' in classified_df.columns:
     _z5d = classified_df[['stock_code', '5D']].drop_duplicates('stock_code')
     filtered_df = filtered_df.merge(_z5d, on='stock_code', how='left')
 
-st.caption(f"필터링 결과: {len(filtered_df)}개 종목 (전체 {len(report_df)}개) | 종합점수 내림차순")
+# 시총 데이터 병합 + 필터
+_mcap = get_market_cap_latest()
+if not _mcap.empty:
+    filtered_df = filtered_df.merge(
+        _mcap[['stock_code', 'market_cap_str', 'market_cap_rank']],
+        on='stock_code', how='left',
+    )
+
+_mcap_limits = {"시총 100위 이내": 100, "시총 200위 이내": 200, "시총 500위 이내": 500}
+if mcap_filter in _mcap_limits and 'market_cap_rank' in filtered_df.columns:
+    filtered_df = filtered_df[filtered_df['market_cap_rank'] <= _mcap_limits[mcap_filter]]
+
+_dir_label = "순매수" if _direction == 'long' else "순매도"
+_mcap_note = " · 시총 500위 이내" if mcap_filter != "전체" else ""
+st.caption(f"필터링 결과: {len(filtered_df)}개 종목 (전체 {len(report_df)}개) | {_dir_label} | 종합점수 내림차순{_mcap_note}")
 
 # ---------------------------------------------------------------------------
 # 3개 탭: 종목 순위 / 섹터 분석 / 패턴 가이드

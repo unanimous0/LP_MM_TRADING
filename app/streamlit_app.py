@@ -22,6 +22,7 @@ from utils.data_loader import (
     run_analysis_pipeline_with_progress,
     get_date_range,
     get_abnormal_supply_data,
+    get_market_cap_latest,
 )
 from utils.charts import (
     create_pattern_pie_chart,
@@ -107,6 +108,17 @@ end_date_str = end_date.strftime("%Y-%m-%d")
 
 st.sidebar.divider()
 
+direction = st.sidebar.selectbox(
+    "분석 방향", ["매수 (Long)", "매도 (Short)"], index=0,
+    help="매수: 외국인/기관 순매수 상위 종목 · 매도: 순매도 상위 종목",
+)
+_direction = 'long' if '매수' in direction else 'short'
+
+mcap_filter = st.sidebar.selectbox(
+    "시총 필터", ["전체", "시총 100위 이내", "시총 200위 이내", "시총 500위 이내"], index=0,
+    help="대형주 위주로 필터링합니다.",
+)
+
 min_score_filter = st.sidebar.slider(
     "최소 종합점수", 0.0, 100.0, 60.0, step=5.0,
     help="종합점수(패턴점수 + 시그널수×5)가 이 값 이상인 종목만 표시합니다.",
@@ -125,6 +137,7 @@ zscore_matrix, classified_df, signals_df, report_df = run_analysis_pipeline_with
     end_date=end_date_str,
     progress_bar=_prog,
     institution_weight=institution_weight,
+    direction=_direction,
 )
 
 if report_df.empty:
@@ -153,14 +166,29 @@ if not classified_df.empty and '5D' in classified_df.columns:
     _z5d = classified_df[['stock_code', '5D']].drop_duplicates('stock_code')
     report_df = report_df.merge(_z5d, on='stock_code', how='left')
 
+# 시총 데이터 병합 (필터링 전)
+_mcap = get_market_cap_latest()
+if not _mcap.empty:
+    report_df = report_df.merge(
+        _mcap[['stock_code', 'market_cap_str', 'market_cap_rank']],
+        on='stock_code', how='left',
+    )
+
 # 필터 + 정렬
 ranked_df = report_df[report_df['final_score'] >= min_score_filter].copy()
+
+# 시총 필터 적용
+_mcap_limits = {"시총 100위 이내": 100, "시총 200위 이내": 200, "시총 500위 이내": 500}
+if mcap_filter in _mcap_limits and 'market_cap_rank' in ranked_df.columns:
+    ranked_df = ranked_df[ranked_df['market_cap_rank'] <= _mcap_limits[mcap_filter]]
+
 ranked_df = ranked_df.sort_values('final_score', ascending=False).head(top_n)
 
 # ---------------------------------------------------------------------------
 # 기준일 + KPI
 # ---------------------------------------------------------------------------
-st.markdown(f"**기준일**: {end_date_str}")
+_dir_label = "매수" if _direction == 'long' else "매도"
+st.markdown(f"**기준일**: {end_date_str} · **방향**: {_dir_label}")
 
 total = len(report_df)
 high_score = len(report_df[(report_df['score'] >= 70) & (report_df['signal_count'] >= 2)])
@@ -178,8 +206,9 @@ st.divider()
 # ---------------------------------------------------------------------------
 # 수급 TOP N 랭킹
 # ---------------------------------------------------------------------------
-st.subheader(f"수급 TOP {min(top_n, len(ranked_df))}")
-st.caption(f"종합점수(패턴점수 + 시그널×5) 기준 내림차순 · 최소 {min_score_filter:.0f}점 이상 · {len(ranked_df)}개 종목")
+st.subheader(f"{'순매수' if _direction == 'long' else '순매도'} 수급 TOP {min(top_n, len(ranked_df))}")
+_mcap_note = " · 시총 500위 이내" if mcap_filter != "전체" else ""
+st.caption(f"종합점수(패턴점수 + 시그널×5) 기준 내림차순 · 최소 {min_score_filter:.0f}점 이상 · {len(ranked_df)}개 종목{_mcap_note}")
 
 if ranked_df.empty:
     st.info("조건에 맞는 종목이 없습니다. 사이드바에서 최소 종합점수를 낮춰보세요.")
@@ -191,7 +220,8 @@ else:
     _display.insert(0, 'rank', range(1, len(_display) + 1))
 
     _show_cols = ['rank', 'stock_code', 'stock_name', 'sector', _pat_col,
-                  'score', 'signal_count', '5D', 'final_score']
+                  'score', 'signal_count', '5D', 'final_score',
+                  'market_cap_str', 'market_cap_rank']
     _show_cols = [c for c in _show_cols if c in _display.columns]
 
     _col_cfg = {
@@ -207,6 +237,8 @@ else:
         'final_score': st.column_config.ProgressColumn(
             '종합점수', min_value=0, max_value=115, format='%.1f점',
         ),
+        'market_cap_str': st.column_config.TextColumn('시총'),
+        'market_cap_rank': st.column_config.NumberColumn('시총순위', format='%d위'),
     }
     _col_cfg = {k: v for k, v in _col_cfg.items() if k in _show_cols}
 

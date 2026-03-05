@@ -340,7 +340,9 @@ class SupplyNormalizer:
                 return pd.DataFrame()
             df = self._compute_sff(df)
         else:
-            # 날짜 범위 최적화: window+buffer만 로드 (500일이 아닌 실제 필요 기간)
+            # 날짜 범위 최적화
+            # - 전체 종목(stock_codes=None): window+buffer만 로드 (이상수급용, 속도 우선)
+            # - 특정 종목(stock_codes 지정): 전체 이력 로드 (종목상세 차트, 데이터 소량)
             effective_end = end_date
             if effective_end is None:
                 try:

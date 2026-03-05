@@ -97,6 +97,38 @@ def get_sectors() -> List[str]:
 
 
 @st.cache_data(ttl=3600)
+def get_market_cap_latest() -> pd.DataFrame:
+    """최신 날짜 기준 전체 종목 시총 + 시총순위 반환.
+
+    Returns:
+        DataFrame(stock_code, market_cap, market_cap_rank, market_cap_str)
+    """
+    engine = get_db_connection()
+    df = pd.read_sql(
+        text("""
+        SELECT stock_code, market_cap,
+               RANK() OVER (ORDER BY market_cap DESC) AS market_cap_rank
+        FROM market_cap_daily
+        WHERE time = (SELECT MAX(time) FROM market_cap_daily)
+          AND market_cap IS NOT NULL
+        """),
+        engine,
+    )
+    if df.empty:
+        return df
+
+    # 억/조 포맷
+    def _fmt(v):
+        if v >= 1_000_000_000_000:
+            return f"{v / 1_000_000_000_000:.1f}조"
+        return f"{v / 100_000_000:,.0f}억"
+
+    df['market_cap_str'] = df['market_cap'].apply(_fmt)
+    df['market_cap_rank'] = df['market_cap_rank'].astype(int)
+    return df
+
+
+@st.cache_data(ttl=3600)
 def get_date_range() -> Tuple[str, str]:
     """DB 내 거래 날짜 범위 (min_date, max_date) — MV 우선 사용"""
     engine = get_db_connection()
@@ -196,14 +228,15 @@ def get_abnormal_supply_data(
 _CACHE_DIR = str(_PROJECT_ROOT / "data" / "cache")
 
 
-def _get_cache_path(end_date: str, weight: float) -> str:
+def _get_cache_path(end_date: str, weight: float, direction: str = 'long') -> str:
     w_int = int(round(weight * 100))
-    return os.path.join(_CACHE_DIR, f"pipeline_{end_date}_{w_int}.pkl")
+    suffix = f"_{direction}" if direction != 'long' else ""
+    return os.path.join(_CACHE_DIR, f"pipeline_{end_date}_{w_int}{suffix}.pkl")
 
 
-def _load_pipeline_cache(end_date: str, weight: float):
+def _load_pipeline_cache(end_date: str, weight: float, direction: str = 'long'):
     """파일 캐시 로드 (없으면 None)"""
-    path = _get_cache_path(end_date, weight)
+    path = _get_cache_path(end_date, weight, direction)
     if not os.path.exists(path):
         return None
     try:
@@ -219,10 +252,10 @@ def _load_pipeline_cache(end_date: str, weight: float):
         return None
 
 
-def _save_pipeline_cache(end_date, weight, zscore, classified, signals, report):
+def _save_pipeline_cache(end_date, weight, zscore, classified, signals, report, direction='long'):
     """파이프라인 결과를 pkl 파일로 저장"""
     os.makedirs(_CACHE_DIR, exist_ok=True)
-    path = _get_cache_path(end_date, weight)
+    path = _get_cache_path(end_date, weight, direction)
     pd.to_pickle({
         'end_date': end_date,
         'institution_weight': weight,
@@ -273,13 +306,14 @@ def _stage_zscore(end_date: Optional[str] = None, institution_weight: float = 0.
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def _stage_classify(end_date: Optional[str] = None, institution_weight: float = 0.3) -> pd.DataFrame:
+def _stage_classify(end_date: Optional[str] = None, institution_weight: float = 0.3,
+                    direction: str = 'long') -> pd.DataFrame:
     """Stage 3a: 패턴 분류"""
     zscore_matrix = _stage_zscore(end_date=end_date, institution_weight=institution_weight)
     if zscore_matrix.empty:
         return pd.DataFrame()
     classifier = PatternClassifier()
-    return classifier.classify_all(zscore_matrix)
+    return classifier.classify_all(zscore_matrix, direction=direction)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -291,9 +325,11 @@ def _stage_signals(end_date: Optional[str] = None, institution_weight: float = 0
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def _stage_report(end_date: Optional[str] = None, institution_weight: float = 0.3) -> pd.DataFrame:
+def _stage_report(end_date: Optional[str] = None, institution_weight: float = 0.3,
+                  direction: str = 'long') -> pd.DataFrame:
     """Stage 3c: 통합 리포트"""
-    classified_df = _stage_classify(end_date=end_date, institution_weight=institution_weight)
+    classified_df = _stage_classify(end_date=end_date, institution_weight=institution_weight,
+                                    direction=direction)
     signals_df = _stage_signals(end_date=end_date, institution_weight=institution_weight)
     if classified_df.empty:
         return pd.DataFrame()
@@ -305,11 +341,13 @@ def _stage_report(end_date: Optional[str] = None, institution_weight: float = 0.
 def run_analysis_pipeline(
     end_date: Optional[str] = None,
     institution_weight: float = 0.3,
+    direction: str = 'long',
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Stage 1-3 전체 파이프라인 (progress bar 없는 버전)"""
     return run_analysis_pipeline_with_progress(
         end_date=end_date, progress_bar=None,
         institution_weight=institution_weight,
+        direction=direction,
     )
 
 
@@ -317,6 +355,7 @@ def run_analysis_pipeline_with_progress(
     end_date: Optional[str] = None,
     progress_bar=None,
     institution_weight: float = 0.3,
+    direction: str = 'long',
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Stage 1-3 전체 파이프라인 (단계별 진행률 표시 지원)
@@ -328,6 +367,7 @@ def run_analysis_pipeline_with_progress(
         end_date: 분석 기준 날짜
         progress_bar: st.progress 위젯 (None이면 진행률 표시 안 함)
         institution_weight: 기관 가중치 (0.0=외국인만, 0.3=기본, 1.0=동등)
+        direction: 'long' (순매수) 또는 'short' (순매도)
 
     Returns:
         (zscore_matrix, classified_df, signals_df, report_df)
@@ -338,7 +378,7 @@ def run_analysis_pipeline_with_progress(
 
     # 1. 파일 캐시 확인
     if end_date is not None:
-        cache = _load_pipeline_cache(end_date, institution_weight)
+        cache = _load_pipeline_cache(end_date, institution_weight, direction)
         if cache is not None:
             _upd(1.0, "✅ 캐시 로드 완료 100%")
             return (cache['zscore_matrix'], cache['classified_df'],
@@ -354,20 +394,23 @@ def run_analysis_pipeline_with_progress(
         return zscore_matrix, empty, empty, empty
 
     _upd(0.40, "📊 Z-Score 계산 완료 → 패턴 분류 중... 40%")
-    classified_df = _stage_classify(end_date=end_date, institution_weight=institution_weight)
+    classified_df = _stage_classify(end_date=end_date, institution_weight=institution_weight,
+                                    direction=direction)
 
     _upd(0.65, "🔍 패턴 분류 완료 → 시그널 탐지 중... 65%")
     signals_df = _stage_signals(end_date=end_date, institution_weight=institution_weight)
 
     _upd(0.75, "📡 시그널 탐지 완료 → 리포트 생성 중... 75%")
-    report_df = _stage_report(end_date=end_date, institution_weight=institution_weight)
+    report_df = _stage_report(end_date=end_date, institution_weight=institution_weight,
+                              direction=direction)
 
     _upd(0.85, "📋 리포트 생성 완료 85%")
 
     # 3. 결과 캐시 저장
     if end_date is not None:
         _save_pipeline_cache(end_date, institution_weight,
-                             zscore_matrix, classified_df, signals_df, report_df)
+                             zscore_matrix, classified_df, signals_df, report_df,
+                             direction=direction)
 
     return zscore_matrix, classified_df, signals_df, report_df
 
