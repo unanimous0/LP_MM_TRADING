@@ -123,16 +123,23 @@ class Position:
         return (current - entry).days
 
     def to_trade(self, exit_date: str, exit_price: float, exit_reason: str,
-                 exit_costs: float) -> Trade:
-        """청산하여 Trade 객체 생성"""
-        # 수익률 계산 (방향별)
-        if self.direction == 'long':
-            return_pct = (exit_price / self.entry_price - 1) * 100
-        else:  # short
-            return_pct = (1 - exit_price / self.entry_price) * 100
+                 exit_costs: float, trading_days: Optional[int] = None) -> Trade:
+        """청산하여 Trade 객체 생성
 
-        hold_days_count = self.hold_days(exit_date)
+        Args:
+            trading_days: 영업일 기준 보유일수 (None이면 캘린더일 폴백)
+        """
+        hold_days_count = trading_days if trading_days is not None else self.hold_days(exit_date)
         total_costs = self.entry_costs + exit_costs
+
+        # 수익률 계산 (거래 비용 포함, 방향별)
+        entry_value = self.entry_price * self.shares
+        if self.direction == 'long':
+            gross = exit_price / self.entry_price - 1
+        else:  # short
+            gross = 1 - exit_price / self.entry_price
+        cost_pct = total_costs / entry_value if entry_value > 0 else 0
+        return_pct = (gross - cost_pct) * 100
 
         return Trade(
             stock_code=self.stock_code,
@@ -336,7 +343,7 @@ class Portfolio:
         return position
 
     def exit_position(self, stock_code: str, exit_date: str, exit_price: float,
-                      exit_reason: str) -> Optional[Trade]:
+                      exit_reason: str, trading_days: Optional[int] = None) -> Optional[Trade]:
         """
         포지션 청산
 
@@ -376,7 +383,8 @@ class Portfolio:
         self.cash += proceeds
 
         # Trade 생성
-        trade = position.to_trade(exit_date, exit_price, exit_reason, exit_costs)
+        trade = position.to_trade(exit_date, exit_price, exit_reason, exit_costs,
+                                  trading_days=trading_days)
         self.trades.append(trade)
 
         # 포지션 제거

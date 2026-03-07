@@ -146,7 +146,7 @@ class SignalDetector:
         return df
 
     def _detect_ma_crossover_from_df(self, df: pd.DataFrame) -> pd.DataFrame:
-        """이미 로드된 데이터에서 MA 골든크로스 탐지 (벡터화)"""
+        """이미 로드된 데이터에서 MA 골든크로스 탐지 (벡터화, Sff 기반)"""
         if df.empty:
             return pd.DataFrame(columns=[
                 'stock_code', 'trade_date', 'ma_short', 'ma_long', 'ma_diff', 'is_golden_cross'
@@ -156,9 +156,19 @@ class SignalDetector:
         ma_long = self.config['ma_long']
 
         d = df.sort_values(['stock_code', 'trade_date']).copy()
-        d['ma_short'] = d.groupby('stock_code')['foreign_net_amount'].transform(
+
+        # combined_sff 계산 (가속도와 동일 공식)
+        if 'combined_sff' not in d.columns:
+            same_direction = (d['foreign_net_amount'] * d['institution_net_amount']) > 0
+            d['combined_sff'] = np.where(
+                same_direction,
+                d['foreign_net_amount'] + d['institution_net_amount'] * self.institution_weight,
+                d['foreign_net_amount']
+            )
+
+        d['ma_short'] = d.groupby('stock_code')['combined_sff'].transform(
             lambda x: x.rolling(ma_short).mean())
-        d['ma_long'] = d.groupby('stock_code')['foreign_net_amount'].transform(
+        d['ma_long'] = d.groupby('stock_code')['combined_sff'].transform(
             lambda x: x.rolling(ma_long).mean())
         d['prev_ma_short'] = d.groupby('stock_code')['ma_short'].shift(1)
         d['prev_ma_long'] = d.groupby('stock_code')['ma_long'].shift(1)

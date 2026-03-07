@@ -144,29 +144,32 @@ class PerformanceMetrics:
         if self.daily_values.empty:
             return {'mdd': 0.0, 'start_date': None, 'end_date': None, 'recovery_date': None}
 
+        # 복사본에서 계산 (원본 수정 방지)
+        dv = self.daily_values.copy()
+
         # 누적 최고점 계산
-        self.daily_values['cummax'] = self.daily_values['value'].cummax()
+        dv['cummax'] = dv['value'].cummax()
 
         # 낙폭 계산 (%)
-        self.daily_values['drawdown'] = (
-            (self.daily_values['value'] / self.daily_values['cummax'] - 1) * 100
+        dv['drawdown'] = (
+            (dv['value'] / dv['cummax'] - 1) * 100
         )
 
         # 최대 낙폭
-        mdd_idx = self.daily_values['drawdown'].idxmin()
-        mdd = self.daily_values.loc[mdd_idx, 'drawdown']
+        mdd_idx = dv['drawdown'].idxmin()
+        mdd = dv.loc[mdd_idx, 'drawdown']
 
         # 최고점 날짜 (낙폭 시작점)
-        start_idx = self.daily_values.loc[:mdd_idx, 'cummax'].idxmax()
-        start_date = self.daily_values.loc[start_idx, 'date']
+        start_idx = dv.loc[:mdd_idx, 'value'].idxmax()
+        start_date = dv.loc[start_idx, 'date']
 
         # 최저점 날짜
-        end_date = self.daily_values.loc[mdd_idx, 'date']
+        end_date = dv.loc[mdd_idx, 'date']
 
         # 회복 날짜 (최고점 갱신)
-        peak_value = self.daily_values.loc[start_idx, 'value']
-        recovery_df = self.daily_values.loc[mdd_idx:][
-            self.daily_values.loc[mdd_idx:, 'value'] >= peak_value
+        peak_value = dv.loc[start_idx, 'value']
+        recovery_df = dv.loc[mdd_idx:][
+            dv.loc[mdd_idx:, 'value'] >= peak_value
         ]
 
         recovery_date = recovery_df.iloc[0]['date'] if not recovery_df.empty else None

@@ -202,7 +202,9 @@ def get_abnormal_supply_data(
     # 순매수금액 조인 (해당 날짜)
     trade_date = df['trade_date'].iloc[0]
     codes = df['stock_code'].tolist()
-    codes_str = "','".join(codes)
+    placeholders = ", ".join([f":c{i}" for i in range(len(codes))])
+    params = {f"c{i}": c for i, c in enumerate(codes)}
+    params["td"] = trade_date
     amounts = pd.read_sql(
         text(f"""
         SELECT
@@ -211,11 +213,12 @@ def get_abnormal_supply_data(
             SUM(CASE WHEN it.investor_type = 'INSTITUTION'  THEN it.net_buy_value ELSE 0 END) AS institution_net_amount
         FROM investor_trading it
         WHERE it.investor_type IN ('FOREIGN', 'INSTITUTION')
-          AND it.time = '{trade_date}'
-          AND it.stock_code IN ('{codes_str}')
+          AND it.time = :td
+          AND it.stock_code IN ({placeholders})
         GROUP BY it.stock_code
         """),
         engine,
+        params=params,
     )
     df = df.merge(amounts, on='stock_code', how='left')
     return df
@@ -452,7 +455,10 @@ def get_stock_raw_history(
                trading_volume, ma5, ma20, sync_rate
     """
     engine = get_db_connection()
-    date_filter = f"AND it.time <= '{end_date}'" if end_date else ""
+    date_filter = "AND it.time <= :end_date" if end_date else ""
+    params = {"stock_code": stock_code}
+    if end_date:
+        params["end_date"] = end_date
     df = pd.read_sql(
         text(f"""
         SELECT
@@ -464,12 +470,13 @@ def get_stock_raw_history(
         FROM investor_trading it
         JOIN ohlcv_daily o ON it.time = o.time AND it.stock_code = o.stock_code
         WHERE it.investor_type IN ('FOREIGN', 'INSTITUTION')
-          AND it.stock_code = '{stock_code}'
+          AND it.stock_code = :stock_code
           {date_filter}
         GROUP BY it.time
         ORDER BY it.time
         """),
         engine,
+        params=params,
     )
 
     if df.empty:
@@ -540,6 +547,7 @@ def run_backtest(
     borrowing_rate: float = 0.03,
     use_tc: bool = True,
     use_divergence: bool = True,
+    market_cap_top_n: Optional[int] = None,
 ) -> Dict:
     """
     백테스트 실행 (캐싱)
@@ -574,6 +582,7 @@ def run_backtest(
         commission_rate=commission_rate,
         slippage_rate=slippage_rate,
         borrowing_rate=borrowing_rate,
+        market_cap_top_n=market_cap_top_n,
     )
 
     engine = BacktestEngine(pg_engine, config)
@@ -603,6 +612,7 @@ def run_backtest(
             'commission_rate': config.commission_rate,
             'slippage_rate': config.slippage_rate,
             'borrowing_rate': config.borrowing_rate,
+            'market_cap_top_n': config.market_cap_top_n,
         },
         'initial_capital': config.initial_capital,
     }
@@ -647,6 +657,7 @@ def run_backtest_with_progress(
     borrowing_rate: float = 0.03,
     use_tc: bool = True,
     use_divergence: bool = True,
+    market_cap_top_n: Optional[int] = None,
 ) -> Dict:
     """백테스트 실행 (캐시 없음, progress_callback 지원)"""
     from src.backtesting.engine import BacktestConfig, BacktestEngine
@@ -670,6 +681,7 @@ def run_backtest_with_progress(
         commission_rate=commission_rate,
         slippage_rate=slippage_rate,
         borrowing_rate=borrowing_rate,
+        market_cap_top_n=market_cap_top_n,
     )
     engine = BacktestEngine(pg_engine, config)
     result = engine.run(
@@ -698,8 +710,100 @@ def run_backtest_with_progress(
             'commission_rate': config.commission_rate,
             'slippage_rate': config.slippage_rate,
             'borrowing_rate': config.borrowing_rate,
+            'market_cap_top_n': config.market_cap_top_n,
         },
         'initial_capital': config.initial_capital,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 워크포워드 실행
+# ---------------------------------------------------------------------------
+
+def run_walk_forward(
+    start_date: str,
+    end_date: str,
+    train_months: int = 6,
+    val_months: int = 1,
+    step_months: int = 1,
+    n_trials: int = 100,
+    metric: str = 'sharpe_ratio',
+    strategy: str = 'long',
+    initial_capital: float = 10_000_000,
+    max_positions: int = 5,
+    max_hold_days: int = 999,
+    reverse_threshold: float = 60,
+    institution_weight: float = 0.3,
+    use_tc: bool = True,
+    use_divergence: bool = True,
+    tax_rate: float = 0.0020,
+    commission_rate: float = 0.00015,
+    slippage_rate: float = 0.001,
+    borrowing_rate: float = 0.03,
+    optuna_param_space: Optional[Dict] = None,
+    progress_callback=None,
+    market_cap_top_n: Optional[int] = None,
+) -> Dict:
+    """
+    Walk-Forward Analysis 실행 래퍼
+
+    Returns:
+        {
+            'periods': List[dict],          # 기간별 메트릭 + best_params
+            'combined_trade_dicts': List[dict],  # 직렬화된 통합 거래
+            'combined_daily_values': DataFrame,
+            'summary': DataFrame,           # summary() 결과
+            'initial_capital': float,
+        }
+    """
+    from src.backtesting.engine import BacktestConfig
+    from src.backtesting.walk_forward import WalkForwardAnalyzer, WalkForwardConfig
+
+    wf_config = WalkForwardConfig(
+        train_months=train_months,
+        val_months=val_months,
+        step_months=step_months,
+        metric=metric,
+        workers=1,
+        n_trials=n_trials,
+    )
+
+    base_config = BacktestConfig(
+        strategy=strategy,
+        initial_capital=initial_capital,
+        max_positions=max_positions,
+        max_hold_days=max_hold_days,
+        reverse_signal_threshold=reverse_threshold,
+        institution_weight=institution_weight,
+        force_exit_on_end=True,
+        use_tc=use_tc,
+        use_divergence=use_divergence,
+        tax_rate=tax_rate,
+        commission_rate=commission_rate,
+        slippage_rate=slippage_rate,
+        borrowing_rate=borrowing_rate,
+        market_cap_top_n=market_cap_top_n,
+    )
+
+    analyzer = WalkForwardAnalyzer(
+        start_date=start_date,
+        end_date=end_date,
+        wf_config=wf_config,
+        base_config=base_config,
+        optuna_param_space=optuna_param_space,
+    )
+
+    result = analyzer.run(verbose=False, progress_callback=progress_callback)
+
+    # Trade 객체 → dict 직렬화
+    combined_trade_dicts = _serialize_trades(result['combined_trades'])
+
+    return {
+        'periods': result['periods'],
+        'combined_trade_dicts': combined_trade_dicts,
+        'combined_daily_values': result['combined_daily_values'],
+        'summary': analyzer.summary(),
+        'initial_capital': initial_capital,
     }
 
 
@@ -749,6 +853,7 @@ def run_optuna_optimization(
     borrowing_rate: float = 0.03,
     use_tc: bool = True,
     use_divergence: bool = True,
+    market_cap_top_n: Optional[int] = None,
 ) -> Optional[Dict]:
     """
     Optuna Persistent Bayesian Optimization 실행
@@ -783,6 +888,7 @@ def run_optuna_optimization(
         commission_rate=commission_rate,
         slippage_rate=slippage_rate,
         borrowing_rate=borrowing_rate,
+        market_cap_top_n=market_cap_top_n,
     )
 
     optimizer = OptunaOptimizer(
@@ -1066,9 +1172,6 @@ def _ensure_score_change_log_table() -> None:
 _ensure_score_change_log_table()
 
 
-# 직전 분석 결과를 메모리에 캐시 (모듈 레벨)
-_prev_score_snapshot: Optional[pd.DataFrame] = None
-
 
 def snapshot_scores(report_df: pd.DataFrame, analysis_date: str) -> None:
     """
@@ -1080,8 +1183,6 @@ def snapshot_scores(report_df: pd.DataFrame, analysis_date: str) -> None:
     report_df     : 현재 분석 결과 DataFrame (get_stage_report 결과)
     analysis_date : YYYY-MM-DD 기준일 문자열
     """
-    global _prev_score_snapshot
-
     app_db_path = _get_app_db_path()
     conn = sqlite3.connect(app_db_path)
     try:
@@ -1159,7 +1260,6 @@ def snapshot_scores(report_df: pd.DataFrame, analysis_date: str) -> None:
             conn.commit()
     finally:
         conn.close()
-    _prev_score_snapshot = high_df
 
 
 def get_score_change_alerts(limit: int = 100) -> pd.DataFrame:

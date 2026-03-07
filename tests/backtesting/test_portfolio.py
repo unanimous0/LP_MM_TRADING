@@ -124,7 +124,8 @@ class TestPosition:
         assert trade.stock_code == '005930'
         assert trade.entry_price == 70000
         assert trade.exit_price == 77000
-        assert trade.return_pct == pytest.approx(10.0, abs=0.01)
+        # return_pct includes costs: gross 10% - costs 0.5% = 9.5%
+        assert trade.return_pct == pytest.approx(9.5, abs=0.01)
         assert trade.hold_days == 8
         assert trade.costs == 8000 + 27000  # entry + exit
 
@@ -370,7 +371,8 @@ class TestShortPosition:
         assert trade.direction == 'short'
         assert trade.entry_price == 80000
         assert trade.exit_price == 70000
-        assert trade.return_pct == pytest.approx(12.5, abs=0.1)  # (1 - 70k/80k) * 100
+        # return_pct includes costs: gross 12.5% - costs 0.225% = 12.275%
+        assert trade.return_pct == pytest.approx(12.275, abs=0.01)
         assert trade.costs == 10000 + 8000
 
     def test_short_trade_profit(self):

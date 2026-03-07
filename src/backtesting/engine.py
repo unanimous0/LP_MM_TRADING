@@ -42,7 +42,8 @@ class BacktestConfig:
                  tax_rate: float = 0.0020,  # 증권거래세 (매도 시, 0.20%)
                  commission_rate: float = 0.00015,  # 수수료 (매수/매도, 0.015%)
                  slippage_rate: float = 0.001,  # 슬리피지 (매수/매도, 0.1%)
-                 borrowing_rate: float = 0.03):  # 공매도 차입비용 (연환산, 3.0%)
+                 borrowing_rate: float = 0.03,  # 공매도 차입비용 (연환산, 3.0%)
+                 market_cap_top_n: Optional[int] = None):  # 시총 상위 N종목 필터 (None이면 전체)
         """
         백테스트 설정 초기화
 
@@ -86,6 +87,7 @@ class BacktestConfig:
         self.commission_rate = commission_rate
         self.slippage_rate = slippage_rate
         self.borrowing_rate = borrowing_rate
+        self.market_cap_top_n = market_cap_top_n
 
         if strategy not in ['long', 'short', 'both']:
             raise ValueError(f"strategy must be 'long', 'short', or 'both', got: {strategy}")
@@ -185,8 +187,8 @@ class BacktestEngine:
             종가 (없으면 None)
 
         Note:
-            DB에 시가 데이터가 없으므로 종가만 사용
-            진입/청산 모두 당일 종가로 계산
+            청산 시 당일 종가로 계산.
+            진입은 get_open_price()로 D+1 시가 사용.
         """
         # 사전 계산 데이터 우선 사용 (O(1) lookup)
         if self._precomputed is not None:
@@ -207,6 +209,46 @@ class BacktestEngine:
             return None
 
         return float(df.iloc[0]['close_price'])
+
+    def get_open_price(self, stock_code: str, trade_date: str) -> Optional[float]:
+        """
+        특정 종목의 시가 조회 (진입용)
+
+        Args:
+            stock_code: 종목 코드
+            trade_date: 거래일 (YYYY-MM-DD)
+
+        Returns:
+            시가 (없으면 종가 fallback)
+        """
+        # 사전 계산 데이터 우선 사용 (O(1) lookup)
+        if self._precomputed is not None:
+            price = self._precomputed.open_price_lookup.get((stock_code, trade_date))
+            if price is not None:
+                return float(price)
+            # 시가 없으면 종가 fallback
+            return self.get_price(stock_code, trade_date)
+
+        query = text("""
+        SELECT open_price, close_price
+        FROM ohlcv_daily
+        WHERE stock_code = :sc AND time = :td
+        LIMIT 1
+        """)
+        df = pd.read_sql(query, self.conn, params={'sc': stock_code, 'td': trade_date})
+
+        if df.empty:
+            return None
+
+        open_price = df.iloc[0]['open_price']
+        if pd.notna(open_price) and float(open_price) > 0:
+            return float(open_price)
+
+        # 시가 없으면 종가 fallback
+        close_price = df.iloc[0]['close_price']
+        if pd.notna(close_price):
+            return float(close_price)
+        return None
 
     def get_stock_name(self, stock_code: str) -> str:
         """종목명 조회"""
@@ -360,7 +402,8 @@ class BacktestEngine:
             # 청산 실행 (당일 종가)
             if exit_reason:
                 trade = self.portfolio.exit_position(
-                    stock_code, current_date, current_price, exit_reason
+                    stock_code, current_date, current_price, exit_reason,
+                    trading_days=hold_trading_days,
                 )
                 if trade:
                     trades.append(trade)
@@ -412,8 +455,12 @@ class BacktestEngine:
                     if reverse_final_score >= self.config.reverse_signal_threshold:
                         exit_price = self.get_price(stock_code, exit_date)
                         if exit_price:
+                            entry_idx = self._trading_date_index.get(position.entry_date)
+                            exit_idx = self._trading_date_index.get(exit_date)
+                            td = (exit_idx - entry_idx) if entry_idx is not None and exit_idx is not None else None
                             trade = self.portfolio.exit_position(
-                                stock_code, exit_date, exit_price, 'reverse_signal'
+                                stock_code, exit_date, exit_price, 'reverse_signal',
+                                trading_days=td,
                             )
                             if trade:
                                 trades.append(trade)
@@ -482,8 +529,8 @@ class BacktestEngine:
             if self.portfolio.has_position(stock_code):
                 continue
 
-            # 진입 가격: 당일 종가 (시가 데이터 없음)
-            entry_price = self.get_price(stock_code, entry_date)
+            # 진입 가격: D+1 시가 (시그널 발생 다음 날 시가에 매수)
+            entry_price = self.get_open_price(stock_code, entry_date)
             if entry_price is None or entry_price <= 0:
                 continue  # 가격 없으면 skip
 
@@ -539,6 +586,7 @@ class BacktestEngine:
                 institution_weight=self.config.institution_weight,
                 use_tc=self.config.use_tc,
                 use_divergence=self.config.use_divergence,
+                market_cap_top_n=self.config.market_cap_top_n,
             )
             self._precomputed = pc.precompute(end_date, verbose=verbose)
 
@@ -625,10 +673,15 @@ class BacktestEngine:
         # 6. 마지막 날 모든 포지션 청산 (옵션)
         if self.config.force_exit_on_end:
             last_date = trading_dates[-1]
+            last_idx = self._trading_date_index.get(last_date)
             for stock_code in list(self.portfolio.positions.keys()):
                 exit_price = self.get_price(stock_code, last_date)
                 if exit_price:
-                    self.portfolio.exit_position(stock_code, last_date, exit_price, 'end')
+                    entry_idx = self._trading_date_index.get(
+                        self.portfolio.positions[stock_code].entry_date)
+                    td = (last_idx - entry_idx) if entry_idx is not None and last_idx is not None else None
+                    self.portfolio.exit_position(stock_code, last_date, exit_price, 'end',
+                                                trading_days=td)
 
         # 결과 반환
         daily_df = pd.DataFrame(self.daily_values)

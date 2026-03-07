@@ -205,11 +205,11 @@ FROM (
 ) s
 CROSS JOIN LATERAL (
     SELECT
-        -- MA5/MA20 (외국인 순매수금액 기준)
-        AVG(fa) FILTER (WHERE rn <= 5)  AS ma5_today,
-        AVG(fa) FILTER (WHERE rn <= 20) AS ma20_today,
-        AVG(fa) FILTER (WHERE rn >= 2 AND rn <= 6)  AS ma5_prev,
-        AVG(fa) FILTER (WHERE rn >= 2 AND rn <= 21) AS ma20_prev,
+        -- MA5/MA20 (combined_sff 기준 — Python 경로와 일치)
+        AVG(cn) FILTER (WHERE rn <= 5)  AS ma5_today,
+        AVG(cn) FILTER (WHERE rn <= 20) AS ma20_today,
+        AVG(cn) FILTER (WHERE rn >= 2 AND rn <= 6)  AS ma5_prev,
+        AVG(cn) FILTER (WHERE rn >= 2 AND rn <= 21) AS ma20_prev,
         -- 가속도 (combined_net 기준)
         AVG(cn) FILTER (WHERE rn <= 5)  AS recent5_avg,
         AVG(cn) FILTER (WHERE rn >= 6 AND rn <= 10) AS prev5_avg,

@@ -10,7 +10,7 @@ WalkForwardAnalyzer 클래스:
 
 import calendar
 import pandas as pd
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Callable
 from datetime import datetime, timedelta
 from multiprocessing import Pool
 
@@ -144,31 +144,27 @@ class WalkForwardAnalyzer:
     """Walk-Forward Analysis 클래스 (Optuna 기반)"""
 
     def __init__(self,
-                 db_path: str = '',
                  start_date: str = '',
                  end_date: str = '',
                  wf_config: Optional[WalkForwardConfig] = None,
                  base_config: Optional[BacktestConfig] = None,
-                 param_grid: Optional[dict] = None,
-                 optuna_param_space: Optional[dict] = None):
+                 optuna_param_space: Optional[dict] = None,
+                 **kwargs):
         """
         Args:
-            db_path: (레거시, 미사용) 하위 호환용으로 파라미터 유지
             start_date: 전체 분석 시작일 (YYYY-MM-DD)
             end_date: 전체 분석 종료일 (YYYY-MM-DD)
             wf_config: Walk-Forward 설정 (None이면 기본값)
             base_config: 백테스트 기본 설정 (최적화 대상 외 파라미터)
-            param_grid: (레거시, 미사용) Grid Search 파라미터 그리드
             optuna_param_space: Optuna 탐색 공간
                 None이면 OptunaOptimizer.DEFAULT_PARAM_SPACE 사용
                 형식: {'param': {'type': 'float'/'int', 'low': ..., 'high': ...}}
+            **kwargs: 하위 호환 (db_path, param_grid 등 무시)
         """
-        self.db_path = db_path  # 레거시 호환 (미사용)
         self.start_date = start_date
         self.end_date = end_date
         self.wf_config = wf_config or WalkForwardConfig()
         self.base_config = base_config or BacktestConfig()
-        self.param_grid = param_grid  # 레거시 호환 유지
         self.optuna_param_space = optuna_param_space
 
         self._results: List[Dict] = []
@@ -212,47 +208,6 @@ class WalkForwardAnalyzer:
 
         return periods
 
-    def _extract_best_params(self, row: pd.Series) -> Dict:
-        """
-        (레거시) 최적화 결과 행에서 BacktestConfig 파라미터 추출
-
-        base_config의 값으로 시작 후 grid_search 결과로 덮어쓰기
-
-        Args:
-            row: grid_search() 반환 DataFrame의 단일 행
-
-        Returns:
-            BacktestConfig(**params) 호출 가능한 파라미터 딕셔너리
-        """
-        perf_cols = {'total_return', 'sharpe_ratio', 'win_rate',
-                     'max_drawdown', 'profit_factor', 'total_trades'}
-
-        params = {
-            'initial_capital': self.base_config.initial_capital,
-            'max_positions': self.base_config.max_positions,
-            'min_score': self.base_config.min_score,
-            'min_signals': self.base_config.min_signals,
-            'target_return': self.base_config.target_return,
-            'stop_loss': self.base_config.stop_loss,
-            'max_hold_days': self.base_config.max_hold_days,
-            'reverse_signal_threshold': self.base_config.reverse_signal_threshold,
-            'strategy': self.base_config.strategy,
-            'institution_weight': self.base_config.institution_weight,
-            'force_exit_on_end': self.base_config.force_exit_on_end,
-            'use_tc': self.base_config.use_tc,
-            'use_divergence': self.base_config.use_divergence,
-            'tax_rate': self.base_config.tax_rate,
-            'commission_rate': self.base_config.commission_rate,
-            'slippage_rate': self.base_config.slippage_rate,
-            'borrowing_rate': self.base_config.borrowing_rate,
-        }
-
-        for col in row.index:
-            if col not in perf_cols and col in params:
-                params[col] = row[col]
-
-        return params
-
     def _build_base_config_dict(self) -> dict:
         """base_config → dict 변환 (multiprocessing pickle용)"""
         c = self.base_config
@@ -274,9 +229,10 @@ class WalkForwardAnalyzer:
             'commission_rate': c.commission_rate,
             'slippage_rate': c.slippage_rate,
             'borrowing_rate': c.borrowing_rate,
+            'market_cap_top_n': c.market_cap_top_n,
         }
 
-    def run(self, verbose: bool = True) -> Dict:
+    def run(self, verbose: bool = True, progress_callback: Optional[Callable] = None) -> Dict:
         """
         Walk-Forward 전체 실행 (Optuna 최적화 + 병렬 기간 실행)
 
@@ -289,6 +245,7 @@ class WalkForwardAnalyzer:
 
         Args:
             verbose: 진행 상황 출력 여부
+            progress_callback: 기간 완료 시 호출할 콜백 (current, total)
 
         Returns:
             {
@@ -328,7 +285,7 @@ class WalkForwardAnalyzer:
 
         # worker args 리스트
         args_list = [
-            (self.db_path, period, base_config_dict,
+            ('', period, base_config_dict,
              optuna_space, n_trials, self.wf_config.metric)
             for period in periods
         ]
@@ -353,6 +310,8 @@ class WalkForwardAnalyzer:
                           f"→ 검증: {period['val_start']}~{period['val_end']}")
                 result = _run_wf_period_optuna_worker(args)
                 raw_results.append(result)
+                if progress_callback:
+                    progress_callback(i + 1, len(periods))
 
                 if verbose and result is not None:
                     param_keys = list(optuna_space.keys())
@@ -387,8 +346,13 @@ class WalkForwardAnalyzer:
 
         self._results = all_results
         self._combined_trades = combined_trades
-        combined_df = (pd.concat(combined_daily_values, ignore_index=True)
-                       if combined_daily_values else pd.DataFrame())
+        if combined_daily_values:
+            combined_df = pd.concat(combined_daily_values, ignore_index=True)
+            # 겹침 기간 중복 제거 (마지막 기간 값 우선)
+            if 'date' in combined_df.columns:
+                combined_df = combined_df.drop_duplicates(subset='date', keep='last')
+        else:
+            combined_df = pd.DataFrame()
 
         if verbose:
             print(f"\n{'='*80}")

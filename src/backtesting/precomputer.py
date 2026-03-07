@@ -34,6 +34,7 @@ class PrecomputeResult:
         zscore_all_dates: MultiIndex(trade_date, stock_code) → [5D,10D,20D,50D,100D,200D,500D]
         signals_all_dates: MultiIndex(trade_date, stock_code) → [ma_cross,ma_diff,acceleration,sync_rate,signal_count]
         price_lookup: (stock_code, trade_date) → close_price
+        open_price_lookup: (stock_code, trade_date) → open_price
         stock_names: stock_code → stock_name
         trading_dates: 정렬된 거래일 목록
         patterns_long: trade_date → classify_all(direction='long') DataFrame
@@ -44,6 +45,7 @@ class PrecomputeResult:
     zscore_all_dates: pd.DataFrame
     signals_all_dates: pd.DataFrame
     price_lookup: dict = field(default_factory=dict)
+    open_price_lookup: dict = field(default_factory=dict)
     stock_names: dict = field(default_factory=dict)
     trading_dates: list = field(default_factory=list)
     patterns_long: dict = field(default_factory=dict)
@@ -60,18 +62,21 @@ class BacktestPrecomputer:
     """
 
     def __init__(self, conn, institution_weight: float = 0.3,
-                 use_tc: bool = True, use_divergence: bool = True):
+                 use_tc: bool = True, use_divergence: bool = True,
+                 market_cap_top_n: Optional[int] = None):
         """
         Args:
             conn: 데이터베이스 연결
             institution_weight: 기관 가중치 (Sff 계산용, 기본 0.3)
             use_tc: Temporal Consistency 적용 여부 (PatternClassifier로 전달)
             use_divergence: Short Divergence 점수 반영 여부 (PatternClassifier로 전달)
+            market_cap_top_n: 시총 상위 N종목만 필터링 (None이면 전체)
         """
         self.conn = conn
         self.institution_weight = institution_weight
         self.use_tc = use_tc
         self.use_divergence = use_divergence
+        self.market_cap_top_n = market_cap_top_n
 
     def precompute(self, end_date: str, start_date: Optional[str] = None,
                    verbose: bool = True) -> PrecomputeResult:
@@ -90,6 +95,9 @@ class BacktestPrecomputer:
         if verbose:
             print(f"  원본 데이터: {len(raw_df):,}건")
 
+        if self.market_cap_top_n is not None and not raw_df.empty:
+            raw_df = self._filter_top_n_by_market_cap(raw_df, end_date, verbose)
+
         sff_df = self._compute_sff_all_dates(raw_df)
         if verbose:
             print("  Sff 계산 완료")
@@ -103,6 +111,7 @@ class BacktestPrecomputer:
             print(f"  시그널 계산 완료: {len(signals_df):,}건")
 
         price_lookup = self._build_price_lookup(raw_df)
+        open_price_lookup = self._build_open_price_lookup(end_date)
         stock_names = self._build_stock_names()
 
         trading_dates = sorted(raw_df['trade_date'].unique())
@@ -130,6 +139,7 @@ class BacktestPrecomputer:
             zscore_all_dates=zscore_df,
             signals_all_dates=signals_df,
             price_lookup=price_lookup,
+            open_price_lookup=open_price_lookup,
             stock_names=stock_names,
             trading_dates=trading_dates,
             patterns_long=patterns_long,
@@ -147,9 +157,11 @@ class BacktestPrecomputer:
         """
         if is_mv_available():
             # MV 경로: 사전 계산된 Sff 포함
-            clauses = [f"trade_date <= '{end_date}'"]
+            clauses = ["trade_date <= :end_date"]
+            params = {"end_date": end_date}
             if start_date:
-                clauses.append(f"trade_date >= '{start_date}'")
+                clauses.append("trade_date >= :start_date")
+                params["start_date"] = start_date
             where = "WHERE " + " AND ".join(clauses)
 
             query = text(f"""
@@ -162,8 +174,10 @@ class BacktestPrecomputer:
         else:
             # Fallback: 기존 3-table JOIN
             extra = ""
+            params = {"end_date": end_date}
             if start_date:
-                extra = f"AND it.time >= '{start_date}'"
+                extra = "AND it.time >= :start_date"
+                params["start_date"] = start_date
 
             query = text(f"""
             SELECT
@@ -182,17 +196,51 @@ class BacktestPrecomputer:
             ) ff ON it.stock_code = ff.stock_code
             WHERE it.investor_type IN ('FOREIGN', 'INSTITUTION')
               AND o.close_price IS NOT NULL
-              AND it.time <= '{end_date}'
+              AND it.time <= :end_date
               {extra}
             GROUP BY it.time, it.stock_code
             ORDER BY it.stock_code, it.time
             """)
 
-        df = pd.read_sql(query, self.conn)
+        df = pd.read_sql(query, self.conn, params=params)
         # PostgreSQL은 DATE를 datetime.date로 반환 → 문자열 통일 (기존 비교 로직 호환)
         if not df.empty:
             df['trade_date'] = df['trade_date'].astype(str)
         return df
+
+    def _filter_top_n_by_market_cap(self, raw_df: pd.DataFrame, end_date: str,
+                                        verbose: bool = True) -> pd.DataFrame:
+        """end_date 기준 유통시총 상위 N종목만 필터링
+
+        Args:
+            raw_df: 원본 데이터
+            end_date: 시총 기준일
+            verbose: 진행 상황 출력
+
+        Returns:
+            필터링된 DataFrame
+        """
+        n = self.market_cap_top_n
+
+        # end_date 또는 가장 가까운 이전 날짜의 데이터 사용
+        dates = raw_df.loc[raw_df['trade_date'] <= end_date, 'trade_date'].unique()
+        if len(dates) == 0:
+            return raw_df
+        latest_date = max(dates)
+        latest = raw_df[raw_df['trade_date'] == latest_date].copy()
+
+        # 유통시총 = 종가 × 유통주식수
+        latest['market_cap'] = latest['close_price'] * latest['free_float_shares']
+        latest = latest.dropna(subset=['market_cap'])
+        latest = latest[latest['market_cap'] > 0]
+
+        top_codes = set(latest.nlargest(n, 'market_cap')['stock_code'])
+        filtered = raw_df[raw_df['stock_code'].isin(top_codes)]
+
+        if verbose:
+            print(f"  시총 상위 {n}종목 필터링: {raw_df['stock_code'].nunique()}종목 → {len(top_codes)}종목")
+
+        return filtered
 
     def _compute_sff_all_dates(self, raw_df: pd.DataFrame) -> pd.DataFrame:
         """전체 날짜 Sff 벡터화 계산 (normalizer._apply_sff_formula 동일 로직)
@@ -327,6 +375,26 @@ class BacktestPrecomputer:
         return dict(zip(
             zip(valid['stock_code'], valid['trade_date']),
             valid['close_price'].astype(float)
+        ))
+
+    def _build_open_price_lookup(self, end_date: str) -> dict:
+        """(stock_code, trade_date) → open_price dict 생성
+
+        ohlcv_daily에서 시가 로드 (MV에 open_price 없음).
+        진입 시 D+1 시가 사용을 위한 lookup.
+        """
+        query = text("""
+        SELECT stock_code, time AS trade_date, open_price
+        FROM ohlcv_daily
+        WHERE time <= :end_date AND open_price IS NOT NULL
+        """)
+        df = pd.read_sql(query, self.conn, params={'end_date': end_date})
+        if df.empty:
+            return {}
+        df['trade_date'] = df['trade_date'].astype(str)
+        return dict(zip(
+            zip(df['stock_code'], df['trade_date']),
+            df['open_price'].astype(float)
         ))
 
     def _build_stock_names(self) -> dict:

@@ -2,6 +2,26 @@
 
 > CLAUDE.md에서 분리된 과거 작업 이력. 최근 항목은 CLAUDE.md [Progress History] 섹션 참조.
 
+### 2026-03-07 (코드 리뷰 19건 수정 + 백테스트 진입가 시가 전환)
+
+**목표**: 전체 코드 리뷰 결과 19건 수정 (C2 포지션 사이징 제외) + 백테스트 진입/청산 가격 현실화
+
+**구현 내용**:
+
+- ✅ **C1 (CRITICAL): return_pct에 거래 비용 반영** (`portfolio.py`)
+- ✅ **H1 (HIGH): MA 크로스오버 기준 `foreign_net_amount` → `combined_sff`**
+- ✅ **M1~M7 (MEDIUM 7건)**: MDD peak / hold_days 영업일 / walk-forward dedup / config 정비 / 하드코딩 날짜 / sl_ratio
+- ✅ **L1~L10 (LOW 10건, 2건 스킵)**: parameterized query / dead code / heatmap_renderer 삭제 / .gitignore / 부작용 방지
+- ✅ **백테스트 진입가 시가 전환**: 진입=D+1 시가(open_price), 청산=당일 종가(close_price) 분리
+- ✅ **거래내역 시총순위 추가**: `market_cap_rank` 컬럼
+- ✅ **시총 필터 기본값**: 200 → 300
+
+**파일** (21개): portfolio.py, engine.py, metrics.py, precomputer.py, walk_forward.py, optimizer.py, signal_detector.py, pattern_classifier.py, integrated_report.py, config.py, setup_materialized_views.sql, refresh_mv.sh, 백테스트.py, 워크포워드.py, data_loader.py, .gitignore, requirements.txt, test_portfolio.py, test_engine.py, CLAUDE.md, 삭제: heatmap_renderer.py
+
+**테스트**: 294개 통과 (100%), slow 6개 제외
+
+---
+
 ### 2026-03-05 (시총/시총순위 + 매도 방향 + 시총 필터)
 
 **구현 내용**:

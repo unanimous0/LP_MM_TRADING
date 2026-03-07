@@ -34,7 +34,6 @@ class IntegratedReport:
         self.conn = conn
         self.config = config or self._get_default_config()
         self.classifier = PatternClassifier()
-        self.detector = SignalDetector(conn)
 
     @staticmethod
     def _get_default_config() -> dict:
@@ -87,9 +86,11 @@ class IntegratedReport:
         Returns:
             pd.DataFrame: (stock_code, stock_name, sector)
         """
+        params = {}
         if stock_codes:
-            codes_str = "','".join(stock_codes)
-            where_sql = f"WHERE s.stock_code IN ('{codes_str}')"
+            placeholders = ", ".join([f":c{i}" for i in range(len(stock_codes))])
+            params = {f"c{i}": c for i, c in enumerate(stock_codes)}
+            where_sql = f"WHERE s.stock_code IN ({placeholders})"
         else:
             where_sql = ""
 
@@ -100,7 +101,7 @@ class IntegratedReport:
         {where_sql}
         """
 
-        df = pd.read_sql(text(query), self.conn)
+        df = pd.read_sql(text(query), self.conn, params=params)
 
         if df.empty:
             print("[WARN] No stock info found")
@@ -199,7 +200,8 @@ class IntegratedReport:
                 'signal_count', 'signal_list', 'entry_point', 'stop_loss'
             ])
 
-        # 1. 종목 정보 추가
+        # 1. 종목 정보 추가 (원본 수정 방지)
+        classified_df = classified_df.copy()
         stock_codes = classified_df['stock_code'].astype(str).tolist()
         df_stocks = self._load_stock_info(stock_codes)
 
@@ -330,7 +332,8 @@ class IntegratedReport:
 
             # 최다 섹터
             if 'sector' in df_pattern.columns:
-                top_sector = df_pattern['sector'].value_counts().index[0] if len(df_pattern) > 0 else 'N/A'
+                vc = df_pattern['sector'].dropna().value_counts()
+                top_sector = vc.index[0] if len(vc) > 0 else 'N/A'
             else:
                 top_sector = 'N/A'
 

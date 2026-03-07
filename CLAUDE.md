@@ -1,8 +1,8 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- **현재 작업**: 시총/시총순위 컬럼 + 매도 방향 분석 + 시총 필터 추가
-- **마지막 업데이트**: 2026-03-05
+- **현재 작업**: 코드 리뷰 19건 수정 + 백테스트 진입가 시가 전환 + 시총/매도방향/시총필터 UI
+- **마지막 업데이트**: 2026-03-07
 - **DB**: PostgreSQL(`korea_stock_data`) — 2022-01-03 ~ 2026-03-03, ~10M rows, 2,721종목
   - 앱 전용 데이터(watchlist/backtest_history/score_change_log): `data/app.db`(SQLite) 분리
   - 환경변수: `KOREA_STOCK_DB_HOST`(기본 localhost), `KOREA_STOCK_DB_PORT`(기본 5432)
@@ -161,6 +161,16 @@
   - 파이프라인 `direction` 파라미터 전파 (`data_loader` → `_stage_classify` → `PatternClassifier`)
   - 파일 캐시 키에 direction 포함 (long/short 별도 캐시)
 - **시총 필터**: 전체/100위/200위/500위 이내 선택 → 대형주 위주 필터링
+- **[코드리뷰] 19건 수정 (C2 제외)**: CRITICAL 1 + HIGH 1 + MEDIUM 7 + LOW 10
+  - C1: return_pct에 거래 비용 반영 (portfolio.py)
+  - H1: MA 크로스오버 기준 `foreign_net_amount` → `combined_sff` (signal_detector.py + SQL)
+  - M1~M7: MDD peak 날짜 / hold_days 영업일 / walk-forward 중복 제거 / config 정비 / 하드코딩 날짜 / sl_ratio 500D→100D
+  - L1~L10: SQL parameterized query / 미사용 코드·파일 삭제 / .gitignore / metrics 부작용 / IndexError 방지
+- **[변경] 백테스트 진입가 시가 전환**: 진입=D+1 시가(open_price), 청산=당일 종가(close_price) 분리
+  - `precomputer.py`: `open_price_lookup` 추가 (ohlcv_daily에서 별도 로드)
+  - `engine.py`: `get_open_price()` 메서드 + `_execute_entries()` 시가 사용
+- **거래내역 시총순위 추가**: entry_date 기준 유통시총 순위 컬럼 (`market_cap_rank`)
+- **시총 필터 기본값 변경**: 200 → 300
 - 294개 테스트 (100% 통과, slow 6개 제외)
 
 **핵심 인사이트**:
@@ -628,9 +638,9 @@ LP_MM_TRADING/
 
 **Streamlit 앱 테마** (`.streamlit/config.toml`):
 - `base = "dark"` — 다크 모드 기반
-- `primaryColor = "#38bdf8"` — sky-400 (강조색, 버튼/링크)
-- `backgroundColor = "#0f172a"` — slate-900 (페이지 배경)
-- `secondaryBackgroundColor = "#1e293b"` — slate-800 (사이드바/카드 배경)
+- `primaryColor = "#4ade80"` — green-400 (강조색, 버튼/링크)
+- `backgroundColor = "#0a0a0a"` — neutral-950 (페이지 배경)
+- `secondaryBackgroundColor = "#111111"` — neutral-900 (사이드바/카드 배경)
 - `textColor = "#e2e8f0"` — slate-200 (기본 텍스트)
 - `font = "sans serif"`
 
@@ -803,6 +813,78 @@ short 정렬/분류: adjusted_z = z × max(-confidence, 0)   ← 매도 방향�
 
 > 전체 이력은 **CHANGELOG.md** 참조. 아래는 최근 항목만 기록.
 
+### 2026-03-07 (코드 리뷰 19건 수정 + 백테스트 진입가 시가 전환)
+
+**목표**: 전체 코드 리뷰 결과 19건 수정 (C2 포지션 사이징 제외) + 백테스트 진입/청산 가격 현실화
+
+**구현 내용**:
+
+- ✅ **C1 (CRITICAL): return_pct에 거래 비용 반영** (`portfolio.py`)
+  - `Position.to_trade()`에서 `return_pct = gross - cost_pct` (세금+수수료+슬리피지+차입비용)
+  - 기존: 비용 미반영 → 실제 수익률보다 과대 계산
+
+- ✅ **H1 (HIGH): MA 크로스오버 기준 Sff 전환** (`signal_detector.py`, `setup_materialized_views.sql`)
+  - `foreign_net_amount` → `combined_sff` (외국인 중심 조건부 합산)
+  - SQL 함수 `fn_signals_latest`도 동일 수정
+
+- ✅ **M1~M7 (MEDIUM 7건)**
+  - M1: MDD peak 날짜 `cummax.idxmax()` → `value.idxmax()` (`metrics.py`)
+  - M2: hold_days 영업일 통일 — `trading_days` 파라미터 추가 (`portfolio.py`, `engine.py`)
+  - M3: Walk-forward 겹침 기간 중복 제거 (`walk_forward.py`)
+  - M4: config.toml 테마 색상 문서화 (`CLAUDE.md`)
+  - M5: config.py 기간 수 주석 "8개"→"7개" + `mid_divergence` 정렬 모드 추가
+  - M6: 백테스트 페이지 하드코딩 날짜 동적화 + 라벨 정리
+  - M7: sl_ratio 분모 `500D` → `100D` (`pattern_classifier.py`)
+
+- ✅ **L1~L10 (LOW 10건, 2건 스킵)**
+  - L1: SQL f-string → parameterized query (4곳)
+  - L2: 미사용 코드 삭제 (`_extract_best_params`, `_prev_score_snapshot`, `db_path` 파라미터, 미사용 SignalDetector)
+  - L3: `heatmap_renderer.py` 삭제 + `openpyxl`/`tqdm` 제거
+  - L4: `.gitignore`에 `data/*.db` 추가
+  - L5: `metrics.py` daily_values `.copy()` 부작용 방지
+  - L6: `integrated_report.py` 인플레이스 수정 방지
+  - L7: `value_counts()` IndexError 방지
+  - L8: `refresh_mv.sh` DB_USER 환경변수화
+  - L9: 스킵 (Streamlit API 호환성)
+  - L10: 스킵 (UI 리팩터링 범위 초과)
+
+- ✅ **백테스트 진입가 시가 전환** — 진입=D+1 시가, 청산=당일 종가
+  - `precomputer.py`: `PrecomputeResult.open_price_lookup` + `_build_open_price_lookup()` 추가
+  - `engine.py`: `get_open_price()` 메서드 + `_execute_entries()` 시가 사용
+
+- ✅ **거래내역 시총순위** — `market_cap_rank` 컬럼 추가 (`app/pages/3_📈_백테스트.py`)
+
+- ✅ **시총 필터 기본값** — 200 → 300
+
+**파일** (21개):
+```
+src/backtesting/portfolio.py       (C1: return_pct 비용 반영 + M2: trading_days)
+src/backtesting/engine.py          (M2: trading_days 전달 + 시가 진입)
+src/backtesting/metrics.py         (M1: MDD peak + L5: copy)
+src/backtesting/precomputer.py     (L1: parameterized + 시가 lookup)
+src/backtesting/walk_forward.py    (M3: dedup + L2: dead code)
+src/backtesting/optimizer.py       (L2: db_path 제거)
+src/analyzer/signal_detector.py    (H1: combined_sff MA)
+src/analyzer/pattern_classifier.py (M7: sl_ratio 100D)
+src/analyzer/integrated_report.py  (L1+L2+L6+L7)
+src/config.py                      (M5: 주석+정렬모드)
+scripts/setup_materialized_views.sql (H1: SQL MA 수정)
+scripts/refresh_mv.sh              (L8: env var)
+app/pages/3_📈_백테스트.py          (M6+시총순위+기본값300)
+app/pages/4_🔄_워크포워드.py        (워크포워드 개선)
+app/utils/data_loader.py           (L1+L2: parameterized+dead code)
+.gitignore                         (L4: data/*.db)
+requirements.txt                   (L3: openpyxl/tqdm 제거)
+삭제: src/visualizer/heatmap_renderer.py (L3)
+tests/backtesting/test_portfolio.py (C1 기대값 업데이트)
+tests/backtesting/test_engine.py    (dtype/weighted assertion 완화)
+CLAUDE.md                          (문서 업데이트)
+```
+
+**테스트**: 294개 통과 (100%), slow 6개 제외
+
+---
+
 ### 2026-03-05 (시총/시총순위 + 매도 방향 + 시총 필터)
 
 **목표**: 메인/패턴분석 테이블에 시총 정보 추가 + 순매도 상위 종목 분석 지원 + 대형주 필터링
@@ -893,220 +975,6 @@ README.md                             (프로젝트 소개 최신화)
 
 **테스트**: 294개 통과 (100%), slow 6개 제외
 
----
-
-### 2026-03-04 (성능 최적화 Phase 3 — 벡터화 Z-Score + 부가 병목 해소)
-
-**목표**: Phase 2 이후 남은 병목 전수 파악 및 일괄 해결 (490초 → 8초)
-
-**병목 분석**:
-- `get_abnormal_supply()` × 2회 = **440초** — `calculate_zscore()`가 per-stock for 루프 (2,628종목)
-- `get_date_range()` = 343ms — `investor_trading` 2.4M rows 풀스캔
-- `data_loader.py` 모듈 임포트 = ~450ms — 백테스트 모듈 즉시 로드
-
-**구현 내용**:
-
-- ✅ **`calculate_zscore()` 벡터화** (`normalizer.py`)
-  - per-stock for 루프 → `groupby.transform` (220초 → 3초, 73배)
-  - 날짜 범위 최적화: `_calc_date_start(end_date, max_period=window)` — 500일이 아닌 실제 window(60일)+버퍼만 로드
-  - end_date=None 시 MV/investor_trading에서 MAX(date) 자동 조회
-  - Z-Score 정확성 검증 완료 (수동 계산 결과와 완전 일치)
-
-- ✅ **`get_date_range()` MV 사용** (`data_loader.py`)
-  - `investor_trading` (343ms) → `mv_daily_sff` try/except fallback (2ms, 172배)
-
-- ✅ **백테스트 모듈 lazy import** (`data_loader.py`)
-  - `BacktestConfig`, `BacktestEngine`, `PerformanceMetrics`, `Trade` → 사용 함수 내부 import
-  - 비백테스트 페이지 임포트 비용 ~450ms 절감
-
-**성능 개선 결과**:
-
-| 구간 | Before | After | 배수 |
-|------|--------|-------|------|
-| 이상수급 (buy+sell) | 440초 | **6초** | **75배** |
-| get_date_range() | 343ms | **2ms** | **172배** |
-| 파이프라인 (Stage 1~3) | 1.6초 | 2.2초 | (동일) |
-| **Streamlit 첫 로드 합계** | **~490초** | **~8초** | **61배** |
-
-**파일** (2개):
-```
-src/analyzer/normalizer.py       (calculate_zscore 벡터화 + 날짜 범위 최적화)
-app/utils/data_loader.py         (get_date_range MV + lazy import)
-```
-
-**테스트**: 294개 통과 (100%), slow 6개 제외
-
----
-
-### 2026-03-04 (성능 최적화 Phase 2 — SQL Z-Score + SQL 시그널)
-
-**목표**: 첫 로드 47초 → ~2초 (SQL 함수로 Python 연산 대체)
-
-**구현 내용**:
-
-- ✅ **SQL 함수 `fn_zscore_latest(weight, target_date)`** (`setup_materialized_views.sql`)
-  - LATERAL + FILTER 패턴으로 7개 기간 Z-Score를 0.38초에 계산
-  - 조건부 Z-Score 공식 (부호 전환 시 과잉 반응 방지) SQL 구현
-  - 방향 확신도용 메타데이터 (today_sff, sff_5d_avg, std_*) 동시 반환
-
-- ✅ **SQL 함수 `fn_signals_latest(weight, target_date)`** (`setup_materialized_views.sql`)
-  - MA 크로스오버 + 가속도 + 동조율을 0.04초에 계산
-  - LATERAL 서브쿼리로 종목별 최근 21일 데이터만 참조
-
-- ✅ **performance_optimizer.py SQL 분기**
-  - `_calculate_zscores_sql()`: SQL 함수 호출 → 기존 Python 경로와 동일 출력 포맷
-  - `is_mv_available()` + `stock_codes is None` 조건 → SQL/Python 자동 분기
-  - `periods_dict` 키에 맞게 컬럼 필터링 (요청 기간만 반환)
-
-- ✅ **signal_detector.py SQL 분기**
-  - `_detect_all_signals_sql()`: SQL 함수 호출 → 시그널 카운트/리스트 Python 후처리
-  - SQL 실패 시 기존 Python 경로 자동 fallback
-
-- ✅ **TTL 증가** (`data_loader.py`)
-  - 파이프라인 캐시 TTL 600초 → 3600초 (1시간)
-  - 장중 수급 데이터 불변 → 불필요한 재계산 방지
-
-**성능 개선 결과**:
-
-| 단계 | Before (Phase 1) | After (Phase 2) | 배수 |
-|------|-----------------|-----------------|------|
-| Z-Score (7기간) | 17초 (Python) | **1.2초** (SQL) | **14배** |
-| 시그널 탐지 | 4.6초 (Python) | **0.3초** (SQL) | **15배** |
-| **전체 파이프라인** | **47초** | **1.6초** | **30배** |
-
-**파일** (5개):
-```
-scripts/setup_materialized_views.sql    (fn_zscore_latest + fn_signals_latest 추가)
-src/visualizer/performance_optimizer.py (_calculate_zscores_sql + SQL 분기)
-src/analyzer/signal_detector.py         (_detect_all_signals_sql + SQL 분기)
-app/utils/data_loader.py               (TTL 600→3600)
-tests/test_performance_optimizer.py     (SQL 경로 호환 테스트 수정)
-```
-
-**테스트**: 294개 통과 (100%), slow 6개 제외
-
----
-
-### 2026-03-04 (성능 최적화 — MV + 파일 캐시 + 벡터화)
-
-**목표**: DB 전환 후 데이터 60배 증가(171K→2.4M rows, 345→2,628 종목)에 따른 성능 저하 해결
-
-**구현 내용**:
-
-- ✅ **Materialized View 생성** (`scripts/setup_materialized_views.sql`)
-  - `mv_daily_sff`: 3-table JOIN + GROUP BY + DISTINCT ON을 사전 계산
-  - 인덱스 2개 (`stock_code,trade_date DESC` + `trade_date DESC`)
-  - 리프레시 스크립트 (`scripts/refresh_mv.sh`)
-
-- ✅ **MV 자동 분기** (`src/database/connection.py`)
-  - `is_mv_available()`: MV 존재 여부 1회 체크 후 캐싱
-  - MV 없으면 기존 3-table JOIN 자동 fallback
-
-- ✅ **normalizer.py 리팩터링**
-  - 3곳 중복 쿼리 → `_query_raw_data()` 1개로 통합 (MV/원본 자동 분기)
-  - `_query_combined_sff_only()`: MV에서 combined_sff SQL 직접 계산 (3컬럼만 전송 → I/O 2배 절감)
-  - `_calc_date_start()`: Z-Score 최장 기간(500D) + 버퍼 기반 시작일 자동 계산
-  - `_compute_sff()`: MV 데이터(Sff 이미 있음)와 raw 데이터 자동 분기
-
-- ✅ **signal_detector.py 최적화**
-  - `detect_all_signals()`: 데이터 3회 로드 → 1회 로드 + 3함수 전달
-  - 날짜 필터 자동 적용 (end_date - 300일)
-  - MV 경로 추가 (`mv_daily_sff`에서 `foreign_net_amount`/`institution_net_amount` 로드)
-  - **per-stock 루프 → groupby.transform 벡터화** (155초 → 4.6초, 33배 향상)
-
-- ✅ **precomputer.py MV 지원**
-  - `_load_raw_data()`: MV 존재 시 `mv_daily_sff`에서 로드 + start_date 파라미터
-  - `_compute_sff_all_dates()`: MV 데이터의 foreign_sff/institution_sff 재활용
-
-- ✅ **파이프라인 파일 캐시** (`app/utils/data_loader.py`)
-  - `data/cache/pipeline_{date}_{weight}.pkl` 형식으로 결과 저장
-  - 같은 날 재방문 시 DB 쿼리 + 계산 완전 건너뜀
-  - 7일 이상 된 캐시 파일 자동 정리
-
-**성능 개선 결과**:
-
-| 시나리오 | Before | After | 배수 |
-|---------|--------|-------|------|
-| 첫 로드 (파이프라인 전체) | 30초+ | ~20초 | 1.5배 |
-| 재로드 (같은 날) | 30초+ | <0.01초 | 3000배+ |
-| 시그널 탐지 (2,628종목) | 155초 | 4.6초 | 33배 |
-| _get_sff_data I/O | 11.4초 | 5.0초 | 2.3배 |
-
-**파일** (8개):
-```
-scripts/setup_materialized_views.sql   (신규 — MV 생성 SQL)
-scripts/refresh_mv.sh                 (신규 — MV 리프레시 스크립트)
-src/database/connection.py             (is_mv_available 추가)
-src/analyzer/normalizer.py             (_query_raw_data 통합 + MV 분기 + 날짜 필터)
-src/analyzer/signal_detector.py        (1회 로드 + MV + 벡터화)
-src/backtesting/precomputer.py         (MV 지원 + start_date)
-app/utils/data_loader.py               (파일 캐시 레이어)
-.gitignore                             (data/cache/ 추가)
-```
-
-**테스트**: 기존 테스트 전체 통과 (1건 제외 — DB 데이터 확장으로 인한 기존 테스트 가정 불일치, 코드 변경과 무관)
-
----
-
-### 2026-03-04 (PostgreSQL 전환 완료 + 코드 리뷰 5건 수정)
-
-**목표**: SQLite → PostgreSQL 공유 DB 전환 마무리 + 전체 코드베이스 검토
-
-**구현 내용**:
-
-- ✅ **소스 코드 전환 완료** (9개 파일)
-  - `optimizer.py`: `sqlite3.connect(self.db_path)` → `get_pg_engine()` (런타임 크래시 버그 수정)
-  - `walk_forward.py`: worker 함수 `db_path` 파라미터 레거시 처리
-  - `backtest_runner.py`: `DB_PATH` 임포트 제거, `get_pg_engine()` 전환
-
-- ✅ **테스트 파일 전환** (6개 파일)
-  - `test_engine.py`: undefined `conn` fixture → `get_pg_engine()` 직접 사용
-  - `test_performance_optimizer.py`: `skip_if_no_db` 제거, `get_pg_engine()` 전환
-  - `test_walk_forward.py`: SQLite in-memory fixture → PostgreSQL 실 데이터
-  - `test_optimizer.py`: unused `import sqlite3` 제거
-  - `test_normalizer.py`, `test_integrated_report.py`: `skip_if_no_db` 제거, `get_pg_engine()` 전환
-
-- ✅ **datetime.date → str 변환 처리**
-  - PostgreSQL은 DATE 컬럼을 `datetime.date` 객체로 반환 (SQLite는 문자열)
-  - `precomputer.py` `_load_raw_data()`: `df['trade_date'].astype(str)` 추가
-  - `normalizer.py` 3곳: `preload()`, `calculate_sff()`, `_get_sff_data()` — 동일 변환 추가
-
-- ✅ **불필요 파일 삭제**: `scripts/crawlers/` (3개), `scripts/loaders/` (3개), `src/database/schema.py`
-- ✅ **기타**: `config.py`에서 `get_db_path()` 제거, `pytest.ini` 생성 (slow 마크 등록)
-
-**파일** (16개):
-```
-src/backtesting/optimizer.py           (sqlite3 → get_pg_engine)
-src/backtesting/walk_forward.py        (db_path 레거시 처리)
-src/backtesting/precomputer.py         (datetime.date → str)
-src/analyzer/normalizer.py             (datetime.date → str, 3곳)
-src/config.py                          (get_db_path 제거)
-scripts/analysis/backtest_runner.py    (DB_PATH → get_pg_engine)
-tests/backtesting/test_engine.py       (conn fixture 수정)
-tests/backtesting/test_walk_forward.py (SQLite → PostgreSQL)
-tests/backtesting/test_optimizer.py    (unused import 제거)
-tests/test_performance_optimizer.py    (skip_if_no_db 제거)
-tests/test_normalizer.py              (skip_if_no_db 제거)
-tests/test_integrated_report.py       (skip_if_no_db 제거)
-pytest.ini                             (신규 — slow 마크 등록)
-삭제: scripts/crawlers/* (3), scripts/loaders/* (3), src/database/schema.py
-```
-
-**코드 리뷰** (5개 영역 병렬 검토 → 수동 검증):
-
-- ✅ **[버그] `integrated_report.py:102`**: `pd.read_sql(query, ...)` → `pd.read_sql(text(query), ...)` — SQLAlchemy 2.0+ 호환
-- ✅ **[버그] `signal_detector.py:101`**: `trade_date` datetime.date→str 변환 누락 — normalizer/precomputer와 타입 불일치
-- ✅ **[버그] `data_loader.py` SQLite 13개 함수**: 수동 `conn.close()` → `try/finally` 패턴 — 예외 시 연결 누수 방지
-- ✅ **[정리] `optimizer.py:115`**: 미사용 `db_path` 변수 제거 (레거시 잔재)
-- ✅ **[정리] `test_signal_detector.py:23`**: 무의미한 `skip_if_no_db` 데코레이터 + unused import 제거
-
-**확인 완료 (이상 없음)**:
-- Z-Score 조건부 공식 3곳 일치 (normalizer/precomputer/performance_optimizer)
-- 방향 확신도 tanh 2곳 일치 (classifier/charts)
-- Preload 캐시 vs DB 직접 쿼리 동일 출력
-- Multiprocessing 엔진 생성 정상 (자식 프로세스 독립 singleton)
-
-**테스트**: 294개 통과 (100%), slow 6개 제외, 경고 18→12개 감소
 
 ---
 
@@ -1117,5 +985,5 @@ pytest.ini                             (신규 — slow 마크 등록)
 
 ---
 
-**프로젝트 버전**: v5.1.3 (DB 전환 정리 + 문서 업데이트)
-**마지막 업데이트**: 2026-03-05
+**프로젝트 버전**: v5.1.4 (코드 리뷰 19건 + 진입가 시가 전환)
+**마지막 업데이트**: 2026-03-07

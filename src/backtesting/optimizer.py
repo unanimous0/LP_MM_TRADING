@@ -50,20 +50,20 @@ class OptunaOptimizer:
         # BacktestConfig의 고정 파라미터로 관리 (기본값: 0.3)
     }
 
-    def __init__(self, db_path: str = '', start_date: str = '',
+    def __init__(self, start_date: str = '',
                  end_date: str = '',
                  base_config: Optional[BacktestConfig] = None,
-                 study_storage: Optional[str] = None):
+                 study_storage: Optional[str] = None,
+                 **kwargs):
         """
         Args:
-            db_path: (레거시, 미사용) 하위 호환용으로 파라미터 유지
             start_date: 백테스트 시작일 (YYYY-MM-DD)
             end_date: 백테스트 종료일 (YYYY-MM-DD)
             base_config: 기본 BacktestConfig (최적화 대상 외 파라미터)
             study_storage: Optuna study 저장 경로 (예: "sqlite:///data/optuna_studies.db")
                 None이면 인메모리 (비지속, Walk-Forward 기본값)
+            **kwargs: 하위 호환 (db_path 등 무시)
         """
-        self.db_path = db_path  # 레거시 호환 (미사용)
         self.start_date = start_date
         self.end_date = end_date
         self.base_config = base_config or BacktestConfig()
@@ -97,6 +97,7 @@ class OptunaOptimizer:
             'commission_rate': c.commission_rate,
             'slippage_rate': c.slippage_rate,
             'borrowing_rate': c.borrowing_rate,
+            'market_cap_top_n': c.market_cap_top_n,
         }
 
     def _build_objective(self, param_space: dict, metric: str,
@@ -331,6 +332,7 @@ class OptunaOptimizer:
             institution_weight=self.base_config.institution_weight,
             use_tc=self.base_config.use_tc,
             use_divergence=self.base_config.use_divergence,
+            market_cap_top_n=self.base_config.market_cap_top_n,
         )
         shared_precomputed = pc.precompute(
             self.end_date, start_date=self.start_date, verbose=verbose

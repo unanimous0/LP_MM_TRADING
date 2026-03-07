@@ -1,7 +1,7 @@
 """
 Stage 2 전역 설정 파일
 
-8개 기간 정의, 시각화 파라미터, 필터링 옵션 등을 중앙 관리
+7개 기간 정의, 시각화 파라미터, 필터링 옵션 등을 중앙 관리
 CLI 오버라이드 지원 (argparse → .env → 기본값 순서)
 """
 
@@ -307,7 +307,7 @@ def _validate_config(config: Dict[str, Any]) -> None:
 
     # 7. 정렬 기준 검증
     sort_by = config['visualization'].get('sort_by')
-    valid_sort_modes = ['recent', 'long_divergence', 'weighted', 'average']
+    valid_sort_modes = ['recent', 'long_divergence', 'mid_divergence', 'weighted', 'average']
     if sort_by and sort_by not in valid_sort_modes:
         raise ValueError(
             f"Invalid sort_by: '{sort_by}'. "

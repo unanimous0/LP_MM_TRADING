@@ -15,6 +15,7 @@ data/*.json
 !data/.gitkeep
 
 # Database files
+data/*.db
 data/processed/
 data/raw/processed/
 *.backup_*

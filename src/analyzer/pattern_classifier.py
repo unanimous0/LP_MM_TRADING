@@ -160,9 +160,9 @@ class PatternClassifier:
             df['persistence'] = np.nan
 
         # 3. 단기/장기 비율 (Short/Long Ratio): 최근 가속도
-        if all(p in df.columns for p in ['5D', '20D', '200D', '500D']):
+        if all(p in df.columns for p in ['5D', '20D', '200D', '100D']):
             numerator = df['5D'] + df['20D']
-            denominator = df['200D'] + df['500D'] + 1e-6  # 0으로 나누기 방지
+            denominator = df['200D'] + df['100D'] + 1e-6  # 0으로 나누기 방지
             df['sl_ratio'] = numerator / denominator
         else:
             df['sl_ratio'] = np.nan

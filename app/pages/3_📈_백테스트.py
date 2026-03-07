@@ -14,7 +14,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from utils.data_loader import (
     run_backtest,
@@ -145,68 +145,26 @@ if 'pending_opt_params' in st.session_state:
 
 
 # ---------------------------------------------------------------------------
-# 사이드바 ① 기간 분리 설정 (최상단 — 최적화·백테스트 공통)
+# 사이드바 ① 백테스트 기간 설정
 # ---------------------------------------------------------------------------
 min_date, max_date = get_date_range()
+_max_dt = datetime.strptime(max_date, "%Y-%m-%d")
+_max_value = _max_dt.replace(month=12, day=31)
 
-use_split = st.sidebar.checkbox(
-    "최적화 / 검증 기간 분리",
-    value=True,
-    help="최적화 기간에서 최적 파라미터를 탐색하고, 검증 기간에서 백테스트를 실행합니다. 과적합 없는 신뢰도 높은 결과를 얻을 수 있습니다.",
+bt_start_date = st.sidebar.date_input(
+    "백테스트 시작일",
+    value=datetime.strptime("2023-01-02", "%Y-%m-%d"),
+    min_value=datetime.strptime(min_date, "%Y-%m-%d"),
+    max_value=_max_value,
+    key="w_bt_start",
 )
-if not use_split:
-    st.sidebar.warning("⚠️ 같은 기간에서 최적화·백테스트를 수행합니다. 과적합으로 신뢰하기 어려운 결과가 나올 수 있습니다.")
-
-if use_split:
-    st.sidebar.caption("🔧 최적화 기간 (파라미터 탐색)")
-    _max_dt = datetime.strptime(max_date, "%Y-%m-%d")
-    _max_value = _max_dt.replace(month=12, day=31)
-    opt_start_date = st.sidebar.date_input(
-        "최적화 시작일",
-        value=datetime.strptime("2023-01-02", "%Y-%m-%d"),
-        min_value=datetime.strptime(min_date, "%Y-%m-%d"),
-        max_value=_max_value,
-        key="w_opt_start",
-    )
-    opt_end_date = st.sidebar.date_input(
-        "최적화 종료일",
-        value=datetime.strptime("2025-09-30", "%Y-%m-%d"),
-        min_value=datetime.strptime(min_date, "%Y-%m-%d"),
-        max_value=_max_value,
-        key="w_opt_end",
-    )
-    st.sidebar.caption("✅ 검증 기간 (백테스트 실행)")
-    val_start_date = st.sidebar.date_input(
-        "검증 시작일",
-        value=datetime.strptime("2025-10-01", "%Y-%m-%d"),
-        min_value=datetime.strptime(min_date, "%Y-%m-%d"),
-        max_value=_max_value,
-        key="w_val_start",
-    )
-    val_end_date = st.sidebar.date_input(
-        "검증 종료일",
-        value=_max_dt,
-        min_value=datetime.strptime(min_date, "%Y-%m-%d"),
-        max_value=_max_value,
-        key="w_val_end",
-    )
-else:
-    _max_dt = datetime.strptime(max_date, "%Y-%m-%d")
-    _max_value = _max_dt.replace(month=12, day=31)
-    _start = st.sidebar.date_input(
-        "시작일",
-        value=datetime.strptime("2023-01-02", "%Y-%m-%d"),
-        min_value=datetime.strptime(min_date, "%Y-%m-%d"),
-        max_value=_max_value,
-    )
-    _end = st.sidebar.date_input(
-        "종료일",
-        value=_max_dt,
-        min_value=datetime.strptime(min_date, "%Y-%m-%d"),
-        max_value=_max_value,
-    )
-    opt_start_date = val_start_date = _start
-    opt_end_date = val_end_date = _end
+bt_end_date = st.sidebar.date_input(
+    "백테스트 종료일",
+    value=_max_dt,
+    min_value=datetime.strptime(min_date, "%Y-%m-%d"),
+    max_value=_max_value,
+    key="w_bt_end",
+)
 
 st.sidebar.divider()
 
@@ -221,6 +179,21 @@ strategy = st.sidebar.selectbox(
 )
 
 with st.sidebar.expander("⚡ 파라미터 최적화 (Optuna)"):
+    st.caption("최적화 기간(IS)에서 최적 파라미터를 탐색하고, 백테스트 기간(OS)에서 검증합니다.")
+    opt_start_date = st.date_input(
+        "최적화 시작일 (In-Sample)",
+        value=datetime.strptime("2023-01-02", "%Y-%m-%d"),
+        min_value=datetime.strptime(min_date, "%Y-%m-%d"),
+        max_value=_max_value,
+        key="w_opt_start",
+    )
+    opt_end_date = st.date_input(
+        "최적화 종료일 (In-Sample)",
+        value=_max_dt - timedelta(days=90),
+        min_value=datetime.strptime(min_date, "%Y-%m-%d"),
+        max_value=_max_value,
+        key="w_opt_end",
+    )
     opt_n_trials = st.slider("이번 추가 Trial 수", 10, 200, 100, step=10, key="w_opt_n_trials")
     opt_metric = st.selectbox(
         "평가 지표",
@@ -325,6 +298,16 @@ with st.sidebar.expander("거래 비용", expanded=False):
     slippage_rate = st.number_input("슬리피지 (%)", 0.00, 1.00, 0.10, step=0.01, format="%.2f", key="w_slippage_rate") / 100
     borrowing_rate = st.number_input("공매도 차입비용 (%/연)", 0.0, 20.0, 3.0, step=0.5, format="%.1f", key="w_borrowing_rate") / 100
 
+_cap_options = {"전체": None, "50": 50, "100": 100, "200": 200, "300": 300, "500": 500}
+_cap_selection = st.sidebar.selectbox(
+    "시총 필터 (유통시총 상위)",
+    options=list(_cap_options.keys()),
+    index=4,
+    key="w_market_cap_top_n",
+    help="백테스트 종료일 기준 유통시총(종가×유통주식수) 상위 N종목만 대상으로 백테스트합니다. '전체'는 모든 종목을 포함합니다.",
+)
+market_cap_top_n = _cap_options[_cap_selection]
+
 # ---------------------------------------------------------------------------
 # 실행 버튼
 # ---------------------------------------------------------------------------
@@ -332,8 +315,8 @@ run_clicked = st.sidebar.button("백테스트 실행", type="primary", use_conta
 
 if run_clicked:
     st.session_state['bt_result'] = run_backtest(
-        start_date=val_start_date.strftime("%Y-%m-%d"),
-        end_date=val_end_date.strftime("%Y-%m-%d"),
+        start_date=bt_start_date.strftime("%Y-%m-%d"),
+        end_date=bt_end_date.strftime("%Y-%m-%d"),
         strategy=strategy,
         min_score=min_score,
         min_signals=min_signals,
@@ -350,10 +333,10 @@ if run_clicked:
         borrowing_rate=borrowing_rate,
         use_tc=use_tc,
         use_divergence=use_divergence,
+        market_cap_top_n=market_cap_top_n,
     )
-    st.session_state['bt_use_split'] = use_split
-    st.session_state['bt_opt_period'] = (opt_start_date.strftime("%Y-%m-%d"), opt_end_date.strftime("%Y-%m-%d"))
-    st.session_state['bt_val_period'] = (val_start_date.strftime("%Y-%m-%d"), val_end_date.strftime("%Y-%m-%d"))
+    st.session_state['bt_period'] = (bt_start_date.strftime("%Y-%m-%d"), bt_end_date.strftime("%Y-%m-%d"))
+    st.session_state.pop('bt_opt_period', None)
     st.session_state['bt_use_tc'] = use_tc
     st.session_state['bt_use_divergence'] = use_divergence
 
@@ -398,6 +381,7 @@ if opt_clicked:
         borrowing_rate=borrowing_rate,
         use_tc=use_tc,
         use_divergence=use_divergence,
+        market_cap_top_n=market_cap_top_n,
     )
     _opt_progress_bar.empty()
     _opt_status.empty()
@@ -415,8 +399,8 @@ if opt_clicked:
             _bt_progress_bar.progress(pct, text=f"백테스트 중... {display}/{total}일 ({pct*100:.0f}%)")
 
         st.session_state['bt_result'] = run_backtest_with_progress(
-            start_date=val_start_date.strftime("%Y-%m-%d"),
-            end_date=val_end_date.strftime("%Y-%m-%d"),
+            start_date=bt_start_date.strftime("%Y-%m-%d"),
+            end_date=bt_end_date.strftime("%Y-%m-%d"),
             strategy=strategy,
             min_score=params['min_score'],
             min_signals=params['min_signals'],
@@ -434,11 +418,11 @@ if opt_clicked:
             borrowing_rate=borrowing_rate,
             use_tc=use_tc,
             use_divergence=use_divergence,
+            market_cap_top_n=market_cap_top_n,
         )
         _bt_progress_bar.empty()
-        st.session_state['bt_use_split'] = use_split
         st.session_state['bt_opt_period'] = (opt_start_date.strftime("%Y-%m-%d"), opt_end_date.strftime("%Y-%m-%d"))
-        st.session_state['bt_val_period'] = (val_start_date.strftime("%Y-%m-%d"), val_end_date.strftime("%Y-%m-%d"))
+        st.session_state['bt_period'] = (bt_start_date.strftime("%Y-%m-%d"), bt_end_date.strftime("%Y-%m-%d"))
         st.session_state['bt_use_tc'] = use_tc
         st.session_state['bt_use_divergence'] = use_divergence
         st.rerun()
@@ -555,17 +539,16 @@ if not trades:
 # ---------------------------------------------------------------------------
 # 기간 표시 배너
 # ---------------------------------------------------------------------------
-_use_split = st.session_state.get('bt_use_split', False)
 _opt_p = st.session_state.get('bt_opt_period')
-_val_p = st.session_state.get('bt_val_period')
+_bt_p = st.session_state.get('bt_period')
 
-if _use_split and _opt_p and _val_p:
+if _opt_p and _bt_p:
     st.info(
         f"🔧 최적화 기간: **{_opt_p[0]} ~ {_opt_p[1]}** &nbsp;&nbsp;|&nbsp;&nbsp; "
-        f"✅ 검증 기간: **{_val_p[0]} ~ {_val_p[1]}**"
+        f"✅ 백테스트 기간: **{_bt_p[0]} ~ {_bt_p[1]}**"
     )
-elif _val_p:
-    st.caption(f"백테스트 기간: {_val_p[0]} ~ {_val_p[1]}")
+elif _bt_p:
+    st.caption(f"백테스트 기간: {_bt_p[0]} ~ {_bt_p[1]}")
 
 # 스코어링 버전 배너
 _bt_use_tc = st.session_state.get('bt_use_tc', True)
@@ -619,12 +602,12 @@ with st.expander(f"⚠️ 기간 종료 시 청산된 포지션: {len(end_trades
 with st.container(border=True):
 
     # 헤더
-    if _use_split and _val_p:
-        _opt_str = f"{_opt_p[0]} ~ {_opt_p[1]}" if _opt_p else ""
+    if _opt_p and _bt_p:
+        _opt_str = f"{_opt_p[0]} ~ {_opt_p[1]}"
         st.markdown(
             '<div style="border-left:4px solid #00c853;padding:10px 18px;margin-bottom:20px;background-color:rgba(0,200,83,0.07);border-radius:0 8px 8px 0;">'
-            '<div style="font-size:1.25rem;font-weight:700;color:#00c853;margin-bottom:4px;">✅ 검증 결과 (Out-of-Sample)</div>'
-            f'<div style="font-size:0.82rem;color:#888;line-height:1.5;">🔧 최적화 기간 <strong style="color:#aaa">{_opt_str}</strong> 에서 찾은 최적 파라미터를 &nbsp;→&nbsp; 📅 검증 기간 <strong style="color:#aaa">{_val_p[0]} ~ {_val_p[1]}</strong> 에 적용한 실제 성과입니다.</div>'
+            '<div style="font-size:1.25rem;font-weight:700;color:#00c853;margin-bottom:4px;">✅ 백테스트 결과</div>'
+            f'<div style="font-size:0.82rem;color:#888;line-height:1.5;">🔧 최적화 기간 <strong style="color:#aaa">{_opt_str}</strong> 에서 찾은 최적 파라미터를 &nbsp;→&nbsp; 📅 백테스트 기간 <strong style="color:#aaa">{_bt_p[0]} ~ {_bt_p[1]}</strong> 에 적용한 실제 성과입니다.</div>'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -725,12 +708,55 @@ with st.container(border=True):
             _stats_df = pd.DataFrame(_stats)
             trade_df = pd.concat([trade_df.reset_index(drop=True), _stats_df], axis=1)
 
+        # 시총순위 추가 (진입일 기준 유통시총 순위)
+        if not trade_df.empty:
+            from sqlalchemy import text as _text2
+            from src.database.connection import is_mv_available as _is_mv
+            _conn2 = get_db_connection()
+            _entry_dates = trade_df['entry_date'].unique().tolist()
+            _ed_ph = ','.join([f':ed{i}' for i in range(len(_entry_dates))])
+            _ed_params = {f'ed{i}': d for i, d in enumerate(_entry_dates)}
+            if _is_mv():
+                _mcap_df = pd.read_sql(
+                    _text2(
+                        f"SELECT trade_date, stock_code, close_price * free_float_shares AS market_cap "
+                        f"FROM mv_daily_sff WHERE trade_date IN ({_ed_ph})"
+                    ),
+                    _conn2, params=_ed_params,
+                )
+            else:
+                _mcap_df = pd.read_sql(
+                    _text2(
+                        f"SELECT o.time AS trade_date, o.stock_code, "
+                        f"o.close_price * ff.floating_shares AS market_cap "
+                        f"FROM ohlcv_daily o "
+                        f"JOIN (SELECT DISTINCT ON (stock_code) stock_code, floating_shares "
+                        f"     FROM floating_shares ORDER BY stock_code, base_date DESC) ff "
+                        f"  ON o.stock_code = ff.stock_code "
+                        f"WHERE o.time IN ({_ed_ph})"
+                    ),
+                    _conn2, params=_ed_params,
+                )
+            if not _mcap_df.empty:
+                _mcap_df['trade_date'] = _mcap_df['trade_date'].astype(str)
+                _mcap_df['market_cap_rank'] = _mcap_df.groupby('trade_date')['market_cap'].rank(
+                    ascending=False, method='min'
+                ).astype(int)
+                trade_df = trade_df.merge(
+                    _mcap_df[['trade_date', 'stock_code', 'market_cap_rank']].rename(
+                        columns={'trade_date': 'entry_date'}
+                    ),
+                    on=['entry_date', 'stock_code'],
+                    how='left',
+                )
+
         display_cols = [
             'stock_name', 'stock_code', 'pattern', 'direction',
             'entry_date', 'entry_price', 'exit_date', 'exit_price',
             'return_pct', 'max_return_pct', 'min_return_pct', 'mdd_pct',
             'hold_days', 'exit_reason',
             'pattern_score', 'signal_count', 'final_score',
+            'market_cap_rank',
         ]
         display_cols = [c for c in display_cols if c in trade_df.columns]
         st.dataframe(
@@ -747,6 +773,7 @@ with st.container(border=True):
                 "pattern_score":  st.column_config.NumberColumn("패턴 점수",       format="%.0f"),
                 "signal_count":   st.column_config.NumberColumn("시그널 수",       format="%d"),
                 "final_score":    st.column_config.NumberColumn("최종 점수",       format="%.0f"),
+                "market_cap_rank": st.column_config.NumberColumn("시총순위",       format="%d"),
             },
         )
 
@@ -754,6 +781,7 @@ with st.container(border=True):
         csv_df = trade_df[display_cols].rename(columns={
             'pattern_score': '패턴점수', 'signal_count': '시그널수', 'final_score': '최종점수',
             'max_return_pct': '최대수익률', 'min_return_pct': '최소수익률', 'mdd_pct': 'MDD',
+            'market_cap_rank': '시총순위',
         })
         csv = csv_df.to_csv(index=False, encoding='utf-8-sig')
         st.download_button(
@@ -779,8 +807,8 @@ with st.expander("💾 이 결과를 히스토리에 저장", expanded=False):
         key="hist_note_input",
     )
     if st.button("📥 히스토리 저장", use_container_width=False):
-        _hist_sd = str(st.session_state.get('bt_val_period', [None, None])[0] or '')
-        _hist_ed = str(st.session_state.get('bt_val_period', [None, None])[1] or '')
+        _hist_sd = str(st.session_state.get('bt_period', [None, None])[0] or '')
+        _hist_ed = str(st.session_state.get('bt_period', [None, None])[1] or '')
         _row_id = save_backtest_history(
             result=result,
             start_date=_hist_sd,
