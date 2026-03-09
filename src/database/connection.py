@@ -8,6 +8,8 @@ SQLite:     watchlist, backtest_history, score_change_log (앱 전용)
 환경변수:
     KOREA_STOCK_DB_HOST: PostgreSQL 호스트 (기본: localhost)
     KOREA_STOCK_DB_PORT: PostgreSQL 포트 (기본: 5432)
+    KOREA_STOCK_DB_USER: PostgreSQL 유저 (기본: una0)
+    KOREA_STOCK_DB_PASS: PostgreSQL 패스워드 (~/.bashrc에 설정)
 """
 
 import os
@@ -23,7 +25,9 @@ from sqlalchemy import create_engine, text
 
 PG_HOST = os.environ.get("KOREA_STOCK_DB_HOST", "localhost")
 PG_PORT = os.environ.get("KOREA_STOCK_DB_PORT", "5432")
-PG_DSN = f"postgresql+psycopg2://korea_stock_reader@{PG_HOST}:{PG_PORT}/korea_stock_data"
+PG_USER = os.environ.get("KOREA_STOCK_DB_USER", "una0")
+PG_PASS = os.environ.get("KOREA_STOCK_DB_PASS", "")
+PG_DSN = f"postgresql+psycopg2://{PG_USER}:{PG_PASS}@{PG_HOST}:{PG_PORT}/korea_stock_data"
 
 _pg_engine = None
 

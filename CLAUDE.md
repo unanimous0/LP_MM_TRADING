@@ -1,16 +1,21 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- **현재 작업**: 코드 리뷰 19건 수정 + 백테스트 진입가 시가 전환 + 시총/매도방향/시총필터 UI
-- **마지막 업데이트**: 2026-03-07
+- **현재 작업**: 리눅스 서버 이전 + DB 연결 설정
+- **마지막 업데이트**: 2026-03-09
+- **서버**: 리눅스 서버 (Tailscale VPN으로 집/회사 PC에서 접속)
+  - 외부 포트 개방 없음 (공유기 NAT + 포트포워딩 미설정)
+  - Tailscale IP: `100.64.229.73`
 - **DB**: PostgreSQL(`korea_stock_data`) — 2022-01-03 ~ 2026-03-03, ~10M rows, 2,721종목
+  - **접속 정보**: `una0@localhost:5432/korea_stock_data` (리눅스 서버)
+  - 환경변수: `KOREA_STOCK_DB_HOST`(기본 localhost), `KOREA_STOCK_DB_PORT`(기본 5432), `KOREA_STOCK_DB_USER`(기본 una0), `KOREA_STOCK_DB_PASS`(~/.bashrc에 설정)
   - 앱 전용 데이터(watchlist/backtest_history/score_change_log): `data/app.db`(SQLite) 분리
-  - 환경변수: `KOREA_STOCK_DB_HOST`(기본 localhost), `KOREA_STOCK_DB_PORT`(기본 5432)
   - PENSION(연기금)은 INSTITUTION에 이미 포함, RETAIL(개인)은 DB에 참고용 존재
 - **백테스트 권장 시작일**: 2023-01-01 이후 (DB가 2022-01-03 시작이므로 1Y 데이터 확보)
 - **다음 시작점**: Stage 5-2(자동화 파이프라인) 또는 추가 기능 개발
 - **시각화**: matplotlib 5종 (PNG/PDF) + Plotly 5종 (Streamlit 인터랙티브)
-- **Streamlit**: `venv/bin/streamlit run app/streamlit_app.py` → http://localhost:8501
+- **Streamlit**: `venv/bin/streamlit run app/streamlit_app.py` → http://100.64.229.73:8501 (Tailscale)
+  - 실행 시 `KOREA_STOCK_DB_PASS` 환경변수 필요 (`.bashrc`에 설정됨)
 - **현재 브랜치**: main
 - **로드맵**: [Next Steps] 섹션 Stage 5 참조
 
