@@ -1149,7 +1149,8 @@ def create_signal_ma_chart(
             'long':  ma_series[long_p].values,
         }).dropna().reset_index(drop=True)
 
-        golden_x, golden_y, dead_x, dead_y = [], [], [], []
+        golden_x, golden_y, golden_hover = [], [], []
+        dead_x, dead_y, dead_hover = [], [], []
         for i in range(1, len(tmp)):
             p_row = tmp.iloc[i - 1]
             c_row = tmp.iloc[i]
@@ -1162,10 +1163,13 @@ def create_signal_ma_chart(
             c_date = pd.Timestamp(c_row['trade_date'])
             x_cross = p_date + pd.Timedelta(seconds=t * (c_date - p_date).total_seconds())
             y_cross = (p_row['short'] + t * (c_row['short'] - p_row['short'])) / 1e8
+            hover_date = c_date.strftime('%Y-%m-%d')
             if diff_p < 0:
                 golden_x.append(x_cross); golden_y.append(y_cross)
+                golden_hover.append(hover_date)
             else:
                 dead_x.append(x_cross);   dead_y.append(y_cross)
+                dead_hover.append(hover_date)
 
         cross_label = f'MA{short_p}↑MA{long_p}'
         if golden_x:
@@ -1173,14 +1177,16 @@ def create_signal_ma_chart(
                 x=golden_x, y=golden_y, name='골든크로스', mode='markers',
                 marker=dict(symbol='triangle-up', color='#4ade80', size=9,
                             line=dict(width=1, color='#0a0a0a')),
-                hovertemplate=f'골든크로스 ({cross_label})<br>%{{x}}<extra></extra>',
+                customdata=golden_hover,
+                hovertemplate=f'골든크로스 ({cross_label})<br>%{{customdata}}<extra></extra>',
             ))
         if dead_x:
             fig.add_trace(go.Scatter(
                 x=dead_x, y=dead_y, name='데드크로스', mode='markers',
                 marker=dict(symbol='triangle-down', color='#f87171', size=9,
                             line=dict(width=1, color='#0a0a0a')),
-                hovertemplate=f'데드크로스 (MA{short_p}↓MA{long_p})<br>%{{x}}<extra></extra>',
+                customdata=dead_hover,
+                hovertemplate=f'데드크로스 (MA{short_p}↓MA{long_p})<br>%{{customdata}}<extra></extra>',
             ))
 
     fig.add_hline(y=0, line_color='#64748b', line_width=0.8)
