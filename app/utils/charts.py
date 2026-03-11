@@ -1459,3 +1459,96 @@ def create_compare_score_radar(
         font_color=_TEXT,
     )
     return fig
+
+
+# ---------------------------------------------------------------------------
+# 누적 수급 바차트
+# ---------------------------------------------------------------------------
+
+def create_cumulative_bar_chart(
+    df: pd.DataFrame,
+    value_col: str,
+    name_col: str = 'display_name',
+    title: str = '',
+    top_n: int = 30,
+    value_format: str = '.1f',
+    color: str = '#38bdf8',
+) -> go.Figure:
+    """누적 수급 순위 수평 바차트
+
+    Args:
+        df: name_col, sector, value_col 포함 DataFrame (이미 정렬됨)
+        value_col: 값 컬럼명
+        name_col: 표시명 컬럼 (기본 display_name)
+        title: 차트 제목
+        top_n: 표시 종목 수
+        value_format: 텍스트 포맷 (예: '.1f', '.0f', '.1%')
+        color: 바 색상
+    """
+    if df.empty:
+        fig = go.Figure()
+        fig.update_layout(title=f'{title} (데이터 없음)', height=300)
+        return _apply_dark(fig)
+
+    plot_df = df.head(top_n).copy()
+    plot_df = plot_df.iloc[::-1]  # 아래→위 순서
+
+    y_labels = plot_df[name_col].tolist()
+    values = plot_df[value_col].fillna(0)
+
+    # 텍스트 라벨 생성
+    if '%' in value_format:
+        text_labels = [f'{v:{value_format}}' for v in values]
+    else:
+        text_labels = [f'{v:{value_format}}' for v in values]
+
+    # y라벨: 종목명만 (종목코드 제거 — 차트에서 가독성)
+    y_labels = [
+        n.rsplit(' (', 1)[0] if ' (' in n else n
+        for n in plot_df[name_col].tolist()
+    ]
+
+    fig = go.Figure(data=go.Bar(
+        y=y_labels,
+        x=values,
+        orientation='h',
+        marker_color=color,
+        marker_line=dict(color=_BG_PAPER, width=0.5),
+        customdata=np.column_stack([
+            plot_df.get('sector', pd.Series(['-'] * len(plot_df))).fillna('-').values,
+            np.array(text_labels, dtype=object),
+        ]),
+        hovertemplate=(
+            '<b>%{y}</b><br>'
+            '섹터: %{customdata[0]}<br>'
+            '값: %{customdata[1]}'
+            '<extra></extra>'
+        ),
+        text=text_labels,
+        textposition='inside',
+        insidetextanchor='end',
+        textfont=dict(color='white', size=11, family='sans-serif'),
+        cliponaxis=False,
+    ))
+
+    # x축: 값 클러스터링 시 변별이 안 되므로, 최솟값 근처부터 시작
+    v_min, v_max = float(values.min()), float(values.max())
+    if v_max <= 0:
+        # 모든 값이 0 이하 — Plotly 자동 스케일링에 위임
+        x_start, x_end = None, None
+    elif v_min > 0:
+        x_start = max(0, v_min * 0.7)  # 최솟값의 70%부터
+        x_end = v_max * 1.08
+    else:
+        x_start = 0
+        x_end = v_max * 1.08
+
+    fig.update_layout(
+        title=title,
+        xaxis=dict(range=[x_start, x_end] if x_end is not None else None, title=''),
+        yaxis_title='',
+        height=max(280, len(plot_df) * 34 + 60),
+        margin=dict(l=10, r=20, t=40, b=20),
+        bargap=0.2,
+    )
+    return _apply_dark(fig)

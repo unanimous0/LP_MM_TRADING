@@ -366,7 +366,7 @@ direction = st.sidebar.selectbox(
 _direction = 'long' if '매수' in direction else 'short'
 
 mcap_filter = st.sidebar.selectbox(
-    "시총 필터", ["전체", "시총 100위 이내", "시총 200위 이내", "시총 500위 이내"], index=0,
+    "시총 필터", ["전체", "시총 100위 이내", "시총 200위 이내", "시총 300위 이내", "시총 500위 이내"], index=0,
     help="대형주 위주로 필터링합니다.",
 )
 
@@ -434,7 +434,7 @@ if not _mcap.empty:
         on='stock_code', how='left',
     )
 
-_mcap_limits = {"시총 100위 이내": 100, "시총 200위 이내": 200, "시총 500위 이내": 500}
+_mcap_limits = {"시총 100위 이내": 100, "시총 200위 이내": 200, "시총 300위 이내": 300, "시총 500위 이내": 500}
 if mcap_filter in _mcap_limits and 'market_cap_rank' in filtered_df.columns:
     filtered_df = filtered_df[filtered_df['market_cap_rank'] <= _mcap_limits[mcap_filter]]
 

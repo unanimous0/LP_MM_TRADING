@@ -91,7 +91,16 @@ class BacktestPrecomputer:
         if verbose:
             print("사전 계산 시작...")
 
-        raw_df = self._load_raw_data(end_date)
+        # start_date가 있으면 Z-Score 윈도우(최대 500D) + 시그널 MA(최대 120D) 버퍼를 포함하여
+        # 데이터 로드 범위를 최적화 (4년치 → 필요한 기간만)
+        data_start = None
+        if start_date:
+            from datetime import datetime, timedelta
+            _buffer_calendar_days = 700 + 180  # 500 거래일 ≈ 700일 + MA 120거래일 ≈ 180일
+            _dt = datetime.strptime(start_date, "%Y-%m-%d")
+            data_start = (_dt - timedelta(days=_buffer_calendar_days)).strftime("%Y-%m-%d")
+
+        raw_df = self._load_raw_data(end_date, start_date=data_start)
         if verbose:
             print(f"  원본 데이터: {len(raw_df):,}건")
 

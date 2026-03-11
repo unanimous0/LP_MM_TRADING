@@ -5,11 +5,6 @@ icon = ":material/trophy:"
 is_section = false
 
 [[pages]]
-path = "pages/7_⚡_이상수급.py"
-name = "이상 수급"
-icon = ":material/bolt:"
-
-[[pages]]
 path = "pages/1_📊_히트맵.py"
 name = "히트맵"
 icon = ":material/grid_on:"
@@ -38,3 +33,13 @@ icon = ":material/bar_chart:"
 path = "pages/6_🔀_종목비교.py"
 name = "종목 비교"
 icon = ":material/compare:"
+
+[[pages]]
+path = "pages/7_⚡_이상수급.py"
+name = "이상 수급"
+icon = ":material/bolt:"
+
+[[pages]]
+path = "pages/8_🏆_누적수급.py"
+name = "누적 수급"
+icon = ":material/leaderboard:"

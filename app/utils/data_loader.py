@@ -1262,6 +1262,149 @@ def snapshot_scores(report_df: pd.DataFrame, analysis_date: str) -> None:
         conn.close()
 
 
+# ---------------------------------------------------------------------------
+# 누적 수급 순위
+# ---------------------------------------------------------------------------
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _get_trading_dates(end_date: str, lookback_days: int) -> list:
+    """end_date 이전 lookback_days개 거래일 목록 반환"""
+    engine = get_db_connection()
+    df = pd.read_sql(
+        text("""
+        SELECT DISTINCT trade_date FROM mv_daily_sff
+        WHERE trade_date <= :end_date
+        ORDER BY trade_date DESC LIMIT :n
+        """),
+        engine,
+        params={'end_date': end_date, 'n': lookback_days},
+    )
+    return sorted(df['trade_date'].astype(str).tolist())
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_cumulative_score_ranking(
+    end_date: str,
+    lookback_days: int = 20,
+    institution_weight: float = 0.3,
+    direction: str = 'long',
+    top_rank_n: int = 50,
+) -> pd.DataFrame:
+    """N일간 일별 final_score 집계 (BacktestPrecomputer 사용).
+
+    Returns:
+        DataFrame(stock_code, avg_score, max_score, score_top_n_ratio, appearance_days, appearance_ratio)
+    """
+    from src.backtesting.precomputer import BacktestPrecomputer
+
+    trading_dates = _get_trading_dates(end_date, lookback_days)
+    if not trading_dates:
+        return pd.DataFrame()
+
+    start_date = trading_dates[0]
+    pg_engine = get_db_connection()
+    precomputer = BacktestPrecomputer(
+        pg_engine,
+        institution_weight=institution_weight,
+        use_tc=True,
+        use_divergence=True,
+    )
+    result = precomputer.precompute(end_date=end_date, start_date=start_date, verbose=False)
+    merged = result.merged_long if direction == 'long' else result.merged_short
+
+    # 벡터화: iterrows 대신 pd.concat로 한번에 결합
+    frames = []
+    for date in result.trading_dates:
+        df = merged.get(date)
+        if df is not None and not df.empty:
+            frames.append(df[['stock_code', 'final_score']].assign(date=date))
+
+    if not frames:
+        return pd.DataFrame()
+
+    all_df = pd.concat(frames, ignore_index=True)
+    all_df['final_score'] = all_df['final_score'].fillna(0)
+    all_df['daily_rank'] = all_df.groupby('date')['final_score'].rank(ascending=False)
+
+    total_days = len(result.trading_dates)
+    agg = all_df.groupby('stock_code').agg(
+        avg_score=('final_score', 'mean'),
+        max_score=('final_score', 'max'),
+        score_top_n_count=('daily_rank', lambda x: (x <= top_rank_n).sum()),
+        appearance_days=('final_score', 'count'),
+    ).reset_index()
+
+    # 분모 = appearance_days (등장한 날 중 비율, sff_top_n_ratio와 기준 통일)
+    agg['score_top_n_ratio'] = agg['score_top_n_count'] / agg['appearance_days']
+    agg['appearance_ratio'] = agg['appearance_days'] / total_days
+
+    return agg
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_cumulative_sff_ranking(
+    end_date: str,
+    lookback_days: int = 20,
+    institution_weight: float = 0.3,
+    direction: str = 'long',
+    top_rank_n: int = 50,
+) -> pd.DataFrame:
+    """N일간 Sff/수급금액 누적 집계 (SQL).
+
+    Returns:
+        DataFrame(stock_code, cum_sff, avg_sff, positive_ratio, sff_top_n_ratio,
+                  cum_net_amount, trading_days)
+    """
+    dir_sign = 1 if direction == 'long' else -1
+    engine = get_db_connection()
+    df = pd.read_sql(
+        text("""
+        WITH date_range AS (
+            SELECT DISTINCT trade_date
+            FROM mv_daily_sff
+            WHERE trade_date <= :end_date
+            ORDER BY trade_date DESC
+            LIMIT :lookback
+        ),
+        daily_sff AS (
+            SELECT m.stock_code, m.trade_date,
+                CASE WHEN m.foreign_sff * m.institution_sff > 0
+                     THEN m.foreign_sff + m.institution_sff * :weight
+                     ELSE m.foreign_sff
+                END * :dir_sign AS combined_sff,
+                (m.foreign_net_amount + m.institution_net_amount) * :dir_sign AS net_amount
+            FROM mv_daily_sff m
+            WHERE m.trade_date IN (SELECT trade_date FROM date_range)
+        ),
+        ranked AS (
+            SELECT *,
+                RANK() OVER (PARTITION BY trade_date ORDER BY combined_sff DESC) AS daily_rank
+            FROM daily_sff
+        )
+        SELECT stock_code,
+            SUM(combined_sff) AS cum_sff,
+            AVG(combined_sff) AS avg_sff,
+            COUNT(*) FILTER (WHERE combined_sff > 0)::float
+                / NULLIF(COUNT(*), 0) AS positive_ratio,
+            COUNT(*) FILTER (WHERE daily_rank <= :top_rank_n)::float
+                / NULLIF(COUNT(*), 0) AS sff_top_n_ratio,
+            SUM(net_amount) AS cum_net_amount,
+            COUNT(*) AS trading_days
+        FROM ranked
+        GROUP BY stock_code
+        """),
+        engine,
+        params={
+            'end_date': end_date,
+            'lookback': lookback_days,
+            'weight': institution_weight,
+            'dir_sign': dir_sign,
+            'top_rank_n': top_rank_n,
+        },
+    )
+    return df
+
+
 def get_score_change_alerts(limit: int = 100) -> pd.DataFrame:
     """
     최근 고득점 변동 알림 조회.

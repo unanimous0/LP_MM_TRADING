@@ -1,8 +1,8 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- **현재 작업**: 골든/데드크로스 주말 날짜 버그 수정
-- **마지막 업데이트**: 2026-03-10
+- **현재 작업**: 누적 수급 순위 페이지 추가
+- **마지막 업데이트**: 2026-03-11
 - **서버**: 리눅스 서버 (Tailscale VPN으로 집/회사 PC에서 접속)
   - 외부 포트 개방 없음 (공유기 NAT + 포트포워딩 미설정)
   - Tailscale IP: `100.64.229.73`
@@ -177,6 +177,11 @@
 - **거래내역 시총순위 추가**: entry_date 기준 유통시총 순위 컬럼 (`market_cap_rank`)
 - **시총 필터 기본값 변경**: 200 → 300
 - **[버그수정] 골든/데드크로스 호버 날짜 주말 표시**: 보간 x좌표(시각위치) 유지 + customdata로 거래일(c_date) 표시
+- **누적 수급 순위 페이지** (`8_🏆_누적수급.py`): 최근 N일 종합점수+수급 누적 분석
+  - 4탭: 종합순위 / 종합점수평균 / 누적수급강도 / 수급안정성&출현빈도
+  - Composite = 평균점수(35%) + 누적Sff(25%) + 양수비율(20%) + 출현빈도(20%) 백분위 가중평균
+  - BacktestPrecomputer(점수) + SQL mv_daily_sff(수급) 이중 데이터소스
+  - Long/Short 방향 전환 + 시총 필터 + 상위 기준(Top N) 슬라이더
 - 294개 테스트 (100% 통과, slow 6개 제외)
 
 **핵심 인사이트**:
@@ -405,6 +410,7 @@ python backtest_runner.py --plot --save-pdf output/report.pdf
 - ✅ 종목 상세 페이지 (`5_📋_종목상세.py`) — 4탭 (Z-Score추이/수급금액/시그널MA/패턴현황)
 - ✅ 종목 비교 페이지 (`6_🔀_종목비교.py`) — 최대 5종목 병렬 비교 (Z-Score추이 오버레이 / 멀티기간 바차트 / 레이더 / 지표 테이블)
 - ✅ 이상수급 페이지 (`7_⚡_이상수급.py`) — 4탭 (이상수급 / 당일수급순위 / 수급금액 / 고득점변동알림)
+- ✅ 누적수급 페이지 (`8_🏆_누적수급.py`) — 4탭 (종합순위 / 종합점수평균 / 누적수급강도 / 수급안정성&출현빈도)
 - ✅ 히트맵 페이지 (`1_📊_히트맵.py`) — 클릭→미니상세, 호버 패턴/점수, 섹터 평균
 - ✅ BacktestPrecomputer 속도 최적화 (165~262배 향상)
 - ✅ PlotlyVisualizer (`src/backtesting/plotly_visualizer.py`)
@@ -577,7 +583,8 @@ LP_MM_TRADING/
 │   └── pages/
 │       ├── 1_🏠_홈.py              # DB 통계, 최근 업데이트
 │       ├── 2_🔍_수급_분석.py       # Stage 1-3 분석 파이프라인
-│       └── 3_📈_백테스트.py        # 백테스트 실행 + Optuna 최적화 + Plotly 차트
+│       ├── 3_📈_백테스트.py        # 백테스트 실행 + Optuna 최적화 + Plotly 차트
+│       └── 8_🏆_누적수급.py        # 누적 수급 순위 (종합/점수/수급/안정성)
 ├── src/
 │   ├── database/                  # DB 모듈
 │   │   └── connection.py          # PostgreSQL(시장데이터) + SQLite(앱데이터) 이중 연결 + MV 확인
@@ -819,6 +826,59 @@ short 정렬/분류: adjusted_z = z × max(-confidence, 0)   ← 매도 방향�
 
 > 전체 이력은 **CHANGELOG.md** 참조. 아래는 최근 항목만 기록.
 
+### 2026-03-11 (누적 수급 순위 페이지 추가 + 코드 리뷰 수정)
+
+**목표**: 최근 N일간 종합점수+수급을 누적하여 꾸준히 상위권에 머문 종목 식별 + 4개 관점 코드 리뷰 후 수정
+
+**구현 내용**:
+
+- ✅ **`get_cumulative_score_ranking()`** (`data_loader.py`)
+  - BacktestPrecomputer로 N일간 일별 final_score 집계
+  - `pd.concat` 벡터화 (iterrows 648K회 제거)
+  - avg_score / max_score / score_top_n_ratio / appearance_ratio 산출
+  - 출현빈도 분모 = `appearance_days` (sff_top_n_ratio와 기준 통일)
+
+- ✅ **`get_cumulative_sff_ranking()`** (`data_loader.py`)
+  - SQL CTE 쿼리로 N일간 combined_sff 누적 집계
+  - combined_sff 조건부 합산: `> 0` (normalizer와 통일)
+  - `:dir_sign` 파라미터로 Long/Short 자동 전환
+
+- ✅ **`create_cumulative_bar_chart()`** (`charts.py`)
+  - 수평 바차트 (x축 데이터 범위 자동 조정, edge case 방어)
+
+- ✅ **누적 수급 페이지** (`8_🏆_누적수급.py`)
+  - 4탭: 종합순위 / 종합점수평균 / 누적수급강도 / 수급안정성&출현빈도
+  - Composite: 백분위 가중평균 × 100 (0~100점 스케일)
+  - ProgressColumn max_value 동적화 (데이터 실제 최댓값 기준)
+  - inner merge (한쪽만 있는 종목의 composite 왜곡 방지)
+  - Composite NaN 방어 (컬럼 부재 시 zero Series)
+  - Short 방향 탭4 캡션 동적화
+  - 종목 상세 이동 버튼 (하단 selectbox + switch_page)
+
+- ✅ **Precomputer 데이터 로드 최적화** (`precomputer.py`)
+  - `start_date` 지정 시 `start_date - 880일`부터만 로드 (Z-Score 500D + MA 120D 버퍼)
+  - lookback=20일에 4년치 ~10M행 로드 → 필요 기간만 로드
+
+- ✅ **시총 필터 300위 통일** (메인 + 패턴분석 + 누적수급)
+
+- ✅ **pages.toml** 순서 정리: 히트맵→패턴분석→...→이상수급→누적수급 (하단)
+
+**파일** (8개):
+```
+app/utils/data_loader.py           (3개 함수 추가 + 벡터화 + SQL > 0 통일)
+app/utils/charts.py                (create_cumulative_bar_chart + x축 edge case)
+app/pages/8_🏆_누적수급.py          (신규 페이지 + 코드리뷰 수정 반영)
+app/pages/2_🔍_패턴분석.py          (시총 300위 추가)
+app/streamlit_app.py               (시총 300위 추가)
+src/backtesting/precomputer.py     (data_start 로드 최적화)
+.streamlit/pages.toml              (페이지 순서 정리)
+CLAUDE.md                          (문서 업데이트)
+```
+
+**테스트**: 294개 통과 (100%), slow 6개 제외 — Precomputer 33개 포함
+
+---
+
 ### 2026-03-10 (골든/데드크로스 호버 날짜 주말 버그 수정)
 
 **목표**: 종목상세 시그널&MA 탭에서 골든/데드크로스 호버 날짜가 주말(토/일)로 표시되는 버그 수정
@@ -1009,5 +1069,5 @@ README.md                             (프로젝트 소개 최신화)
 
 ---
 
-**프로젝트 버전**: v5.1.5 (골든/데드크로스 호버 날짜 주말 버그 수정)
-**마지막 업데이트**: 2026-03-10
+**프로젝트 버전**: v5.2.0 (누적 수급 순위 페이지 + 코드 리뷰 수정)
+**마지막 업데이트**: 2026-03-11
