@@ -204,10 +204,72 @@ col5.metric("시그널 2+", f"{signal_2plus}개", help="시그널 2개 이상 �
 st.divider()
 
 # ---------------------------------------------------------------------------
-# 수급 TOP N 랭킹
+# 시총 구간별 수급 TOP — 대형/중형/전체를 한눈에
 # ---------------------------------------------------------------------------
-st.subheader(f"{'순매수' if _direction == 'long' else '순매도'} 수급 TOP {min(top_n, len(ranked_df))}")
-_mcap_note = " · 시총 500위 이내" if mcap_filter != "전체" else ""
+_dir_top_label = "순매수" if _direction == 'long' else "순매도"
+st.subheader(f"시총 구간별 {_dir_top_label} TOP")
+st.caption("같은 체급 안에서 수급이 가장 강한 종목을 보여줍니다.")
+
+_TIER_TOP_N = 10
+_pat_col_tier = 'pattern_label' if 'pattern_label' in report_df.columns else 'pattern'
+
+# 시총 구간별 필터링 (min_score_filter 적용)
+_base_filtered = report_df[report_df['final_score'] >= min_score_filter].copy()
+
+_tier_configs = [
+    ("대형주", "시총 100위 이내", 1, 100),
+    ("중형주", "101~300위", 101, 300),
+    ("전체", "점수 기준", None, None),
+]
+
+_tier_cols = st.columns(len(_tier_configs))
+for _tc, (_tier_name, _tier_desc, _rank_min, _rank_max) in zip(_tier_cols, _tier_configs):
+    with _tc:
+        if _rank_min is not None and 'market_cap_rank' in _base_filtered.columns:
+            _tier_df = _base_filtered[
+                (_base_filtered['market_cap_rank'] >= _rank_min)
+                & (_base_filtered['market_cap_rank'] <= _rank_max)
+            ]
+        else:
+            _tier_df = _base_filtered
+
+        _tier_df = _tier_df.sort_values('final_score', ascending=False).head(_TIER_TOP_N)
+
+        st.markdown(f"**{_tier_name}** <span style='color:#94a3b8;font-size:13px;'>({_tier_desc})</span>",
+                    unsafe_allow_html=True)
+
+        if _tier_df.empty:
+            st.caption("해당 조건 종목 없음")
+        else:
+            # 컴팩트 HTML 테이블
+            _rows_html = []
+            for _rank_i, (_, _r) in enumerate(_tier_df.iterrows(), 1):
+                _s = _r['final_score']
+                _sc = '#4ade80' if _s >= 70 else ('#fbbf24' if _s >= 60 else '#94a3b8')
+                _pat = str(_r.get(_pat_col_tier, ''))
+                _name = str(_r.get('stock_name', ''))
+                _rows_html.append(
+                    f'<tr>'
+                    f'<td style="color:#64748b;width:24px;">{_rank_i}</td>'
+                    f'<td style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{_esc(_name)}</td>'
+                    f'<td style="color:{_sc};font-weight:600;text-align:right;">{_s:.0f}</td>'
+                    f'<td style="color:#94a3b8;font-size:12px;">{_esc(_pat)}</td>'
+                    f'</tr>'
+                )
+            st.markdown(
+                '<table style="width:100%;border-collapse:collapse;font-size:13px;line-height:1.8;">'
+                + ''.join(_rows_html)
+                + '</table>',
+                unsafe_allow_html=True,
+            )
+
+st.divider()
+
+# ---------------------------------------------------------------------------
+# 수급 TOP N 랭킹 (상세 테이블)
+# ---------------------------------------------------------------------------
+st.subheader(f"{_dir_top_label} 수급 상세 랭킹")
+_mcap_note = f" · {mcap_filter}" if mcap_filter != "전체" else ""
 st.caption(f"종합점수(패턴점수 + 시그널×5) 기준 내림차순 · 최소 {min_score_filter:.0f}점 이상 · {len(ranked_df)}개 종목{_mcap_note}")
 
 if ranked_df.empty:
