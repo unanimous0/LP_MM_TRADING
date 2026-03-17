@@ -76,7 +76,7 @@ def _build_tooltip_html(row, zscore_row=None):
 
     tc_bonus = 0.0
     if not is_sustained:
-        tc_bonus = (tc - 0.5) * 20
+        tc_bonus = (tc - 0.5) * 10
 
     sub_bonus_map = {
         '장기기반': +5, '단기돌파': +5, 'V자반등': +3, '전면수급': +3,
@@ -191,7 +191,7 @@ def _build_tooltip_html(row, zscore_row=None):
     # 보정
     if not is_sustained:
         tc_desc = "순서일치" if tc >= 0.7 else ("혼조" if tc >= 0.4 else "역순")
-        h.append(f'<div class="tt-adj">tc보너스 ({tc:.2f} − 0.5) × 20 = <b>{tc_bonus:+.1f}</b> <span class="tt-dim">({tc_desc})</span></div>')
+        h.append(f'<div class="tt-adj">tc보너스 ({tc:.2f} − 0.5) × 10 = <b>{tc_bonus:+.1f}</b> <span class="tt-dim">({tc_desc})</span></div>')
 
     if sub_type:
         h.append(f'<div class="tt-adj">복합패턴 {_esc(sub_type)} = <b>{sub_bonus:+d}</b></div>')
@@ -601,7 +601,7 @@ Z-Score 패턴의 형태에 따라 3가지 기본 패턴 + 7가지 복합 패턴
           + 단순평균 × 0.10 (지속형: 0.30)
 
 패턴점수 = 기본점수 + tc보너스 + 복합패턴보너스
-  · tc보너스 = (tc - 0.5) × 20  (±10점, 지속형 제외)
+  · tc보너스 = (tc - 0.5) × 10  (±5점, 지속형 제외)
   · 복합패턴보너스 = -8 ~ +5점
 
 종합점수 = 패턴점수 + 시그널수 × 5

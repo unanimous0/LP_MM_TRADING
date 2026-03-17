@@ -278,7 +278,7 @@ with st.sidebar.expander("스코어링 버전", expanded=False):
         value=True,
         key="w_use_tc",
         help="tc 기준: 5D≥10D≥…≥500D 순서 일관성 (0~1)\n"
-             "ON: 급등형 진입조건(tc≥0.5) + 점수 보너스 ±10점 적용\n"
+             "ON: 급등형 진입조건(tc≥0.5) + 점수 보너스 ±5점 적용\n"
              "OFF: 조건 무시, 보너스 없음 (개선 이전 동작)",
     )
     use_divergence = st.checkbox(

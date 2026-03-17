@@ -719,7 +719,7 @@ MA 골든크로스, 수급 가속도, 외인-기관 동조율 등의 추가 시�
        + short_divergence × 0.15 <span class="comment"># 단기이격 (5D - 20D)</span>
 
 <span class="key">base_score</span> <span class="op">=</span> (가중합 + 3) / 6 × 100              <span class="comment"># Z[-3,3] → [0,100] 변환</span>
-<span class="key">tc_bonus</span>   <span class="op">=</span> (temporal_consistency - 0.5) × 20   <span class="comment"># ±10점 보너스/페널티</span>
+<span class="key">tc_bonus</span>   <span class="op">=</span> (temporal_consistency - 0.5) × 10   <span class="comment"># ±5점 보너스/페널티</span>
 <span class="key">pattern_score</span> <span class="op">=</span> clip(base_score + tc_bonus, 0, 100)
 
 <span class="comment"># 최종 점수</span>

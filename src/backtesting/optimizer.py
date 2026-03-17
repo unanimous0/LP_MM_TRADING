@@ -93,6 +93,8 @@ class OptunaOptimizer:
             'force_exit_on_end': c.force_exit_on_end,
             'use_tc': c.use_tc,
             'use_divergence': c.use_divergence,
+            'tc_center': c.tc_center,
+            'tc_scale': c.tc_scale,
             'tax_rate': c.tax_rate,
             'commission_rate': c.commission_rate,
             'slippage_rate': c.slippage_rate,
@@ -333,6 +335,8 @@ class OptunaOptimizer:
             use_tc=self.base_config.use_tc,
             use_divergence=self.base_config.use_divergence,
             market_cap_top_n=self.base_config.market_cap_top_n,
+            tc_center=self.base_config.tc_center,
+            tc_scale=self.base_config.tc_scale,
         )
         shared_precomputed = pc.precompute(
             self.end_date, start_date=self.start_date, verbose=verbose

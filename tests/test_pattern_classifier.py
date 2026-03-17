@@ -486,8 +486,8 @@ class TestPatternClassifier:
         score_high = classifier.calculate_pattern_score(row_high_tc)
         score_low  = classifier.calculate_pattern_score(row_low_tc)
 
-        # tc=1.0 → +10점, tc=0.0 → -10점 → 차이 = 20점
-        assert score_high - score_low == pytest.approx(20.0, abs=0.1)
+        # tc=1.0 → +5점, tc=0.0 → -5점 → 차이 = 10점 (tc_scale=10)
+        assert score_high - score_low == pytest.approx(10.0, abs=0.1)
 
     def test_sustained_pattern_with_low_tc(self, classifier):
         """지속형은 tc 조건이 없으므로 tc=0.1도 지속형으로 분류됨"""
@@ -586,7 +586,7 @@ class TestScoringToggle:
         assert classifier_default.classify_pattern(row) != '급등형'
 
     def test_use_tc_false_no_tc_bonus_in_score(self, classifier_no_tc):
-        """use_tc=False이면 tc_bonus(±10점)가 적용되지 않음"""
+        """use_tc=False이면 tc_bonus(±5점)가 적용되지 않음"""
         base = {
             'recent': 1.0,
             'long_divergence': 0.5,

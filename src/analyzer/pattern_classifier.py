@@ -43,22 +43,28 @@ class PatternClassifier:
 
     def __init__(self, config: Optional[dict] = None,
                  use_tc: bool = True,
-                 use_divergence: bool = True):
+                 use_divergence: bool = True,
+                 tc_center: float = 0.5,
+                 tc_scale: float = 10.0):
         """
         Args:
             config: 패턴 분류 설정
                 - pattern_thresholds: 패턴별 임계값
                 - score_weights: 점수 가중치
             use_tc: Temporal Consistency 적용 여부
-                True(기본): tc 임계값 조건 + tc_bonus ±10점 적용
+                True(기본): tc 임계값 조건 + tc_bonus 적용
                 False: tc 조건 무시 (스코어링 개선 이전 동작)
             use_divergence: 이격도(short/mid) 점수 반영 여부
                 True(기본): 현재 가중치 (short_divergence=0.10, mid_divergence=0.10) 사용
                 False: 레거시 가중치 사용 (short_divergence=0.00, mid_divergence=0.00, 이격도 도입 이전 동작)
+            tc_center: tc_bonus 중심점 (기본 0.5, 이 값일 때 bonus=0)
+            tc_scale: tc_bonus 스케일 (기본 10.0, bonus 범위 = ±tc_scale/2)
         """
         self.config = config or self._get_default_config()
         self.use_tc = use_tc
         self.use_divergence = use_divergence
+        self.tc_center = tc_center
+        self.tc_scale = tc_scale
 
     @staticmethod
     def _get_default_config() -> dict:
@@ -291,7 +297,7 @@ class PatternClassifier:
             - Z-Score 범위 [-3, 3]을 [0, 100]으로 변환
             - 지속형은 short_divergence 제외 (가중치 0, average로 흡수)
             - 지속형은 tc_bonus 없음 (tc=0.0이 정상 패턴이므로 페널티 부적절)
-            - 급등형/전환형/기타: tc_bonus ±10점 적용
+            - 급등형/전환형/기타: tc_bonus ±5점 적용 (tc_scale=10)
 
         Pattern-aware weights:
             지속형: short_divergence 가중치=0 (average로 재분배)
@@ -339,14 +345,14 @@ class PatternClassifier:
         base_score = ((weighted_sum + 3) / 6) * 100
         base_score = float(np.clip(base_score, 0, 100))
 
-        # Temporal consistency 보너스: ±10점 (지속형 제외, use_tc=True일 때만)
-        # 지속형은 tc=0.0(장기>단기)이 이상적이므로 tc 보너스 부적절
-        # 급등형/전환형/기타: tc=1.0 → +10점, tc=0.5 → 0점, tc=0.0 → -10점
+        # Temporal consistency 보너스 (지속형 제외, use_tc=True일 때만)
+        # tc_bonus = (tc - tc_center) × tc_scale
+        # 기본: center=0.5, scale=10 → 범위 ±5점
         # use_tc=False이면 보너스 미적용 (스코어링 개선 이전 동작)
         if self.use_tc and pattern != '지속형':
             tc = row.get('temporal_consistency', 0.5)
             if pd.notna(tc):
-                tc_bonus = (tc - 0.5) * 20
+                tc_bonus = (tc - self.tc_center) * self.tc_scale
                 base_score += tc_bonus
 
         return float(np.clip(base_score, 0, 100))

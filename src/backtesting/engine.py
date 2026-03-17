@@ -39,6 +39,8 @@ class BacktestConfig:
                  force_exit_on_end: bool = False,  # 백테스트 종료 시 강제 청산 여부
                  use_tc: bool = True,              # Temporal Consistency 적용 여부
                  use_divergence: bool = True,      # Short Divergence 점수 반영 여부
+                 tc_center: float = 0.5,           # tc_bonus 중심점 (이 값일 때 bonus=0)
+                 tc_scale: float = 10.0,           # tc_bonus 스케일 (범위 = ±scale/2)
                  tax_rate: float = 0.0020,  # 증권거래세 (매도 시, 0.20%)
                  commission_rate: float = 0.00015,  # 수수료 (매수/매도, 0.015%)
                  slippage_rate: float = 0.001,  # 슬리피지 (매수/매도, 0.1%)
@@ -83,6 +85,8 @@ class BacktestConfig:
         self.force_exit_on_end = force_exit_on_end
         self.use_tc = use_tc
         self.use_divergence = use_divergence
+        self.tc_center = tc_center
+        self.tc_scale = tc_scale
         self.tax_rate = tax_rate
         self.commission_rate = commission_rate
         self.slippage_rate = slippage_rate
@@ -119,6 +123,8 @@ class BacktestEngine:
         self.classifier = PatternClassifier(
             use_tc=self.config.use_tc,
             use_divergence=self.config.use_divergence,
+            tc_center=self.config.tc_center,
+            tc_scale=self.config.tc_scale,
         )
         self.signal_detector = SignalDetector(conn, institution_weight=self.config.institution_weight)
 
@@ -587,6 +593,8 @@ class BacktestEngine:
                 use_tc=self.config.use_tc,
                 use_divergence=self.config.use_divergence,
                 market_cap_top_n=self.config.market_cap_top_n,
+                tc_center=self.config.tc_center,
+                tc_scale=self.config.tc_scale,
             )
             self._precomputed = pc.precompute(end_date, verbose=verbose)
 

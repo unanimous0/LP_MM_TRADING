@@ -63,7 +63,8 @@ class BacktestPrecomputer:
 
     def __init__(self, conn, institution_weight: float = 0.3,
                  use_tc: bool = True, use_divergence: bool = True,
-                 market_cap_top_n: Optional[int] = None):
+                 market_cap_top_n: Optional[int] = None,
+                 tc_center: float = 0.5, tc_scale: float = 10.0):
         """
         Args:
             conn: 데이터베이스 연결
@@ -71,12 +72,16 @@ class BacktestPrecomputer:
             use_tc: Temporal Consistency 적용 여부 (PatternClassifier로 전달)
             use_divergence: Short Divergence 점수 반영 여부 (PatternClassifier로 전달)
             market_cap_top_n: 시총 상위 N종목만 필터링 (None이면 전체)
+            tc_center: tc_bonus 중심점 (PatternClassifier로 전달)
+            tc_scale: tc_bonus 스케일 (PatternClassifier로 전달)
         """
         self.conn = conn
         self.institution_weight = institution_weight
         self.use_tc = use_tc
         self.use_divergence = use_divergence
         self.market_cap_top_n = market_cap_top_n
+        self.tc_center = tc_center
+        self.tc_scale = tc_scale
 
     def precompute(self, end_date: str, start_date: Optional[str] = None,
                    verbose: bool = True) -> PrecomputeResult:
@@ -428,7 +433,10 @@ class BacktestPrecomputer:
         from src.analyzer.pattern_classifier import PatternClassifier
         # use_tc / use_divergence를 Precomputer 설정에서 그대로 전달
         # (검증 모드에서 before/after 비교 시 이 경로에서 결정됨)
-        classifier = PatternClassifier(use_tc=self.use_tc, use_divergence=self.use_divergence)
+        classifier = PatternClassifier(
+            use_tc=self.use_tc, use_divergence=self.use_divergence,
+            tc_center=self.tc_center, tc_scale=self.tc_scale,
+        )
 
         patterns_long = {}
         patterns_short = {}
