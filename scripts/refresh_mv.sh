@@ -13,7 +13,7 @@ DB_PORT="${KOREA_STOCK_DB_PORT:-5432}"
 DB_NAME="korea_stock_data"
 
 echo "$(date '+%Y-%m-%d %H:%M:%S') MV 리프레시 시작..."
-DB_USER="${KOREA_STOCK_DB_USER:-postgres}"
+DB_USER="${KOREA_STOCK_DB_USER:-una0}"
 
 psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
     -c "REFRESH MATERIALIZED VIEW mv_daily_sff;"

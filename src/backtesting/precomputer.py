@@ -341,10 +341,10 @@ class BacktestPrecomputer:
             df['foreign_net_amount']
         )
 
-        # 1. MA Cross (signal_detector.detect_ma_crossover 동일)
-        df['ma5'] = df.groupby('stock_code')['foreign_net_amount'].transform(
+        # 1. MA Cross (signal_detector.detect_ma_crossover 동일 — combined_net 기준)
+        df['ma5'] = df.groupby('stock_code')['combined_net'].transform(
             lambda x: x.rolling(5).mean())
-        df['ma20'] = df.groupby('stock_code')['foreign_net_amount'].transform(
+        df['ma20'] = df.groupby('stock_code')['combined_net'].transform(
             lambda x: x.rolling(20).mean())
         df['prev_ma5'] = df.groupby('stock_code')['ma5'].shift(1)
         df['prev_ma20'] = df.groupby('stock_code')['ma20'].shift(1)

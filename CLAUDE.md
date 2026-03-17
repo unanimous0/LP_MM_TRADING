@@ -1,8 +1,8 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- **현재 작업**: 누적 수급 순위 페이지 추가
-- **마지막 업데이트**: 2026-03-11
+- **현재 작업**: tc_bonus 스케일 조정 + 시총 구간별 TOP + 코드 리뷰 수정
+- **마지막 업데이트**: 2026-03-17
 - **서버**: 리눅스 서버 (Tailscale VPN으로 집/회사 PC에서 접속)
   - 외부 포트 개방 없음 (공유기 NAT + 포트포워딩 미설정)
   - Tailscale IP: `100.64.229.73`
@@ -182,7 +182,10 @@
   - Composite = 평균점수(35%) + 누적Sff(25%) + 양수비율(20%) + 출현빈도(20%) 백분위 가중평균
   - BacktestPrecomputer(점수) + SQL mv_daily_sff(수급) 이중 데이터소스
   - Long/Short 방향 전환 + 시총 필터 + 상위 기준(Top N) 슬라이더
-- 294개 테스트 (100% 통과, slow 6개 제외)
+- **tc_bonus 스케일 조정**: `tc_scale` 20→10 (±10점→±5점, 대형주 패널티 완화), 파라미터화 전파
+- **메인 페이지 시총 구간별 TOP**: 대형주(1-100위)/중형주(101-300위)/전체 TOP 10 병렬 표시
+- **[버그수정] Precomputer MA 크로스**: `foreign_net_amount` → `combined_net` (signal_detector/SQL과 통일)
+- 300개 테스트 (100% 통과, slow 6개 포함)
 
 **핵심 인사이트**:
 - 3개 패턴은 투자 스타일별 최적 종목 필터링 (단기=돌파형, 중기=매집형, 저가=반등형)
@@ -826,6 +829,48 @@ short 정렬/분류: adjusted_z = z × max(-confidence, 0)   ← 매도 방향�
 
 > 전체 이력은 **CHANGELOG.md** 참조. 아래는 최근 항목만 기록.
 
+### 2026-03-17 (tc_bonus 스케일 조정 + 시총 구간별 TOP + Precomputer MA 버그 수정)
+
+**목표**: 대형주 점수 실효성 개선 + 코드 리뷰 발견 버그 수정
+
+**구현 내용**:
+
+- ✅ **tc_bonus 스케일 축소**: `tc_scale` 20→10 (±10점→±5점)
+  - 대형주 패널티 완화 (tc가 낮은 대형주가 과도하게 감점되는 문제)
+  - 4변형×3기간 백테스트 검증 후 적용 (시총300 필터: B변형 +12.9% 최적)
+  - 파라미터화: `PatternClassifier(tc_center, tc_scale)` → `BacktestConfig` → `Precomputer` 전파
+  - 영향 범위: `pattern_classifier.py`, `engine.py`, `precomputer.py`, `optimizer.py`, `walk_forward.py`
+  - UI/문서 8곳 ±10→±5 / ×20→×10 업데이트
+
+- ✅ **메인 페이지 시총 구간별 TOP**: 대형주가 전체 순위에서 보이지 않는 문제 해결
+  - KPI 카드 아래 3컬럼: 대형주 TOP 10 (1-100위) / 중형주 TOP 10 (101-300위) / 전체 TOP 10
+  - 색상 코딩: 80+점 green, 70+ sky, 60+ amber, <60 slate
+  - 컴팩트 HTML 테이블 (점수 기준 정렬)
+
+- ✅ **[버그수정] Precomputer MA 크로스 컬럼 불일치**
+  - **문제**: `precomputer.py:345-348`에서 MA5/MA20을 `foreign_net_amount`로 계산
+  - **정상**: `signal_detector.py` + SQL `fn_signals_latest()`는 `combined_sff`(조건부 합산) 사용
+  - **수정**: `foreign_net_amount` → `combined_net` (이미 같은 함수에서 계산된 조건부 합산값)
+  - 백테스트 시그널 탐지가 실시간 분석과 동일해짐
+
+**테스트**: 300개 통과 (precomputer 23 + engine 16 + others 261)
+
+**파일** (10개):
+```
+src/analyzer/pattern_classifier.py    (tc_center/tc_scale 파라미터화)
+src/backtesting/precomputer.py        (tc_center/tc_scale 전파 + MA cross 버그 수정)
+src/backtesting/engine.py             (BacktestConfig tc_center/tc_scale)
+src/backtesting/optimizer.py          (tc_center/tc_scale 전파)
+src/backtesting/walk_forward.py       (tc_center/tc_scale 전파)
+app/streamlit_app.py                  (시총 구간별 TOP 섹션 추가)
+app/pages/2_🔍_패턴분석.py            (tc_bonus ×10 표시)
+app/pages/3_📈_백테스트.py            (tc_bonus ±5점 표시)
+tests/test_pattern_classifier.py      (tc_bonus assertion 업데이트)
+CLAUDE.md                             (문서 업데이트)
+```
+
+---
+
 ### 2026-03-11 (누적 수급 순위 페이지 추가 + 코드 리뷰 수정)
 
 **목표**: 최근 N일간 종합점수+수급을 누적하여 꾸준히 상위권에 머문 종목 식별 + 4개 관점 코드 리뷰 후 수정
@@ -1069,5 +1114,5 @@ README.md                             (프로젝트 소개 최신화)
 
 ---
 
-**프로젝트 버전**: v5.2.0 (누적 수급 순위 페이지 + 코드 리뷰 수정)
-**마지막 업데이트**: 2026-03-11
+**프로젝트 버전**: v5.3.0 (tc_bonus 스케일 조정 + 시총 구간별 TOP + Precomputer MA 버그 수정)
+**마지막 업데이트**: 2026-03-17
