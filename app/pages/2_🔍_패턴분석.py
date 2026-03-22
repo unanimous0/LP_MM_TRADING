@@ -24,6 +24,7 @@ from utils.data_loader import (
     get_stock_list, get_db_connection,
     get_watchlist, add_to_watchlist, remove_from_watchlist,
     get_market_cap_latest,
+    get_score_reference_distributions, rescale_scores,
 )
 from utils.charts import (
     create_sector_avg_score_chart,
@@ -370,6 +371,21 @@ mcap_filter = st.sidebar.selectbox(
     help="대형주 위주로 필터링합니다.",
 )
 
+st.sidebar.divider()
+_rescale_on = st.sidebar.checkbox(
+    "점수 보정", value=True,
+    help="시총 필터 범위 종목의 최근 N거래일 점수 분포 기준으로 0~100 스케일을 재조정합니다. "
+         "대형주의 점수가 낮게 나오는 문제를 해결합니다.",
+    key="pa_rescale_on",
+)
+_rescale_lookback = st.sidebar.number_input(
+    "기준 기간 (거래일)", min_value=20, max_value=240, value=120, step=20,
+    help="최근 M거래일의 점수 분포를 기준으로 스케일링합니다. 길수록 안정적, 짧으면 최근 시장 반영.",
+    disabled=not _rescale_on,
+    key="pa_rescale_lookback",
+)
+st.sidebar.divider()
+
 sectors = get_sectors()
 selected_sector = st.sidebar.selectbox("섹터", ["전체"] + sectors)
 
@@ -391,12 +407,30 @@ if report_df.empty:
     st.warning("분석 데이터가 없습니다.")
     st.stop()
 
-# final_score 계산
+# final_score 계산 (보정 전 raw)
 report_df = report_df.copy()
 if 'signal_count' in report_df.columns:
     report_df['final_score'] = report_df['score'] + report_df['signal_count'] * 5
 else:
     report_df['final_score'] = report_df['score']
+
+# 점수 보정 — 시총 필터 기준 분포로 백분위 변환
+_ref_dists = {}
+if _rescale_on:
+    with st.spinner("점수 보정 기준 계산 중... (첫 호출 시 ~20초, 이후 캐시)"):
+        _ref_dists = get_score_reference_distributions(
+            end_date=end_date_str,
+            lookback_days=_rescale_lookback,
+            institution_weight=institution_weight,
+            direction=_direction,
+        )
+_mcap_to_ref_key = {
+    "시총 100위 이내": "top_100", "시총 200위 이내": "top_200",
+    "시총 300위 이내": "top_300", "시총 500위 이내": "all",
+}
+_ref_list = _ref_dists.get(_mcap_to_ref_key.get(mcap_filter, "all"), [])
+if _ref_list:
+    report_df = rescale_scores(report_df, _ref_list)
 
 # 섹터 + 최소 점수 필터
 conn = get_db_connection()

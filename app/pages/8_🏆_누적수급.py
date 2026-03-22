@@ -121,6 +121,7 @@ score_df = get_cumulative_score_ranking(
     institution_weight=institution_weight,
     direction=direction_key,
     top_rank_n=top_rank_n,
+    market_cap_top_n=mcap_top_n or 500,
 )
 
 # C. 종목 정보 + 시총

@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 from sqlalchemy import text
@@ -315,7 +316,7 @@ def _stage_classify(end_date: Optional[str] = None, institution_weight: float = 
     zscore_matrix = _stage_zscore(end_date=end_date, institution_weight=institution_weight)
     if zscore_matrix.empty:
         return pd.DataFrame()
-    classifier = PatternClassifier()
+    classifier = PatternClassifier(use_tc=True, use_divergence=True, tc_center=0.5, tc_scale=10.0)
     return classifier.classify_all(zscore_matrix, direction=direction)
 
 
@@ -406,6 +407,38 @@ def run_analysis_pipeline_with_progress(
     _upd(0.75, "📡 시그널 탐지 완료 → 리포트 생성 중... 75%")
     report_df = _stage_report(end_date=end_date, institution_weight=institution_weight,
                               direction=direction)
+
+    # ── 필터 1: 거래대금 1억 미만 종목 제외 (거래정지 + 극소거래량 포함) ──
+    # 거래정지(volume=0) + 유동성 부족 종목은 sff 노이즈 → 의미 없는 점수 산출
+    if not classified_df.empty and end_date is not None:
+        try:
+            _engine = get_db_connection()
+            _illiquid = pd.read_sql(text('''
+                SELECT stock_code FROM ohlcv_daily
+                WHERE time = :dt AND (trading_value < 100000000 OR trading_value IS NULL)
+            '''), _engine, params={'dt': end_date})
+            if not _illiquid.empty:
+                _illiquid_codes = set(_illiquid['stock_code'])
+                classified_df = classified_df[~classified_df['stock_code'].isin(_illiquid_codes)]
+                if not report_df.empty:
+                    report_df = report_df[~report_df['stock_code'].isin(_illiquid_codes)]
+                if not signals_df.empty:
+                    signals_df = signals_df[~signals_df['stock_code'].isin(_illiquid_codes)]
+        except Exception:
+            pass  # DB 오류 시 필터 스킵
+
+    # ── 필터 2: 방향 확신도 — 실제 수급 방향이 반대인 종목 제외 ──
+    # direction_confidence가 Z-Score를 0으로 만든 종목은 weighted_sum≈0 → score≈50
+    # 임계값 0.05: tanh(x)>0.05 ↔ sff>0.05×std — 노이즈 수준 제외
+    if not classified_df.empty:
+        _active = classified_df[
+            (classified_df['recent'].abs() > 0.05) |
+            (classified_df['weighted'].abs() > 0.05)
+        ]['stock_code']
+        classified_df = classified_df[classified_df['stock_code'].isin(_active)]
+        if not report_df.empty:
+            report_df = report_df[report_df['stock_code'].isin(_active)]
+        signals_df = signals_df[signals_df['stock_code'].isin(_active)] if not signals_df.empty else signals_df
 
     _upd(0.85, "📋 리포트 생성 완료 85%")
 
@@ -1282,6 +1315,108 @@ def _get_trading_dates(end_date: str, lookback_days: int) -> list:
     return sorted(df['trade_date'].astype(str).tolist())
 
 
+# ---------------------------------------------------------------------------
+# 점수 보정 (Score Rescaling) — 상위 N개 × 최근 M일 분포 기반
+# ---------------------------------------------------------------------------
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_score_reference_distributions(
+    end_date: str,
+    lookback_days: int = 120,
+    institution_weight: float = 0.3,
+    direction: str = 'long',
+) -> Dict[str, List[float]]:
+    """Precomputer 1회 실행(상위 500종목) → 체급별 정렬된 점수 분포 반환.
+
+    Returns:
+        {'all': [...], 'top_100': [...], 'top_200': [...], 'top_300': [...],
+         'large': [...], 'mid': [...], 'small': [...]}
+        빈 경우 빈 dict.
+    """
+    from src.backtesting.precomputer import BacktestPrecomputer
+
+    trading_dates = _get_trading_dates(end_date, lookback_days)
+    if not trading_dates:
+        return {}
+
+    start_date = trading_dates[0]
+    pg_engine = get_db_connection()
+    precomputer = BacktestPrecomputer(
+        pg_engine,
+        institution_weight=institution_weight,
+        use_tc=True,
+        use_divergence=True,
+        market_cap_top_n=500,
+    )
+    result = precomputer.precompute(end_date=end_date, start_date=start_date, verbose=False)
+    merged = result.merged_long if direction == 'long' else result.merged_short
+
+    # 점수 + 종목코드 수집 (벡터화)
+    all_dfs = []
+    for date in result.trading_dates:
+        df = merged.get(date)
+        if df is not None and not df.empty and 'score' in df.columns:
+            sub = df[['stock_code', 'score']].copy()
+            if 'signal_count' in df.columns:
+                sub['final_score'] = sub['score'] + df['signal_count'].fillna(0) * 5
+            else:
+                sub['final_score'] = sub['score']
+            all_dfs.append(sub[['stock_code', 'final_score']].dropna(subset=['final_score']))
+
+    if not all_dfs:
+        return {}
+
+    scores_df = pd.concat(all_dfs, ignore_index=True)
+
+    # 시총 순위 조인
+    mcap = get_market_cap_latest()
+    if not mcap.empty:
+        scores_df = scores_df.merge(
+            mcap[['stock_code', 'market_cap_rank']], on='stock_code', how='left',
+        )
+    else:
+        scores_df['market_cap_rank'] = np.nan
+
+    has_rank = scores_df['market_cap_rank'].notna()
+    fs = scores_df['final_score']
+    rank = scores_df['market_cap_rank']
+
+    dists: Dict[str, List[float]] = {
+        'all': sorted(fs.tolist()),
+        'top_100': sorted(fs[has_rank & (rank <= 100)].tolist()),
+        'top_200': sorted(fs[has_rank & (rank <= 200)].tolist()),
+        'top_300': sorted(fs[has_rank & (rank <= 300)].tolist()),
+        'large': sorted(fs[has_rank & (rank <= 100)].tolist()),
+        'mid': sorted(fs[has_rank & (rank > 100) & (rank <= 300)].tolist()),
+        'small': sorted(fs[has_rank & (rank > 300)].tolist()),
+    }
+    return dists
+
+
+def rescale_scores(
+    df: pd.DataFrame,
+    ref_sorted: List[float],
+) -> pd.DataFrame:
+    """백분위 기반 점수 보정: 역사적 분포에서 해당 종합점수의 백분위 × 100.
+
+    final_score(패턴점수+시그널보너스)를 기준 분포와 비교하여 백분위로 변환.
+    - 같은 체급 안에서 0~100으로 자연 분포 (100 초과 없음)
+    - 강한 날 1위는 99점, 약한 날 1위는 70점 (교차일 비교 보존)
+    """
+    df = df.copy()
+    n = len(ref_sorted)
+    if n == 0:
+        return df
+
+    ref_arr = np.array(ref_sorted)
+
+    # final_score(raw) 기준으로 백분위 계산
+    raw_final = df['final_score'].values
+    percentiles = np.searchsorted(ref_arr, raw_final, side='right') / n * 100
+    df['final_score'] = np.clip(percentiles, 0, 100)
+    return df
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_cumulative_score_ranking(
     end_date: str,
@@ -1289,6 +1424,7 @@ def get_cumulative_score_ranking(
     institution_weight: float = 0.3,
     direction: str = 'long',
     top_rank_n: int = 50,
+    market_cap_top_n: Optional[int] = 500,
 ) -> pd.DataFrame:
     """N일간 일별 final_score 집계 (BacktestPrecomputer 사용).
 
@@ -1308,6 +1444,7 @@ def get_cumulative_score_ranking(
         institution_weight=institution_weight,
         use_tc=True,
         use_divergence=True,
+        market_cap_top_n=market_cap_top_n,
     )
     result = precomputer.precompute(end_date=end_date, start_date=start_date, verbose=False)
     merged = result.merged_long if direction == 'long' else result.merged_short

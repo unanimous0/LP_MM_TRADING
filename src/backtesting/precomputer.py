@@ -447,12 +447,21 @@ class BacktestPrecomputer:
             except KeyError:
                 continue
 
-            # _today_sff, _std_*D 메타컬럼이 포함됨 → classify_all()에서 방향 확신도 적용
-            long_stocks = zscore_on_date[zscore_on_date['5D'] > 0].copy()
+            # 방향 확신도 기준으로 분할 (_sff_5d_avg 사용 — classify_all과 동일 기준)
+            # 이전: 5D Z-Score > 0 (Z-Score는 편차 지표라 방향과 불일치 가능)
+            # 현재: _sff_5d_avg > 0 (실제 수급 방향 기준, classify_all과 통일)
+            sff_col = '_sff_5d_avg' if '_sff_5d_avg' in zscore_on_date.columns else '_today_sff'
+            if sff_col in zscore_on_date.columns:
+                long_stocks = zscore_on_date[zscore_on_date[sff_col] > 0].copy()
+                short_stocks = zscore_on_date[zscore_on_date[sff_col] < 0].copy()
+            else:
+                # 폴백: 기존 5D 기준
+                long_stocks = zscore_on_date[zscore_on_date['5D'] > 0].copy()
+                short_stocks = zscore_on_date[zscore_on_date['5D'] < 0].copy()
+
             if not long_stocks.empty:
                 patterns_long[date] = classifier.classify_all(long_stocks, direction='long')
 
-            short_stocks = zscore_on_date[zscore_on_date['5D'] < 0].copy()
             if not short_stocks.empty:
                 patterns_short[date] = classifier.classify_all(short_stocks, direction='short')
 

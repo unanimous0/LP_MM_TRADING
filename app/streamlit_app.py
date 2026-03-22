@@ -16,6 +16,7 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 from datetime import datetime
+from typing import Dict
 from html import escape as _esc
 
 from utils.data_loader import (
@@ -23,6 +24,8 @@ from utils.data_loader import (
     get_date_range,
     get_abnormal_supply_data,
     get_market_cap_latest,
+    get_score_reference_distributions,
+    rescale_scores,
 )
 from utils.charts import (
     create_pattern_pie_chart,
@@ -119,6 +122,19 @@ mcap_filter = st.sidebar.selectbox(
     help="대형주 위주로 필터링합니다.",
 )
 
+st.sidebar.divider()
+_rescale_on = st.sidebar.checkbox(
+    "점수 보정", value=True,
+    help="시총 필터 범위 종목의 최근 N거래일 점수 분포 기준으로 0~100 스케일을 재조정합니다. "
+         "대형주의 점수가 낮게 나오는 문제를 해결합니다.",
+)
+_rescale_lookback = st.sidebar.number_input(
+    "기준 기간 (거래일)", min_value=20, max_value=240, value=120, step=20,
+    help="최근 M거래일의 점수 분포를 기준으로 스케일링합니다. 길수록 안정적, 짧으면 최근 시장 반영.",
+    disabled=not _rescale_on,
+)
+st.sidebar.divider()
+
 min_score_filter = st.sidebar.slider(
     "최소 종합점수", 0.0, 100.0, 60.0, step=5.0,
     help="종합점수(패턴점수 + 시그널수×5)가 이 값 이상인 종목만 표시합니다.",
@@ -153,7 +169,7 @@ _prog.progress(1.0, text="완료 100%")
 _prog.empty()
 
 # ---------------------------------------------------------------------------
-# final_score 계산 + 필터 + 정렬
+# 기본 final_score (보정 전 raw) + 시총/Z-Score 병합
 # ---------------------------------------------------------------------------
 report_df = report_df.copy()
 if 'signal_count' in report_df.columns:
@@ -174,14 +190,38 @@ if not _mcap.empty:
         on='stock_code', how='left',
     )
 
-# 필터 + 정렬
-ranked_df = report_df[report_df['final_score'] >= min_score_filter].copy()
+# ---------------------------------------------------------------------------
+# 점수 보정 — Precomputer 1회 → 체급별 분포 (캐시)
+# ---------------------------------------------------------------------------
+_ref_dists: Dict = {}
+if _rescale_on:
+    with st.spinner("점수 보정 기준 계산 중... (첫 호출 시 ~20초, 이후 캐시)"):
+        _ref_dists = get_score_reference_distributions(
+            end_date=end_date_str,
+            lookback_days=_rescale_lookback,
+            institution_weight=institution_weight,
+            direction=_direction,
+        )
 
-# 시총 필터 적용
+# raw 보존 (tier TOP에서 체급별 독립 보정용)
+_report_raw = report_df
+
+# 상세 랭킹용 보정: 시총 필터에 맞는 분포 사용
+_mcap_to_ref_key = {
+    "시총 100위 이내": "top_100", "시총 200위 이내": "top_200",
+    "시총 300위 이내": "top_300", "시총 500위 이내": "all",
+}
+_ref_key = _mcap_to_ref_key.get(mcap_filter, "all")
+_ref_list = _ref_dists.get(_ref_key, [])
+if _ref_list:
+    report_df = rescale_scores(report_df, _ref_list)
+
+# 필터 + 정렬
 _mcap_limits = {"시총 100위 이내": 100, "시총 200위 이내": 200, "시총 300위 이내": 300, "시총 500위 이내": 500}
+ranked_df = report_df.copy()
 if mcap_filter in _mcap_limits and 'market_cap_rank' in ranked_df.columns:
     ranked_df = ranked_df[ranked_df['market_cap_rank'] <= _mcap_limits[mcap_filter]]
-
+ranked_df = ranked_df[ranked_df['final_score'] >= min_score_filter]
 ranked_df = ranked_df.sort_values('final_score', ascending=False).head(top_n)
 
 # ---------------------------------------------------------------------------
@@ -211,27 +251,29 @@ st.subheader(f"시총 구간별 {_dir_top_label} TOP")
 st.caption("같은 체급 안에서 수급이 가장 강한 종목을 보여줍니다.")
 
 _TIER_TOP_N = 10
-_pat_col_tier = 'pattern_label' if 'pattern_label' in report_df.columns else 'pattern'
+_pat_col_tier = 'pattern_label' if 'pattern_label' in _report_raw.columns else 'pattern'
 
-# 시총 구간별 필터링 (min_score_filter 적용)
-_base_filtered = report_df[report_df['final_score'] >= min_score_filter].copy()
-
+# 시총 구간별 — 각 체급 내 독립 백분위 보정 (raw 점수 + 사전 분할 분포)
 _tier_configs = [
-    ("대형주", "시총 100위 이내", 1, 100),
-    ("중형주", "101~300위", 101, 300),
-    ("전체", "점수 기준", None, None),
+    ("대형주", "시총 100위 이내", 1, 100, "large"),
+    ("중형주", "101~300위", 101, 300, "mid"),
+    ("소형주", "301위 이하", 301, None, "small"),
 ]
 
 _tier_cols = st.columns(len(_tier_configs))
-for _tc, (_tier_name, _tier_desc, _rank_min, _rank_max) in zip(_tier_cols, _tier_configs):
+for _tc, (_tier_name, _tier_desc, _rank_min, _rank_max, _tier_ref_key) in zip(_tier_cols, _tier_configs):
     with _tc:
-        if _rank_min is not None and 'market_cap_rank' in _base_filtered.columns:
-            _tier_df = _base_filtered[
-                (_base_filtered['market_cap_rank'] >= _rank_min)
-                & (_base_filtered['market_cap_rank'] <= _rank_max)
-            ]
+        if 'market_cap_rank' in _report_raw.columns:
+            _tier_df = _report_raw[_report_raw['market_cap_rank'] >= _rank_min].copy()
+            if _rank_max is not None:
+                _tier_df = _tier_df[_tier_df['market_cap_rank'] <= _rank_max]
         else:
-            _tier_df = _base_filtered
+            _tier_df = _report_raw.copy()
+
+        # 각 체급별 독립 백분위 보정 (이미 계산된 분포 사용)
+        _tier_ref = _ref_dists.get(_tier_ref_key, [])
+        if _tier_ref and not _tier_df.empty:
+            _tier_df = rescale_scores(_tier_df, _tier_ref)
 
         _tier_df = _tier_df.sort_values('final_score', ascending=False).head(_TIER_TOP_N)
 
