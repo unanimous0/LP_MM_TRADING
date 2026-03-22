@@ -321,7 +321,7 @@ else:
     _display.insert(0, 'rank', range(1, len(_display) + 1))
 
     _show_cols = ['rank', 'stock_code', 'stock_name', 'sector', _pat_col,
-                  'score', 'signal_count', '5D', 'final_score',
+                  'signal_count', '5D', 'final_score',
                   'market_cap_str', 'market_cap_rank']
     _show_cols = [c for c in _show_cols if c in _display.columns]
 
@@ -332,11 +332,10 @@ else:
         'sector': st.column_config.TextColumn('섹터'),
         'pattern': st.column_config.TextColumn('패턴'),
         'pattern_label': st.column_config.TextColumn('패턴'),
-        'score': st.column_config.NumberColumn('패턴점수', format='%.1f'),
         'signal_count': st.column_config.NumberColumn('시그널', format='%d'),
         '5D': st.column_config.NumberColumn('5D Z', format='%.2f'),
         'final_score': st.column_config.ProgressColumn(
-            '종합점수', min_value=0, max_value=115, format='%.1f점',
+            '점수', min_value=0, max_value=106, format='%.1f점',
         ),
         'market_cap_str': st.column_config.TextColumn('시총'),
         'market_cap_rank': st.column_config.NumberColumn('시총순위', format='%d위'),
@@ -403,9 +402,8 @@ else:
             f'<div style="border-left:4px solid {pcolor}; padding:8px 16px; '
             f'background-color:#111111; border-radius:4px; margin:8px 0;">'
             f'<b>패턴:</b> {_esc(str(pattern_label))} &nbsp;|&nbsp; '
-            f'<b>패턴점수:</b> {score:.1f} &nbsp;|&nbsp; '
-            f'<b>시그널:</b> {signal_count}개 ({_esc(str(signal_list)) if signal_list else "없음"}) &nbsp;|&nbsp; '
-            f'<b>종합:</b> {final_score:.1f}점'
+            f'<b>점수:</b> {final_score:.1f}점 &nbsp;|&nbsp; '
+            f'<b>시그널:</b> {signal_count}개 ({_esc(str(signal_list)) if signal_list else "없음"})'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -414,16 +412,20 @@ else:
         dc1, dc2 = st.columns([1, 2])
 
         with dc1:
-            # 점수 산출 근거
-            st.markdown("**점수 산출 근거**")
+            # 점수 산출 근거 (v2: 4구성요소)
+            st.markdown("**점수 산출 근거 (v2)**")
+
+            _direction = _drill_row.get('direction', 'long')
+            _sp_col = 'supply_persistence_long' if _direction == 'long' else 'supply_persistence_short'
+            _sp_val = _drill_row.get(_sp_col, 0.0)
+            if pd.isna(_sp_val):
+                _sp_val = 0.0
+            _sp_norm = min(_sp_val * 2.0, 3.0)
 
             _comps = {
-                '최근수급 (recent)': _drill_row.get('recent', float('nan')),
-                '단기이격 (short_divergence)': _drill_row.get('short_divergence', float('nan')),
-                '중기이격 (mid_divergence)': _drill_row.get('mid_divergence', float('nan')),
-                '장기이격 (long_divergence)': _drill_row.get('long_divergence', float('nan')),
-                '가중평균 (weighted)': _drill_row.get('weighted', float('nan')),
-                '단순평균 (average)': _drill_row.get('average', float('nan')),
+                '수급강도 ×0.35': _drill_row.get('recent', float('nan')),
+                '수급추세 ×0.20': _drill_row.get('long_divergence', float('nan')),
+                '종합수급 ×0.25': _drill_row.get('weighted', float('nan')),
             }
             for label, val in _comps.items():
                 if pd.notna(val):
@@ -433,14 +435,14 @@ else:
                         f'<span style="color:{_c};font-weight:600;">{val:+.2f}</span>',
                         unsafe_allow_html=True,
                     )
-
-            tc = _drill_row.get('temporal_consistency', float('nan'))
-            if pd.notna(tc):
-                st.markdown(
-                    f'<span style="color:#94a3b8;font-size:13px;">기간순서 일관성 (tc):</span> '
-                    f'<span style="font-weight:600;">{tc:.2f}</span>',
-                    unsafe_allow_html=True,
-                )
+            # supply_persistence
+            _sp_c = '#4ade80' if _sp_norm > 0 else '#94a3b8'
+            st.markdown(
+                f'<span style="color:#94a3b8;font-size:13px;">수급지속 ×0.20:</span> '
+                f'<span style="color:{_sp_c};font-weight:600;">{_sp_norm:+.2f}</span> '
+                f'<span style="color:#64748b;font-size:11px;">(raw {_sp_val:.3f})</span>',
+                unsafe_allow_html=True,
+            )
 
             sub_type = _drill_row.get('sub_type', None)
             if sub_type and not (isinstance(sub_type, float) and pd.isna(sub_type)):

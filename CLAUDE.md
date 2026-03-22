@@ -1,8 +1,8 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- **현재 작업**: tc_bonus 스케일 조정 + 시총 구간별 TOP + 코드 리뷰 수정
-- **마지막 업데이트**: 2026-03-17
+- **현재 작업**: 점수 공식 v2 + 방향 확신도 필터 + 거래대금 필터
+- **마지막 업데이트**: 2026-03-22
 - **서버**: 리눅스 서버 (Tailscale VPN으로 집/회사 PC에서 접속)
   - 외부 포트 개방 없음 (공유기 NAT + 포트포워딩 미설정)
   - Tailscale IP: `100.64.229.73`
@@ -136,25 +136,27 @@
   - 섹터 노드 라벨: `'섹터명  평균 XX.X점  (종합점수)'` — 호버 없이 박스에 즉시 표시
   - per-node texttemplate 배열: 섹터/종목 노드별 다른 표시 형식
   - 색상: 딥레드→앰버→옐로→sky-400(앱 primary)→에메랄드
-- **스코어링 개선**: Temporal Consistency(tc) + Divergence(이격도) → 인접 기간 Z-Score 순서 + 단기/중기/장기 이격 반영
-  - tc 미달 시 급등형 → 기타 (tc≥0.5), 지속형은 tc 조건 없음 (장기매집 특성상 tc=0.0 정상)
-  - 점수 보너스 ±5점: `tc_bonus = (tc - 0.5) × 10` (지속형 제외, 대형주 패널티 완화)
-  - short_divergence = 5D - 20D (가중치 0.15, tanh 이후 계산 — sort key 스케일 일치)
-  - 지속형은 short_divergence 가중치=0 (5D<20D가 이상적 패턴이므로 패널티 방지)
-  - 방향 확신도 기준: `_sff_5d_avg` (5일 평균) 사용 — 하루 소폭 매도로 제외되는 엣지 케이스 방지
-  - 3개 경로 모두 일치: `pattern_classifier.py`, `precomputer.py`, `charts.py`
+- **점수 공식 v2**: 6개→4개 구성요소 단순화 + supply_persistence(수급 지속 강도) 추가
+  - 수급강도(recent) ×0.35 + 수급추세(long_divergence) ×0.20 + 종합수급(weighted) ×0.25 + 수급지속(supply_persistence) ×0.20
+  - supply_persistence = 평균Sff × √연속일수 (유통시총 대비, Long/Short 양방향)
+  - 제거: short_divergence/mid_divergence/average 가중치, tc_bonus, sub_type_score_bonus
+  - 시그널 가산: ×5 → ×2 (독립 확인 신호 유지, 점수 지배력 축소)
+  - 방향 확신도 필터: 매도 방향 종목 제외 (recent/weighted abs > 0.05)
+  - 거래대금 1억 미만 종목 제외 (거래정지 + 극소거래량)
+  - Precomputer 필터: `5D > 0` → `_sff_5d_avg > 0` (메인 파이프라인과 통일)
 - **프로젝트 보고서**: `WHALE_SUPPLY_REPORT.html` — 배경·수식·파이프라인·사용법·해석 가이드 포함
 - **Phase 1 스코어링 검증**: `use_tc`/`use_divergence` 토글 전 파이프라인 적용 + CLI `--no-tc`/`--no-divergence`
   - min_score=70 기준: 현재 스코어링 +28.15% (레거시 +25.89%), 칼마 2.18 (레거시 1.86)
 - **Phase 2 대시보드 개선 4종**: 관심종목 저장 / 종목 비교 페이지 / 고득점 변동 알림 / 백테스트 히스토리
 - **[버그수정] 코드 리뷰 5건**: MDD 공식 / snapshot 중복·날짜 / Z-Score 슬라이더 최댓값 통일 / Tab2 캡션
 - **복합 패턴 분류(sub_type)**: 기본 패턴(4종) 위에 세부 한정자(7종) 추가 → `pattern_label` 합성 라벨
-  - 급등형: ①장기기반(+5) / ⑥감속(-5) / ⑦단기반등(-8)
-  - 지속형: ②단기돌파(+5) / ④전면수급(+3) / ⑤수급약화(-5)
-  - 전환형: ③V자반등(+3)
+  - 급등형: ①장기기반 / ⑥감속 / ⑦단기반등
+  - 지속형: ②단기돌파 / ④전면수급 / ⑤수급약화
+  - 전환형: ③V자반등
+  - v2: 라벨만 유지, 점수 보정 제거 (백테스트 미검증)
   - UI 전면 반영: 패턴분석 sub_type 필터 + 종목리스트/히트맵/Treemap/관심종목 pattern_label 표시
 - **UI 단순화 "점수 하나로 줄 세우기"**: 패턴분석 사이드바 12→4개, 탭 7→2개(+패턴가이드), 히트맵 필터 3개 제거
-  - `final_score = score + signal_count × 5`로 항상 정렬, 나머지 지표는 설명용으로만 사용
+  - `final_score = score + signal_count × 2`로 항상 정렬 (v2: ×5→×2 축소)
   - 커스텀 HTML 테이블: 5D Z / 종합점수 셀 호버 시 점수 산출 근거 툴팁 (Z-Score 그리드 + 지표별 공식 + 2열 레이아웃)
   - 테이블 `max-height:680px` 스크롤 + sticky header
 - **[변경] 모멘텀 계산 기준 500D→200D**: 500D는 참고용, 장기 기준 = 200D/100D
@@ -182,7 +184,7 @@
   - Composite = 평균점수(35%) + 누적Sff(25%) + 양수비율(20%) + 출현빈도(20%) 백분위 가중평균
   - BacktestPrecomputer(점수) + SQL mv_daily_sff(수급) 이중 데이터소스
   - Long/Short 방향 전환 + 시총 필터 + 상위 기준(Top N) 슬라이더
-- **tc_bonus 스케일 조정**: `tc_scale` 20→10 (±10점→±5점, 대형주 패널티 완화), 파라미터화 전파
+- **tc_bonus**: v2에서 점수 공식에서 제거 (패턴 분류 조건으로만 사용)
 - **메인 페이지 시총 구간별 TOP**: 대형주(1-100위)/중형주(101-300위)/전체 TOP 10 병렬 표시
 - **[버그수정] Precomputer MA 크로스**: `foreign_net_amount` → `combined_net` (signal_detector/SQL과 통일)
 - 300개 테스트 (100% 통과, slow 6개 포함)
@@ -1114,5 +1116,5 @@ README.md                             (프로젝트 소개 최신화)
 
 ---
 
-**프로젝트 버전**: v5.3.0 (tc_bonus 스케일 조정 + 시총 구간별 TOP + Precomputer MA 버그 수정)
-**마지막 업데이트**: 2026-03-17
+**프로젝트 버전**: v6.0.0 (점수 공식 v2 + 방향 확신도 필터 + 거래대금 필터 + supply_persistence)
+**마지막 업데이트**: 2026-03-22
