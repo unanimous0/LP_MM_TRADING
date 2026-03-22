@@ -310,12 +310,75 @@ def _stage_zscore(end_date: Optional[str] = None, institution_weight: float = 0.
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def _stage_supply_persistence(end_date: Optional[str] = None,
+                               institution_weight: float = 0.3) -> pd.DataFrame:
+    """수급 지속 강도 조회 (평균Sff × √연속일수, Long/Short 양방향)"""
+    engine = get_db_connection()
+    df = pd.read_sql(text('''
+        WITH recent AS (
+            SELECT stock_code, trade_date,
+                CASE WHEN foreign_sff * institution_sff > 0
+                     THEN foreign_sff + institution_sff * :weight
+                     ELSE foreign_sff
+                END AS combined_sff
+            FROM mv_daily_sff
+            WHERE trade_date <= :end_date
+              AND trade_date >= CAST(:end_date AS date) - INTERVAL '90 days'
+            ORDER BY stock_code, trade_date
+        )
+        SELECT stock_code, trade_date, combined_sff
+        FROM recent
+    '''), engine, params={'end_date': end_date, 'weight': institution_weight})
+
+    if df.empty:
+        return pd.DataFrame(columns=['stock_code', 'supply_persistence_long', 'supply_persistence_short'])
+
+    df = df.sort_values(['stock_code', 'trade_date'])
+    result = []
+    for code, group in df.groupby('stock_code'):
+        vals = group['combined_sff'].values
+        # Long: 연속 양수 강도
+        long_streak = []
+        for v in vals:
+            if v > 0:
+                long_streak.append(v)
+            else:
+                long_streak = []
+        sp_long = (sum(long_streak) / len(long_streak) * len(long_streak) ** 0.5) if long_streak else 0.0
+
+        # Short: 연속 음수 강도
+        short_streak = []
+        for v in vals:
+            if v < 0:
+                short_streak.append(abs(v))
+            else:
+                short_streak = []
+        sp_short = (sum(short_streak) / len(short_streak) * len(short_streak) ** 0.5) if short_streak else 0.0
+
+        result.append({
+            'stock_code': code,
+            'supply_persistence_long': sp_long,
+            'supply_persistence_short': sp_short,
+        })
+
+    return pd.DataFrame(result)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def _stage_classify(end_date: Optional[str] = None, institution_weight: float = 0.3,
                     direction: str = 'long') -> pd.DataFrame:
-    """Stage 3a: 패턴 분류"""
+    """Stage 3a: 패턴 분류 (supply_persistence 포함)"""
     zscore_matrix = _stage_zscore(end_date=end_date, institution_weight=institution_weight)
     if zscore_matrix.empty:
         return pd.DataFrame()
+
+    # 수급 지속 강도 병합
+    sp = _stage_supply_persistence(end_date=end_date, institution_weight=institution_weight)
+    if not sp.empty:
+        zscore_matrix = zscore_matrix.merge(sp, on='stock_code', how='left')
+        zscore_matrix['supply_persistence_long'] = zscore_matrix['supply_persistence_long'].fillna(0.0)
+        zscore_matrix['supply_persistence_short'] = zscore_matrix['supply_persistence_short'].fillna(0.0)
+
     classifier = PatternClassifier(use_tc=True, use_divergence=True, tc_center=0.5, tc_scale=10.0)
     return classifier.classify_all(zscore_matrix, direction=direction)
 
@@ -1357,10 +1420,7 @@ def get_score_reference_distributions(
         df = merged.get(date)
         if df is not None and not df.empty and 'score' in df.columns:
             sub = df[['stock_code', 'score']].copy()
-            if 'signal_count' in df.columns:
-                sub['final_score'] = sub['score'] + df['signal_count'].fillna(0) * 5
-            else:
-                sub['final_score'] = sub['score']
+            sub['final_score'] = sub['score'] + df['signal_count'].fillna(0) * 2  # v2: 시그널 가산 축소
             all_dfs.append(sub[['stock_code', 'final_score']].dropna(subset=['final_score']))
 
     if not all_dfs:

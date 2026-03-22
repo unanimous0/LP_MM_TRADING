@@ -172,10 +172,7 @@ _prog.empty()
 # 기본 final_score (보정 전 raw) + 시총/Z-Score 병합
 # ---------------------------------------------------------------------------
 report_df = report_df.copy()
-if 'signal_count' in report_df.columns:
-    report_df['final_score'] = report_df['score'] + report_df['signal_count'] * 5
-else:
-    report_df['final_score'] = report_df['score']
+report_df['final_score'] = report_df['score'] + report_df.get('signal_count', 0) * 2
 
 # 5D Z-Score 병합
 if not classified_df.empty and '5D' in classified_df.columns:

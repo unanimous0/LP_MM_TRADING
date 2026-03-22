@@ -455,7 +455,7 @@ class BacktestEngine:
                 if not stock_signal.empty:
                     reverse_pattern_score = stock_signal.iloc[0]['score']
                     reverse_signal_count = stock_signal.iloc[0]['signal_count']
-                    reverse_final_score = reverse_pattern_score + (reverse_signal_count * 5)
+                    reverse_final_score = reverse_pattern_score + (reverse_signal_count * 2)  # v2: 시그널 가산 축소
 
                     # 반대 수급 조건 충족 시 exit_date 종가로 청산
                     if reverse_final_score >= self.config.reverse_signal_threshold:
@@ -486,11 +486,10 @@ class BacktestEngine:
         if signals.empty:
             return signals
 
-        # 종합점수 계산: 패턴점수 + (시그널 × 5점)
-        # precomputed fast path에서는 이미 final_score가 포함되어 있음
+        # 종합점수 = 패턴점수 + 시그널 × 2 (v2: 시그널 가산 축소)
         signals = signals.copy()
         if 'final_score' not in signals.columns:
-            signals['final_score'] = signals['score'] + (signals['signal_count'] * 5)
+            signals['final_score'] = signals['score'] + (signals['signal_count'] * 2)
 
         # 필터링: 종합점수 & 시그널 개수
         candidates = signals[

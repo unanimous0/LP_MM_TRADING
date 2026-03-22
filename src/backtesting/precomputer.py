@@ -322,7 +322,52 @@ class BacktestPrecomputer:
         df['_sff_5d_avg'] = df.groupby('stock_code')['combined_sff'].transform(
             lambda x: x.rolling(5, min_periods=1).mean()
         )
-        meta_cols = ['_today_sff', '_sff_5d_avg'] + std_cols
+
+        # 수급 지속 강도 (supply_persistence)
+        # = 평균 Sff × √연속일수 — 며칠째 + 얼마나 강하게 매수/매도 중인지
+        # Sff는 이미 유통시총 대비 비율이므로 종목 간 비교 가능
+        # Long: combined_sff > 0 연속, Short: combined_sff < 0 연속
+        def _supply_persistence(series):
+            """연속 동일방향 Sff의 평균강도 × √연속일수"""
+            result = pd.Series(0.0, index=series.index, dtype=float)
+            streak_vals = []
+            for i, val in enumerate(series):
+                if val > 0:
+                    streak_vals.append(val)
+                else:
+                    streak_vals = []
+                if streak_vals:
+                    avg_sff = sum(streak_vals) / len(streak_vals)
+                    result.iloc[i] = avg_sff * (len(streak_vals) ** 0.5)
+                else:
+                    result.iloc[i] = 0.0
+            return result
+
+        def _supply_persistence_short(series):
+            """매도 방향 연속 지속 강도"""
+            result = pd.Series(0.0, index=series.index, dtype=float)
+            streak_vals = []
+            for i, val in enumerate(series):
+                if val < 0:
+                    streak_vals.append(abs(val))
+                else:
+                    streak_vals = []
+                if streak_vals:
+                    avg_sff = sum(streak_vals) / len(streak_vals)
+                    result.iloc[i] = avg_sff * (len(streak_vals) ** 0.5)
+                else:
+                    result.iloc[i] = 0.0
+            return result
+
+        df['supply_persistence_long'] = df.groupby('stock_code')['combined_sff'].transform(
+            _supply_persistence
+        )
+        df['supply_persistence_short'] = df.groupby('stock_code')['combined_sff'].transform(
+            _supply_persistence_short
+        )
+
+        meta_cols = ['_today_sff', '_sff_5d_avg',
+                     'supply_persistence_long', 'supply_persistence_short'] + std_cols
 
         result = df[['trade_date', 'stock_code'] + period_cols + meta_cols].copy()
         return result.set_index(['trade_date', 'stock_code'])
@@ -518,8 +563,8 @@ class BacktestPrecomputer:
                 merged.insert(1, 'stock_name',
                               merged['stock_code'].map(lambda c: stock_names.get(c, c)))
 
-                # final_score 사전 계산 (score + signal_count × 5)
-                merged['final_score'] = merged['score'] + merged['signal_count'] * 5
+                # final_score = score + signal_count × 2 (v2: 시그널 가산 축소)
+                merged['final_score'] = merged['score'] + merged['signal_count'] * 2
 
                 merged_dict[date] = merged
 

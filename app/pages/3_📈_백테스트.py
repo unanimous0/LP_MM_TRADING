@@ -664,9 +664,8 @@ with st.container(border=True):
 
     with tab6:
         trade_df = pd.DataFrame([t.to_dict() for t in trades])
-        # score = final_score (패턴점수 + 시그널수×5), pattern_score 역산
-        if 'score' in trade_df.columns and 'signal_count' in trade_df.columns:
-            trade_df['pattern_score'] = trade_df['score'] - trade_df['signal_count'] * 5
+        # v2: score = final_score (시그널 미가산)
+        if 'score' in trade_df.columns:
             trade_df = trade_df.rename(columns={'score': 'final_score'})
 
         # 보유기간 중 intraperiod 통계 (max/min 수익률, MDD)

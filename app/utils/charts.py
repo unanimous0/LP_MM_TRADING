@@ -611,7 +611,7 @@ def create_sector_concentration_chart(report_df: pd.DataFrame, min_stocks: int =
     df = report_df.copy()
     df['sector'] = df['sector'].fillna('기타')
     if 'final_score' not in df.columns:
-        df['final_score'] = df['score'] + df.get('signal_count', 0) * 5
+        df['final_score'] = df['score'] + df.get('signal_count', 0) * 2
 
     agg = df.groupby('sector').agg(
         avg_score=('final_score', 'mean'),
@@ -712,7 +712,7 @@ def create_sector_treemap(report_df: pd.DataFrame, top_per_sector: int = 10) -> 
     df = report_df.copy()
     df['sector'] = df['sector'].fillna('기타')
     if 'final_score' not in df.columns:
-        df['final_score'] = df.get('score', 50) + df.get('signal_count', 0) * 5
+        df['final_score'] = df.get('score', 50) + df.get('signal_count', 0) * 2
 
     top_sectors = df.groupby('sector')['final_score'].sum().nlargest(20).index.tolist()
     rows = [df[df['sector'] == s].nlargest(top_per_sector, 'final_score') for s in top_sectors]

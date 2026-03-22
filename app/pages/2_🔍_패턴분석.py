@@ -409,10 +409,7 @@ if report_df.empty:
 
 # final_score 계산 (보정 전 raw)
 report_df = report_df.copy()
-if 'signal_count' in report_df.columns:
-    report_df['final_score'] = report_df['score'] + report_df['signal_count'] * 5
-else:
-    report_df['final_score'] = report_df['score']
+report_df['final_score'] = report_df['score'] + report_df.get('signal_count', 0) * 2
 
 # 점수 보정 — 시총 필터 기준 분포로 백분위 변환
 _ref_dists = {}
@@ -443,10 +440,7 @@ filtered_df = report_gen.filter_report(
 
 # final_score가 filter_report 이후에도 유지되는지 확인
 if 'final_score' not in filtered_df.columns and not filtered_df.empty:
-    if 'signal_count' in filtered_df.columns:
-        filtered_df['final_score'] = filtered_df['score'] + filtered_df['signal_count'] * 5
-    else:
-        filtered_df['final_score'] = filtered_df['score']
+    filtered_df['final_score'] = filtered_df['score'] + filtered_df.get('signal_count', 0) * 2
 
 # 최소 점수를 final_score 기준으로 재필터
 if min_score > 0 and not filtered_df.empty:
@@ -546,7 +540,7 @@ with tab2:
         _cc = _src_df.copy()
         _cc['sector'] = _cc['sector'].fillna('기타')
         if 'final_score' not in _cc.columns:
-            _cc['final_score'] = _cc['score'] + _cc.get('signal_count', 0) * 5
+            _cc['final_score'] = _cc['score'] + _cc.get('signal_count', 0) * 2
         _agg = _cc.groupby('sector').agg(
             평균점수=('final_score', 'mean'),
             종목수=('stock_code', 'size'),

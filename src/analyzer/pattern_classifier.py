@@ -93,14 +93,14 @@ class PatternClassifier:
                 }
             },
 
-            # 점수 계산 가중치 (합계 = 1.00)
+            # 점수 계산 가중치 (합계 = 1.00, v2: 4개 구성요소로 단순화)
+            # 제거: short_divergence, mid_divergence, average (중복/저정보)
+            # 추가: supply_persistence (수급 지속 강도 = 평균Sff × √연속일수)
             'score_weights': {
-                'recent': 0.25,        # 현재 강도 (유지)
-                'short_divergence': 0.10,   # 단기이격 (5D-20D, 0.15→0.10 mid_divergence이 중기 역할 분담)
-                'mid_divergence': 0.10,    # 중기이격 (5D-100D)
-                'long_divergence': 0.15,   # 장기이격 (5D-200D, 0.20→0.15 mid_divergence과 정보 중복 경감)
-                'weighted': 0.30,      # 중장기 트렌드 (유지)
-                'average': 0.10,       # 전체 일관성 (유지)
+                'recent': 0.35,              # 수급강도: (5D+20D)/2
+                'long_divergence': 0.20,     # 수급추세: 5D-200D
+                'weighted': 0.25,            # 종합수급: 가중평균
+                'supply_persistence': 0.20,  # 수급지속: 평균Sff × √연속일수
             },
 
             # 특성 계산 설정
@@ -123,16 +123,9 @@ class PatternClassifier:
                 'dead_cat_long_z': -0.3,        # ⑦ 단기반등: 200D/100D 최대값
             },
 
-            # sub_type별 점수 보정
-            'sub_type_score_bonus': {
-                '장기기반': 5,
-                '단기돌파': 5,
-                'V자반등': 3,
-                '전면수급': 3,
-                '수급약화': -5,
-                '감속': -5,
-                '단기반등': -8,
-            },
+            # sub_type별 점수 보정 (v2: 라벨만 유지, 점수 미반영)
+            # 백테스트 미검증 상태에서 -8~+5점 보정은 근거 부족
+            'sub_type_score_bonus': {},
         }
 
     def calculate_features(self, zscore_matrix: pd.DataFrame) -> pd.DataFrame:
@@ -283,78 +276,45 @@ class PatternClassifier:
 
     def calculate_pattern_score(self, row: pd.Series) -> float:
         """
-        패턴 강도 점수 계산 (0~100)
+        패턴 강도 점수 계산 (0~100, v2 단순화)
 
-        Args:
-            row: 종목별 데이터 행 (recent, long_divergence, weighted, average, short_divergence,
-                 temporal_consistency, pattern 포함)
+        4개 구성요소:
+        - 수급강도 (recent): (5D+20D)/2 — 현재 수급의 절대적 크기
+        - 수급추세 (long_divergence): 5D-200D — 장기 대비 변화
+        - 종합수급 (weighted): 가중평균 — 전체 기간 종합
+        - 수급지속 (supply_persistence): 평균Sff×√연속일수 — 지속 강도
 
-        Returns:
-            float: 패턴 강도 점수 (0~100)
-
-        Formula:
-            Score = Σ(정렬키 × 패턴별 가중치) × 정규화 계수
-            - Z-Score 범위 [-3, 3]을 [0, 100]으로 변환
-            - 지속형은 short_divergence 제외 (가중치 0, average로 흡수)
-            - 지속형은 tc_bonus 없음 (tc=0.0이 정상 패턴이므로 페널티 부적절)
-            - 급등형/전환형/기타: tc_bonus ±5점 적용 (tc_scale=10)
-
-        Pattern-aware weights:
-            지속형: short_divergence 가중치=0 (average로 재분배)
-            기타 패턴: 설정값 그대로 사용
+        제거됨: short_divergence, mid_divergence, average, tc_bonus, sub_type_bonus
         """
-        # use_divergence=False → 레거시 가중치 (이격도 도입 이전)
-        # use_divergence=True  → 현재 가중치 (이격도 포함)
-        weights = self.config['score_weights'] if self.use_divergence else self._LEGACY_SCORE_WEIGHTS
+        weights = self.config['score_weights']
 
-        # 패턴별 가중치 조정
-        # 지속형: 이상적 패턴이 5D<10D<...<500D (장기>단기)이므로
-        #   short_divergence(=5D-20D)/mid_divergence(=5D-100D)가 음수가 정상 → 패널티 방지를 위해 가중치 0으로 설정
-        #   해제된 가중치는 average로 재분배하여 total_w=1.0 유지
-        pattern = row.get('pattern', '')
-        if pattern == '지속형':
-            st_w = weights.get('short_divergence', 0)
-            mm_w = weights.get('mid_divergence', 0)
-            effective_weights = dict(weights)
-            effective_weights['short_divergence'] = 0.0
-            effective_weights['mid_divergence'] = 0.0
-            effective_weights['average'] = weights.get('average', 0) + st_w + mm_w
-        else:
-            effective_weights = weights
+        # supply_persistence: 방향에 따라 long/short 선택
+        direction = row.get('direction', 'long')
+        sp_col = 'supply_persistence_long' if direction == 'long' else 'supply_persistence_short'
+        sp_val = row.get(sp_col, 0.0)
+        if pd.isna(sp_val):
+            sp_val = 0.0
+        # 정규화: Sff 스케일(보통 0~1)에서 Z-Score 스케일(-3~3)로 변환
+        # 경험적 기준: supply_persistence 1.0 ≈ Z-Score 2.0 수준
+        sp_normalized = min(sp_val * 2.0, 3.0)
 
-        # NaN-robust 가중 합계 계산 (데이터 부족 기간 대응)
+        # NaN-robust 가중 합계 계산
         components = [
-            (row['recent'],                          effective_weights['recent']),
-            (row.get('mid_divergence', np.nan),        effective_weights.get('mid_divergence', 0)),
-            (row['long_divergence'],                  effective_weights['long_divergence']),
-            (row['weighted'],                        effective_weights['weighted']),
-            (row['average'],                         effective_weights['average']),
-            (row.get('short_divergence', np.nan),         effective_weights.get('short_divergence', 0)),
+            (row.get('recent', np.nan),           weights.get('recent', 0)),
+            (row.get('long_divergence', np.nan),  weights.get('long_divergence', 0)),
+            (row.get('weighted', np.nan),         weights.get('weighted', 0)),
+            (sp_normalized,                       weights.get('supply_persistence', 0)),
         ]
         valid = [(v, w) for v, w in components if pd.notna(v) and w > 0]
         if not valid:
             return np.nan
 
-        # 유효 가중치 합계로 정규화하여 원래 스케일 유지
         original_total_w = sum(w for _, w in components)
         valid_total_w = sum(w for _, w in valid)
         weighted_sum = sum(v * w for v, w in valid) / valid_total_w * original_total_w
 
         # Z-Score 범위 [-3, 3] → [0, 100] 변환
-        # Z=3일 때 100점, Z=0일 때 50점, Z=-3일 때 0점
         base_score = ((weighted_sum + 3) / 6) * 100
-        base_score = float(np.clip(base_score, 0, 100))
-
-        # Temporal consistency 보너스 (지속형 제외, use_tc=True일 때만)
-        # tc_bonus = (tc - tc_center) × tc_scale
-        # 기본: center=0.5, scale=10 → 범위 ±5점
-        # use_tc=False이면 보너스 미적용 (스코어링 개선 이전 동작)
-        if self.use_tc and pattern != '지속형':
-            tc = row.get('temporal_consistency', 0.5)
-            if pd.notna(tc):
-                tc_bonus = (tc - self.tc_center) * self.tc_scale
-                base_score += tc_bonus
-
         return float(np.clip(base_score, 0, 100))
 
     @staticmethod
@@ -650,7 +610,8 @@ class PatternClassifier:
         base_cols = ['stock_code']
         period_cols = ['5D', '10D', '20D', '50D', '100D', '200D', '500D']
         sort_key_cols = ['recent', 'mid_divergence', 'long_divergence', 'weighted', 'average', 'short_divergence']
-        feature_cols = ['volatility', 'persistence', 'sl_ratio', 'temporal_consistency']
+        feature_cols = ['volatility', 'persistence', 'sl_ratio', 'temporal_consistency',
+                        'supply_persistence_long', 'supply_persistence_short']
         result_cols = ['pattern', 'sub_type', 'pattern_label', 'score', 'direction']
 
         # 존재하는 컬럼만 선택 (유연성)
