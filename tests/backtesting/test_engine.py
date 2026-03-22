@@ -139,16 +139,16 @@ class TestBacktestEngine:
 
         candidates = engine._select_entry_candidates(signals)
 
-        # final_score(= score + signal_count*5) 60 이상, 시그널 1개 이상
-        # 005930: 85+10=95, 000660: 75+10=85, 035420: 65+5=70, 051910: 55+5=60 → 4개
-        assert len(candidates) == 4
+        # v2: final_score = score + signal_count*2, 60 이상 + 시그널 1개 이상
+        # 005930: 85+4=89, 000660: 75+4=79, 035420: 65+2=67, 051910: 55+2=57(탈락) → 3개
+        assert len(candidates) == 3
         assert candidates.iloc[0]['stock_code'] == '005930'  # 점수 높은 순
 
         # 패턴 필터링
         engine.config.allowed_patterns = ['급등형']
         candidates2 = engine._select_entry_candidates(signals)
-        # 급등형: 005930(final=95), 051910(final=60) → 2개
-        assert len(candidates2) == 2
+        # 급등형: 005930(final=89) → 1개 (051910은 final=57로 탈락)
+        assert len(candidates2) == 1
         assert candidates2.iloc[0]['pattern'] == '급등형'
 
     @pytest.mark.slow
