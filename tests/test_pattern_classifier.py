@@ -470,24 +470,23 @@ class TestPatternClassifier:
         # 급등형 tc 기준(0.5) 미달이므로 기타
         assert pattern != '급등형'
 
-    def test_score_increases_with_consistency(self, classifier):
-        """tc=1.0이 tc=0.0보다 점수가 10점 이상 높음 (비-지속형 패턴)"""
+    def test_score_increases_with_supply_persistence(self, classifier):
+        """supply_persistence가 높을수록 점수가 높음 (v2)"""
         base = {
             'recent': 1.0,
             'long_divergence': 0.5,
             'weighted': 0.8,
-            'average': 0.6,
-            'short_divergence': 0.3,
-            # 'pattern' 없음 → '' → tc_bonus 적용됨
+            'direction': 'long',
         }
-        row_high_tc = pd.Series({**base, 'temporal_consistency': 1.0})
-        row_low_tc  = pd.Series({**base, 'temporal_consistency': 0.0})
+        row_high_sp = pd.Series({**base, 'supply_persistence_long': 1.5})  # 정규화 후 3.0
+        row_low_sp  = pd.Series({**base, 'supply_persistence_long': 0.0})
 
-        score_high = classifier.calculate_pattern_score(row_high_tc)
-        score_low  = classifier.calculate_pattern_score(row_low_tc)
+        score_high = classifier.calculate_pattern_score(row_high_sp)
+        score_low  = classifier.calculate_pattern_score(row_low_sp)
 
-        # tc=1.0 → +5점, tc=0.0 → -5점 → 차이 = 10점 (tc_scale=10)
-        assert score_high - score_low == pytest.approx(10.0, abs=0.1)
+        # sp=3.0 × 0.20 = 0.6 → 점수 차이 약 10점
+        assert score_high > score_low
+        assert score_high - score_low > 5.0
 
     def test_sustained_pattern_with_low_tc(self, classifier):
         """지속형은 tc 조건이 없으므로 tc=0.1도 지속형으로 분류됨"""
@@ -624,14 +623,13 @@ class TestScoringToggle:
         # 레거시 가중치에서 short_divergence=0.00 → 두 점수 동일
         assert score_pos == pytest.approx(score_neg, abs=0.01)
 
-    def test_use_divergence_true_affects_score(self, classifier_default):
-        """기본값(use_divergence=True)에서는 short_divergence가 점수에 영향"""
+    def test_v2_short_divergence_not_in_score(self, classifier_default):
+        """v2: short_divergence는 점수 가중치에서 제거됨 → 점수에 영향 없음"""
         base = {
             'recent': 1.0,
             'long_divergence': 0.5,
             'weighted': 0.8,
-            'average': 0.6,
-            'temporal_consistency': 0.5,
+            'direction': 'long',
         }
         score_pos = classifier_default.calculate_pattern_score(
             pd.Series({**base, 'short_divergence': 2.0})
@@ -639,8 +637,8 @@ class TestScoringToggle:
         score_neg = classifier_default.calculate_pattern_score(
             pd.Series({**base, 'short_divergence': -2.0})
         )
-        # short_divergence=0.15 가중치 → 두 점수 달라야 함
-        assert score_pos != pytest.approx(score_neg, abs=0.1)
+        # v2: short_divergence가 가중치에 없으므로 두 점수 동일
+        assert score_pos == pytest.approx(score_neg, abs=0.01)
 
     def test_legacy_classifier_weights_sum_to_one(self, classifier_legacy):
         """레거시 가중치 합계 = 1.00"""
@@ -648,23 +646,23 @@ class TestScoringToggle:
         total = sum(weights.values())
         assert total == pytest.approx(1.0, abs=1e-9)
 
-    def test_default_and_legacy_score_differ_for_high_short_divergence(
-        self, classifier_default, classifier_legacy
+    def test_v2_supply_persistence_affects_score(
+        self, classifier_default
     ):
-        """동일 데이터에서 현재 vs 이전 스코어링 결과가 다름 (검증 비교 가능 확인)"""
-        row = pd.Series({
+        """v2: supply_persistence가 높을수록 점수가 높음"""
+        base = {
             'recent': 1.2,
             'long_divergence': 0.8,
             'weighted': 0.9,
-            'average': 0.7,
-            'short_divergence': 1.5,   # 강한 단기이격 (현재만 반영)
-            'temporal_consistency': 0.8,  # 높은 tc (현재만 반영)
-            'pattern': '급등형',
-        })
-        score_current = classifier_default.calculate_pattern_score(row)
-        score_legacy = classifier_legacy.calculate_pattern_score(row)
-        # 현재 버전이 레거시보다 높아야 함 (tc_bonus + short_divergence 가중치 효과)
-        assert score_current > score_legacy
+            'direction': 'long',
+        }
+        score_high = classifier_default.calculate_pattern_score(
+            pd.Series({**base, 'supply_persistence_long': 1.0})
+        )
+        score_low = classifier_default.calculate_pattern_score(
+            pd.Series({**base, 'supply_persistence_long': 0.0})
+        )
+        assert score_high > score_low
 
 
 class TestSubType:
@@ -787,8 +785,8 @@ class TestSubType:
             else:
                 assert row['pattern_label'] == row['pattern']
 
-    def test_sub_type_score_bonus_applied(self, classifier):
-        """sub_type 점수 보정이 적용됨 (장기기반 +5, 단기반등 -8)"""
+    def test_sub_type_labels_without_score_bonus(self, classifier):
+        """v2: sub_type 라벨은 분류되지만 점수 보정 없음"""
         # 장기기반 데이터 (급등형 + 200D>0.3 + 100D>0.3)
         data_good = {
             'stock_code': ['A'],
@@ -803,10 +801,11 @@ class TestSubType:
         }
         result_good = classifier.classify_all(pd.DataFrame(data_good))
         result_bad = classifier.classify_all(pd.DataFrame(data_bad))
+        # sub_type 라벨은 여전히 분류됨
         assert result_good.iloc[0]['sub_type'] == '장기기반'
         assert result_bad.iloc[0]['sub_type'] == '단기반등'
-        # 장기기반 점수가 단기반등보다 높아야 함 (+5 vs -8 = 13점 차이 최소)
-        assert result_good.iloc[0]['score'] > result_bad.iloc[0]['score']
+        # v2: 점수 보정 없으므로 sub_type만으로 점수 차이 보장 안 됨
+        # (Z-Score 차이로 인한 점수 차이는 있을 수 있음)
 
     def test_classify_all_has_sub_type_columns(self, classifier):
         """classify_all() 결과에 sub_type, pattern_label 컬럼 존재"""
@@ -900,12 +899,11 @@ class TestMidDivergence:
         result = classifier.classify_all(sample_zscore_matrix)
         assert 'mid_divergence' in result.columns
 
-    def test_mid_divergence_affects_score(self, classifier):
-        """mid_divergence 값 변화 시 비-지속형 패턴 점수가 달라짐"""
+    def test_mid_divergence_not_in_v2_score(self, classifier):
+        """v2: mid_divergence는 점수 가중치에서 제거됨 → 점수에 영향 없음"""
         base = {
             'recent': 1.0, 'long_divergence': 0.5, 'weighted': 0.8,
-            'average': 0.6, 'short_divergence': 0.3,
-            'temporal_consistency': 0.5,
+            'direction': 'long',
         }
         score_high = classifier.calculate_pattern_score(
             pd.Series({**base, 'mid_divergence': 2.0})
@@ -913,7 +911,8 @@ class TestMidDivergence:
         score_low = classifier.calculate_pattern_score(
             pd.Series({**base, 'mid_divergence': -2.0})
         )
-        assert score_high != pytest.approx(score_low, abs=0.1)
+        # v2: mid_divergence가 가중치에 없으므로 점수 동일
+        assert score_high == pytest.approx(score_low, abs=0.01)
 
     def test_sustained_score_no_mid_divergence_penalty(self, classifier):
         """지속형은 mid_divergence 가중치 0 → 음수/양수 점수 동일"""

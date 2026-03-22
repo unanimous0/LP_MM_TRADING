@@ -42,54 +42,30 @@ st.title("패턴 분류 & 시그널 분석")
 # 점수 산출 툴팁 HTML 생성
 # ---------------------------------------------------------------------------
 def _build_tooltip_html(row, zscore_row=None):
-    """종목의 점수 산출 과정을 HTML 툴팁 내용으로 생성."""
+    """종목의 점수 산출 과정을 HTML 툴팁 내용으로 생성 (v2: 4구성요소)."""
     pattern = row.get('pattern', '기타')
     sub_type = row.get('sub_type', None)
     if pd.isna(sub_type) if not isinstance(sub_type, str) else False:
         sub_type = None
     score = float(row.get('score', 0))
-    tc = row.get('temporal_consistency', 0.5)
-    tc = tc if pd.notna(tc) else 0.5
     pat_label = row.get('pattern_label', pattern)
 
     recent = float(row.get('recent', 0))
-    mid_divergence = float(row.get('mid_divergence', 0))
     long_divergence = float(row.get('long_divergence', 0))
     weighted = float(row.get('weighted', 0))
-    average = float(row.get('average', 0))
-    short_divergence = float(row.get('short_divergence', 0))
     persistence = float(row.get('persistence', 0))
 
-    is_sustained = (pattern == '지속형')
-
-    if is_sustained:
-        weights = {'recent': 0.25, 'short_divergence': 0.00, 'mid_divergence': 0.00,
-                   'long_divergence': 0.15, 'weighted': 0.30, 'average': 0.30}
-    else:
-        weights = {'recent': 0.25, 'short_divergence': 0.10, 'mid_divergence': 0.10,
-                   'long_divergence': 0.15, 'weighted': 0.30, 'average': 0.10}
-
-    comps = {'recent': recent, 'mid_divergence': mid_divergence, 'long_divergence': long_divergence,
-             'weighted': weighted, 'average': average, 'short_divergence': short_divergence}
-
-    weighted_sum = sum(comps[k] * weights[k] for k in weights if weights[k] > 0)
-    base_score = float(np.clip(((weighted_sum + 3) / 6) * 100, 0, 100))
-
-    tc_bonus = 0.0
-    if not is_sustained:
-        tc_bonus = (tc - 0.5) * 10
-
-    sub_bonus_map = {
-        '장기기반': +5, '단기돌파': +5, 'V자반등': +3, '전면수급': +3,
-        '수급약화': -5, '감속': -5, '단기반등': -8,
-    }
-    sub_bonus = sub_bonus_map.get(sub_type, 0)
+    # supply_persistence (방향별)
+    direction = row.get('direction', 'long')
+    sp_col = 'supply_persistence_long' if direction == 'long' else 'supply_persistence_short'
+    sp_val = float(row.get(sp_col, 0))
+    sp_normalized = min(sp_val * 2.0, 3.0)
 
     sig_count = int(row.get('signal_count', 0))
     sig_list = str(row.get('signal_list', '') or '')
-    final_score = score + sig_count * 5
+    final_score = score + sig_count * 2
 
-    # Z-Score 값 추출 (점수 산출 근거에도 사용)
+    # Z-Score 값 추출
     zvals = {}
     periods = ['5D', '10D', '20D', '50D', '100D', '200D', '500D']
     if zscore_row is not None:
@@ -113,6 +89,8 @@ def _build_tooltip_html(row, zscore_row=None):
 
     # ── 패턴 근거 ──
     h.append('<div class="tt-section">패턴 분류 근거</div>')
+    tc = row.get('temporal_consistency', 0.5)
+    tc = tc if pd.notna(tc) else 0.5
     if pattern == '급등형':
         h.append(
             f'<div class="tt-line">장기이격(<b>{long_divergence:+.2f}</b>)&gt;1.0 '
@@ -130,78 +108,62 @@ def _build_tooltip_html(row, zscore_row=None):
         h.append('<div class="tt-line">급등·지속·전환 조건 미충족 → 기타</div>')
 
     if sub_type:
-        h.append(f'<div class="tt-line">복합: <b>{_esc(sub_type)}</b> ({sub_bonus:+d}점)</div>')
+        h.append(f'<div class="tt-line">복합: <b>{_esc(sub_type)}</b></div>')
 
-    # ── 점수 산출 (근거 공식 포함, 2열 그리드) ──
-    h.append('<div class="tt-section">점수 산출</div>')
+    # ── 점수 산출 (v2: 4구성요소) ──
+    h.append('<div class="tt-section">점수 산출 (v2)</div>')
 
     z5d = zvals.get('5D')
     z20d = zvals.get('20D')
-    z50d = zvals.get('50D')
     z100d = zvals.get('100D')
     z200d = zvals.get('200D')
 
-    def _comp_card(label, key, w):
-        v = comps[key]
-        # 근거 공식
-        formula = ''
-        if key == 'recent' and z5d is not None and z20d is not None:
-            formula = f'(5D {z5d:+.2f} + 20D {z20d:+.2f}) / 2'
-        elif key == 'long_divergence' and z5d is not None:
-            for lp, lv in [('200D', z200d), ('100D', z100d), ('50D', z50d), ('20D', z20d)]:
-                if lv is not None:
-                    formula = f'5D {z5d:+.2f} − {lp} {lv:+.2f}'
-                    break
-        elif key == 'weighted' and zvals:
-            formula = '가중 평균 (최근 높은 비중)'
-        elif key == 'average' and zvals:
-            formula = f'{len(zvals)}개 기간 단순 평균'
-        elif key == 'mid_divergence' and z5d is not None and z100d is not None:
-            formula = f'5D {z5d:+.2f} − 100D {z100d:+.2f}'
-        elif key == 'short_divergence' and z5d is not None and z20d is not None:
-            formula = f'5D {z5d:+.2f} − 20D {z20d:+.2f}'
-
-        if w > 0:
-            fml = f'<div class="cc-f">{formula}</div>' if formula else ''
-            return (
-                f'<div class="cc"><div class="cc-h">{label} <span class="cc-w">×{w:.2f}</span></div>'
-                f'{fml}'
-                f'<div class="cc-v"><b>{v:+.2f}</b> → {v*w:+.3f}</div></div>'
-            )
-        elif key in ('short_divergence', 'mid_divergence') and is_sustained:
-            return (
-                f'<div class="cc"><div class="cc-h">{label} <span class="tt-dim">×0 (지속형 제외)</span></div>'
-                f'<div class="cc-v">{v:+.2f}</div></div>'
-            )
-        return ''
-
+    # 4개 카드
     cards = []
-    for key, label, w in [('recent', '최근수급', 0.25),
-                           ('short_divergence', '단기이격', weights['short_divergence']),
-                           ('mid_divergence', '중기이격', weights['mid_divergence']),
-                           ('long_divergence', '장기이격', weights['long_divergence']),
-                           ('weighted', '가중평균', 0.30),
-                           ('average', '단순평균', weights['average'])]:
-        c = _comp_card(label, key, w)
-        if c:
-            cards.append(c)
+
+    # 수급강도 (recent)
+    fml = f'(5D {z5d:+.2f} + 20D {z20d:+.2f}) / 2' if z5d is not None and z20d is not None else ''
+    cards.append(
+        f'<div class="cc"><div class="cc-h">수급강도 <span class="cc-w">×0.35</span></div>'
+        f'{"<div class=cc-f>" + fml + "</div>" if fml else ""}'
+        f'<div class="cc-v"><b>{recent:+.2f}</b> → {recent*0.35:+.3f}</div></div>'
+    )
+
+    # 수급추세 (long_divergence)
+    fml2 = ''
+    if z5d is not None:
+        for lp, lv in [('200D', z200d), ('100D', z100d)]:
+            if lv is not None:
+                fml2 = f'5D {z5d:+.2f} − {lp} {lv:+.2f}'
+                break
+    cards.append(
+        f'<div class="cc"><div class="cc-h">수급추세 <span class="cc-w">×0.20</span></div>'
+        f'{"<div class=cc-f>" + fml2 + "</div>" if fml2 else ""}'
+        f'<div class="cc-v"><b>{long_divergence:+.2f}</b> → {long_divergence*0.20:+.3f}</div></div>'
+    )
+
+    # 종합수급 (weighted)
+    cards.append(
+        f'<div class="cc"><div class="cc-h">종합수급 <span class="cc-w">×0.25</span></div>'
+        f'<div class="cc-f">가중 평균 (최근 높은 비중)</div>'
+        f'<div class="cc-v"><b>{weighted:+.2f}</b> → {weighted*0.25:+.3f}</div></div>'
+    )
+
+    # 수급지속 (supply_persistence)
+    cards.append(
+        f'<div class="cc"><div class="cc-h">수급지속 <span class="cc-w">×0.20</span></div>'
+        f'<div class="cc-f">평균Sff×√연속일 = {sp_val:.3f} → ×2 cap3</div>'
+        f'<div class="cc-v"><b>{sp_normalized:+.2f}</b> → {sp_normalized*0.20:+.3f}</div></div>'
+    )
 
     h.append(f'<div class="cc-grid">{"".join(cards)}</div>')
-    h.append(f'<div class="tt-result">합산Z {weighted_sum:+.3f} → 기본 <b>{base_score:.1f}</b>점</div>')
 
-    # 보정
-    if not is_sustained:
-        tc_desc = "순서일치" if tc >= 0.7 else ("혼조" if tc >= 0.4 else "역순")
-        h.append(f'<div class="tt-adj">tc보너스 ({tc:.2f} − 0.5) × 10 = <b>{tc_bonus:+.1f}</b> <span class="tt-dim">({tc_desc})</span></div>')
-
-    if sub_type:
-        h.append(f'<div class="tt-adj">복합패턴 {_esc(sub_type)} = <b>{sub_bonus:+d}</b></div>')
-
-    calc_total = float(np.clip(base_score + tc_bonus + sub_bonus, 0, 100))
-    h.append(f'<div class="tt-result">패턴점수 = <b>{calc_total:.1f}</b>점</div>')
+    weighted_sum = recent * 0.35 + long_divergence * 0.20 + weighted * 0.25 + sp_normalized * 0.20
+    base_score = float(np.clip(((weighted_sum + 3) / 6) * 100, 0, 100))
+    h.append(f'<div class="tt-result">합산Z {weighted_sum:+.3f} → 패턴점수 <b>{base_score:.1f}</b>점</div>')
 
     if sig_count > 0:
-        h.append(f'<div class="tt-adj">시그널 {sig_count}개 × 5 = +{sig_count*5} <span class="tt-dim">({_esc(sig_list)})</span></div>')
+        h.append(f'<div class="tt-adj">시그널 {sig_count}개 × 2 = +{sig_count*2} <span class="tt-dim">({_esc(sig_list)})</span></div>')
     else:
         h.append('<div class="tt-adj">시그널 0개</div>')
 
@@ -594,47 +556,43 @@ Z-Score 패턴의 형태에 따라 3가지 기본 패턴 + 7가지 복합 패턴
 
 **급등형 세부**:
 
-| 복합 패턴 | 조건 | 점수 보정 | 해석 |
-|----------|------|----------|------|
-| **장기기반** | 200D > 0.3 AND 100D > 0.3 | **+5점** | 장기간 매집 위에 단기 폭발 — 가장 신뢰도 높음 |
-| **감속** | 단기이격 < -0.3 | **-5점** | 급등세 있으나 최근 속도 감소 중 |
-| **단기반등** | 200D < -0.3 OR 100D < -0.3 | **-8점** | 장기 매도세 속 일시적 반등 — 함정 가능성 |
+| 복합 패턴 | 조건 | 해석 |
+|----------|------|------|
+| **장기기반** | 200D > 0.3 AND 100D > 0.3 | 장기간 매집 위에 단기 폭발 — 가장 신뢰도 높음 |
+| **감속** | 단기이격 < -0.3 | 급등세 있으나 최근 속도 감소 중 |
+| **단기반등** | 200D < -0.3 OR 100D < -0.3 | 장기 매도세 속 일시적 반등 — 함정 가능성 |
 
 **지속형 세부**:
 
-| 복합 패턴 | 조건 | 점수 보정 | 해석 |
-|----------|------|----------|------|
-| **단기돌파** | 5D > 1.0 AND 단기이격 > 0.5 | **+5점** | 장기 매집 중 단기 수급 돌파 — 진입 타이밍 |
-| **전면수급** | 전 기간 Z > 0 AND 변동성 < 0.5 | **+3점** | 모든 기간에서 꾸준한 매수 — 안정적 |
-| **수급약화** | 단기이격 < -0.3 AND 5D < 20D | **-5점** | 매집은 지속되나 최근 수급 둔화 |
+| 복합 패턴 | 조건 | 해석 |
+|----------|------|------|
+| **단기돌파** | 5D > 1.0 AND 단기이격 > 0.5 | 장기 매집 중 단기 수급 돌파 — 진입 타이밍 |
+| **전면수급** | 전 기간 Z > 0 AND 변동성 < 0.5 | 모든 기간에서 꾸준한 매수 — 안정적 |
+| **수급약화** | 단기이격 < -0.3 AND 5D < 20D | 매집은 지속되나 최근 수급 둔화 |
 
 **전환형 세부**:
 
-| 복합 패턴 | 조건 | 점수 보정 | 해석 |
-|----------|------|----------|------|
-| **V자반등** | 5D > 1.0 AND 최근수급 > 0.5 | **+3점** | 급격한 반전 시그널 — 초기 진입 기회 |
+| 복합 패턴 | 조건 | 해석 |
+|----------|------|------|
+| **V자반등** | 5D > 1.0 AND 최근수급 > 0.5 | 급격한 반전 시그널 — 초기 진입 기회 |
+
+> ※ 복합 패턴은 라벨(정보 제공)만, 점수 보정 없음 (v2)
 
 ---
 
-#### 점수 산출 공식
+#### 점수 산출 공식 (v2)
 
 ```
-기본점수 = ((가중합산Z + 3) / 6) × 100     ← Z∈[-3,3] → 점수∈[0,100]
+패턴점수 = ((가중합산Z + 3) / 6) × 100     ← Z∈[-3,3] → 점수∈[0,100]
 
-가중합산Z = 최근수급 × 0.25
-          + 단기이격 × 0.10 (지속형: 0)
-          + 중기이격 × 0.10 (지속형: 0)
-          + 장기이격 × 0.15
-          + 가중평균 × 0.30
-          + 단순평균 × 0.10 (지속형: 0.30)
+가중합산Z = 수급강도 × 0.35    (= (5D + 20D) / 2)
+          + 수급추세 × 0.20    (= 5D − 200D)
+          + 종합수급 × 0.25    (= 가중평균)
+          + 수급지속 × 0.20    (= 평균Sff × √연속일수, ×2 정규화, cap 3.0)
 
-패턴점수 = 기본점수 + tc보너스 + 복합패턴보너스
-  · tc보너스 = (tc - 0.5) × 10  (±5점, 지속형 제외)
-  · 복합패턴보너스 = -8 ~ +5점
-
-종합점수 = 패턴점수 + 시그널수 × 5
-  · 시그널: MA골든크로스, 수급가속도, 외인기관동조 (각 5점)
-  · 최대 115점 (패턴100 + 시그널3×5)
+종합점수 = 패턴점수 + 시그널수 × 2
+  · 시그널: MA골든크로스, 수급가속도, 외인기관동조 (각 2점)
+  · 최대 ~106점 (패턴100 + 시그널3×2)
 ```
 
 ---
@@ -643,11 +601,10 @@ Z-Score 패턴의 형태에 따라 3가지 기본 패턴 + 7가지 복합 패턴
 
 | 점수 구간 | 해석 | 권장 액션 |
 |----------|------|----------|
-| **80점 이상** | 매우 강한 수급 + 다중 시그널 | 적극 검토, 진입 포인트 확인 |
-| **70~79점** | 강한 수급, 패턴 명확 | 관심종목 등록, 타이밍 탐색 |
-| **60~69점** | 보통 수급, 패턴 존재 | 모니터링, 추가 시그널 대기 |
-| **50~59점** | 약한 수급, 불확실 | 관망, 다른 지표와 교차 확인 |
-| **50점 미만** | 중립 또는 매도 수급 | 롱 전략 부적합 |
+| **75점 이상** | 강한 수급 + 지속성 높음 | 적극 검토, 진입 포인트 확인 |
+| **65~74점** | 양호한 수급, 패턴 명확 | 관심종목 등록, 타이밍 탐색 |
+| **55~64점** | 보통 수급 | 모니터링, 추가 확인 |
+| **55점 미만** | 약한 수급 또는 방향 불명확 | 관망 |
 
 ---
 
