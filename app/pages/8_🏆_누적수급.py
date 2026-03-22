@@ -325,7 +325,7 @@ with tab_composite:
 
 # ─── 탭 2: 종합점수 평균 ─────────────────────────────────────────────────────
 with tab_score:
-    st.caption(f"{lookback_label} 일별 final_score(= 점수 + 시그널×5)의 평균·최고·상위 출현빈도")
+    st.caption(f"{lookback_label} 일별 final_score(= 점수 + 시그널×2)의 평균·최고·상위 출현빈도")
 
     if 'avg_score' in merged.columns:
         score_sorted = merged.sort_values('avg_score', ascending=False).head(display_n)

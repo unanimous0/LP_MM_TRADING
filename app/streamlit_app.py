@@ -137,7 +137,7 @@ st.sidebar.divider()
 
 min_score_filter = st.sidebar.slider(
     "최소 종합점수", 0.0, 100.0, 60.0, step=5.0,
-    help="종합점수(패턴점수 + 시그널수×5)가 이 값 이상인 종목만 표시합니다.",
+    help="종합점수(패턴점수 + 시그널수×2)가 이 값 이상인 종목만 표시합니다.",
 )
 
 top_n = st.sidebar.selectbox(
@@ -309,7 +309,7 @@ st.divider()
 # ---------------------------------------------------------------------------
 st.subheader(f"{_dir_top_label} 수급 상세 랭킹")
 _mcap_note = f" · {mcap_filter}" if mcap_filter != "전체" else ""
-st.caption(f"종합점수(패턴점수 + 시그널×5) 기준 내림차순 · 최소 {min_score_filter:.0f}점 이상 · {len(ranked_df)}개 종목{_mcap_note}")
+st.caption(f"종합점수(패턴점수 + 시그널×2) 기준 내림차순 · 최소 {min_score_filter:.0f}점 이상 · {len(ranked_df)}개 종목{_mcap_note}")
 
 if ranked_df.empty:
     st.info("조건에 맞는 종목이 없습니다. 사이드바에서 최소 종합점수를 낮춰보세요.")

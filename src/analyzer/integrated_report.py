@@ -238,7 +238,8 @@ class IntegratedReport:
         base_cols = ['stock_code', 'stock_name', 'sector']
         pattern_cols = ['pattern', 'sub_type', 'pattern_label', 'score']
         sort_key_cols = ['recent', 'mid_divergence', 'long_divergence', 'weighted', 'average', 'short_divergence']
-        feature_cols = ['temporal_consistency']
+        feature_cols = ['temporal_consistency', 'supply_persistence_long', 'supply_persistence_short',
+                       'direction', 'volatility', 'persistence', 'sl_ratio']
         signal_cols = ['signal_count', 'signal_list']
         action_cols = ['entry_point', 'stop_loss']
 
