@@ -17,6 +17,8 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
 
+from utils.ui_constants import INSTITUTION_WEIGHT_HELP
+
 from utils.data_loader import (
     run_walk_forward,
     get_date_range,
@@ -166,6 +168,7 @@ with st.sidebar.expander("🔒 고정 조건", expanded=False):
 
     institution_weight = st.slider(
         "기관 가중치", 0.0, 1.0, 0.3, step=0.05, key="wf_institution_weight",
+        help=INSTITUTION_WEIGHT_HELP,
     )
 
     use_tc = st.checkbox("Temporal Consistency", value=True, key="wf_use_tc")

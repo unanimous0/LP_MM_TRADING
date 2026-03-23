@@ -444,7 +444,8 @@ class BacktestPrecomputer:
         df['signal_count'] = df['signal_count_long']  # 기본값 (하위 호환)
 
         result = df[['trade_date', 'stock_code', 'ma_cross', 'ma_diff',
-                     'acceleration', 'sync_rate', 'signal_count']].copy()
+                     'acceleration', 'sync_rate', 'signal_count',
+                     'signal_count_long', 'signal_count_short']].copy()
         return result.set_index(['trade_date', 'stock_code'])
 
     def _build_price_lookup(self, raw_df: pd.DataFrame) -> dict:
@@ -509,12 +510,16 @@ class BacktestPrecomputer:
 
         # 거래대금 기반 유동성 필터 (거래정지/극소거래량 종목 제외)
         _illiquid_by_date = {}
+        _td_min = trading_dates[0] if trading_dates else None
+        _td_max = trading_dates[-1] if trading_dates else None
         try:
             _ohlcv_q = text("""
                 SELECT stock_code, time AS trade_date FROM ohlcv_daily
                 WHERE (trading_value < 100000000 OR trading_value IS NULL)
+                  AND time >= :td_min AND time <= :td_max
             """)
-            _illiquid_df = pd.read_sql(_ohlcv_q, self.conn)
+            _illiquid_df = pd.read_sql(_ohlcv_q, self.conn,
+                                        params={'td_min': _td_min, 'td_max': _td_max})
             if not _illiquid_df.empty:
                 _illiquid_df['trade_date'] = _illiquid_df['trade_date'].astype(str)
                 for dt, grp in _illiquid_df.groupby('trade_date'):

@@ -672,7 +672,7 @@ with tab3:
                         '종합 점수', min_value=0, max_value=100, format='%.1f점',
                     ),
                     'avg_score': st.column_config.NumberColumn('평균 점수', format='%.1f점'),
-                    'cum_sff': st.column_config.NumberColumn('누적 Sff', format='%.4f'),
+                    'cum_sff': st.column_config.NumberColumn('누적 수급강도', format='%.4f'),
                     'positive_ratio_pct': st.column_config.ProgressColumn(
                         '양수비율', min_value=0, max_value=_cum_max_pos_pct, format='%.0f%%',
                     ),

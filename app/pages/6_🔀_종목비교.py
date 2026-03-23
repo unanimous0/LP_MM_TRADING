@@ -19,6 +19,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 import streamlit as st
 import pandas as pd
 
+from utils.ui_constants import INSTITUTION_WEIGHT_HELP
 from utils.data_loader import (
     get_stock_list, get_date_range,
     get_stock_zscore_history,
@@ -65,7 +66,7 @@ z_score_window = st.sidebar.slider(
 institution_weight = st.sidebar.slider(
     "기관 가중치", 0.0, 1.0, 0.3, step=0.05,
     key="w_institution_weight",
-    help="기관 수급이 외국인과 같은 방향일 때만 가중치가 반영됩니다.",
+    help=INSTITUTION_WEIGHT_HELP,
 )
 
 st.sidebar.divider()
