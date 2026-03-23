@@ -381,7 +381,7 @@ with tab_price:
             _ov_labels.append(f"{_inv}")
 
         # Y축 단위 라벨 (차트 상단)
-        _left_label = f"{'+'.join(_ov_labels)} {_ov_mode} (억원)" if _ov_labels else ""
+        _left_label = f"{_ov_mode} (억원)" if _ov_labels else ""
         _axis_html = '<div style="display:flex;justify-content:space-between;font-size:12px;color:#94a3b8;margin-bottom:2px;">'
         _axis_html += f'<span>{_left_label}</span>' if _left_label else '<span></span>'
         _axis_html += '<span>주가 (원)</span></div>'
