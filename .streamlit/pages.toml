@@ -35,11 +35,6 @@ name = "종목 비교"
 icon = ":material/compare:"
 
 [[pages]]
-path = "pages/7_⚡_이상수급.py"
-name = "이상 수급"
-icon = ":material/bolt:"
-
-[[pages]]
 path = "pages/8_🏆_누적수급.py"
 name = "누적 수급"
 icon = ":material/leaderboard:"
