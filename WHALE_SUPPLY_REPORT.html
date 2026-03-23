@@ -704,26 +704,23 @@ MA 골든크로스, 수급 가속도, 외인-기관 동조율 등의 추가 시�
   급등형·지속형에서 탈락합니다.</p>
 </div>
 
-<h3 id="s5-2">5-2. 점수 체계 (0 ~ 115점)</h3>
-<p>각 종목은 7개 기간 Z-Score를 조합한 <strong>패턴 점수(0~100점)</strong>에
-추가 시그널 수를 반영한 <strong>최종 점수(최대 115점)</strong>를 받습니다.</p>
+<h3 id="s5-2">5-2. 점수 체계 v2 (0 ~ 106점)</h3>
+<p>각 종목은 4가지 수급 지표를 조합한 <strong>패턴 점수(0~100점)</strong>에
+시그널 보너스를 더한 <strong>최종 점수(최대 ~106점)</strong>를 받습니다.</p>
 
 <div class="formula">
-<span class="comment"># 패턴 점수 계산 (0~100)</span>
-<span class="comment"># 각 구성 요소는 방향 확신도(tanh) 가중치 적용 후 계산</span>
+<span class="comment"># 패턴 점수 계산 v2 (0~100)</span>
+<span class="comment"># 4개 구성요소 — 방향 확신도(tanh) 적용 후 계산</span>
 
-<span class="key">가중합</span> <span class="op">=</span> recent × 0.25      <span class="comment"># 최근 강도 (5D Z-Score)</span>
-       + long_divergence × 0.20  <span class="comment"># 장기이격 (5D - 200D)</span>
-       + weighted × 0.30         <span class="comment"># 중장기 가중 평균 (기간 가중합)</span>
-       + average × 0.10          <span class="comment"># 전체 기간 단순 평균</span>
-       + short_divergence × 0.15 <span class="comment"># 단기이격 (5D - 20D)</span>
+<span class="key">가중합</span> <span class="op">=</span> 수급강도 × 0.35         <span class="comment"># (5D + 20D) / 2</span>
+       + 수급추세 × 0.20         <span class="comment"># 5D - 200D</span>
+       + 종합수급 × 0.25         <span class="comment"># 가중 평균</span>
+       + 수급지속 × 0.20         <span class="comment"># 평균Sff × √연속일수 (정규화)</span>
 
-<span class="key">base_score</span> <span class="op">=</span> (가중합 + 3) / 6 × 100              <span class="comment"># Z[-3,3] → [0,100] 변환</span>
-<span class="key">tc_bonus</span>   <span class="op">=</span> (temporal_consistency - 0.5) × 10   <span class="comment"># ±5점 보너스/페널티</span>
-<span class="key">pattern_score</span> <span class="op">=</span> clip(base_score + tc_bonus, 0, 100)
+<span class="key">pattern_score</span> <span class="op">=</span> clip((가중합 + 3) / 6 × 100, 0, 100)
 
 <span class="comment"># 최종 점수</span>
-<span class="key">final_score</span> <span class="op">=</span> pattern_score + signal_count × 5   <span class="comment"># 시그널 1개당 +5점, 최대 115점</span>
+<span class="key">final_score</span> <span class="op">=</span> pattern_score + signal_count × 2   <span class="comment"># 시그널 1개당 +2점</span>
 </div>
 
 <h3 id="s5-3">5-3. 시간 일관성 (Temporal Consistency)</h3>
@@ -758,7 +755,7 @@ MA 골든크로스, 수급 가속도, 외인-기관 동조율 등의 추가 시�
 ══════════════════════════════════════════════════════════ -->
 <section id="s6">
 <h2 class="sec"><span class="num">6</span> 추가 시그널 (패턴 점수 위에 가산)</h2>
-<p>아래 3가지 시그널은 패턴 분류와는 독립적으로 탐지되며, 시그널이 발생할 때마다 최종 점수에 +5점씩 가산됩니다.</p>
+<p>아래 3가지 시그널은 패턴 분류와는 독립적으로 탐지되며, 시그널이 발생할 때마다 최종 점수에 +2점씩 가산됩니다 (v2).</p>
 
 <div class="signal-grid">
   <div class="signal-card">

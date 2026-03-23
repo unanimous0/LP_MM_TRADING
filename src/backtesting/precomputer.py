@@ -551,10 +551,25 @@ class BacktestPrecomputer:
                 short_stocks = zscore_on_date[zscore_on_date['5D'] < 0].copy()
 
             if not long_stocks.empty:
-                patterns_long[date] = classifier.classify_all(long_stocks, direction='long')
+                _classified = classifier.classify_all(long_stocks, direction='long')
+                # 방향 확신도 사후 필터 (메인 파이프라인과 동일 기준)
+                if not _classified.empty and 'recent' in _classified.columns:
+                    _classified = _classified[
+                        (_classified['recent'].abs() > 0.05) |
+                        (_classified['weighted'].abs() > 0.05)
+                    ]
+                if not _classified.empty:
+                    patterns_long[date] = _classified
 
             if not short_stocks.empty:
-                patterns_short[date] = classifier.classify_all(short_stocks, direction='short')
+                _classified = classifier.classify_all(short_stocks, direction='short')
+                if not _classified.empty and 'recent' in _classified.columns:
+                    _classified = _classified[
+                        (_classified['recent'].abs() > 0.05) |
+                        (_classified['weighted'].abs() > 0.05)
+                    ]
+                if not _classified.empty:
+                    patterns_short[date] = _classified
 
         return patterns_long, patterns_short
 

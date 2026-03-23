@@ -197,11 +197,8 @@ Score = clip(((Weighted_sum + 3) / 6) × 100, 0, 100)
 # tc 보정 (지속형 제외)
 Score += tc_bonus
 
-# sub_type 보정
-Score += sub_type_bonus
-
-# 종합 점수
-final_score = score + signal_count × 5
+# 종합 점수 (v2: sub_type 보정 제거, 시그널 가산 축소)
+final_score = score + signal_count × 2
 ```
 
 ---
@@ -312,7 +309,7 @@ final_score = score + signal_count × 5
 ### 6-3. 종합 점수
 
 ```python
-종합 점수 (final_score) = 패턴 점수 + (시그널 개수 × 5점)
+종합 점수 (final_score) = 패턴 점수 + (시그널 개수 × 2점)
 ```
 
 ---

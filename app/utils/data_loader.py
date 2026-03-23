@@ -323,7 +323,7 @@ def _stage_supply_persistence(end_date: Optional[str] = None,
                 END AS combined_sff
             FROM mv_daily_sff
             WHERE trade_date <= :end_date
-              AND trade_date >= CAST(:end_date AS date) - INTERVAL '90 days'
+              AND trade_date >= CAST(:end_date AS date) - INTERVAL '365 days'
             ORDER BY stock_code, trade_date
         )
         SELECT stock_code, trade_date, combined_sff

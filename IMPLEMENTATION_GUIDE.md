@@ -214,7 +214,7 @@ python scripts/analysis/regime_scanner.py --pattern 급등형 --min-score 70 --s
     ├── sub_type 7종 (장기기반/단기돌파/V자반등/전면수급/수급약화/감속/단기반등)
     ├── tc(시간 일관성) + divergence(이격도) 보정
     ├── 시그널 3종 (MA크로스/가속도/동조율)
-    └── 출력: final_score = score + signal_count × 5
+    └── 출력: final_score = score + signal_count × 2
 ```
 
 ### Stage별 성능

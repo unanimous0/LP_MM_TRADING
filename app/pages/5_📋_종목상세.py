@@ -102,6 +102,13 @@ institution_weight = st.sidebar.slider(
     help=INSTITUTION_WEIGHT_HELP,
 )
 
+_direction_sel = st.sidebar.selectbox(
+    "분석 방향", ["매수 (Long)", "매도 (Short)"], index=0,
+    help="매수: 순매수 관점 패턴/점수 · 매도: 순매도 관점 패턴/점수",
+    key="detail_direction",
+)
+_direction = 'long' if '매수' in _direction_sel else 'short'
+
 # 선택 종목 파싱
 stock_code = selected.split('(')[-1].rstrip(')')
 stock_name = selected.rsplit(' (', 1)[0]
@@ -133,10 +140,10 @@ if zscore_df.empty and raw_df.empty:
     st.stop()
 
 _prog.progress(0.50, text="📊 패턴 분류 중... 50%")
-classified_df = _stage_classify(end_date=end_date_str, institution_weight=institution_weight)
+classified_df = _stage_classify(end_date=end_date_str, institution_weight=institution_weight, direction=_direction)
 
 _prog.progress(0.70, text="📋 통합 리포트 생성 중... 70%")
-report_df = _stage_report(end_date=end_date_str, institution_weight=institution_weight)
+report_df = _stage_report(end_date=end_date_str, institution_weight=institution_weight, direction=_direction)
 
 _prog.progress(0.88, text="🔔 시그널 탐지 중... 88%")
 signals_df = _stage_signals(end_date=end_date_str, institution_weight=institution_weight)
