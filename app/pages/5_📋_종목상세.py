@@ -297,17 +297,44 @@ with tab_price:
             for _, row in ohlcv_df.iterrows()
         ]
 
-        # 외국인 순매수 오버레이 (raw_df에서 가져옴)
-        _supply_line = []
-        if not raw_df.empty and 'foreign_net_amount' in raw_df.columns:
-            _supply_raw = raw_df[['trade_date', 'foreign_net_amount']].copy()
-            if start_date_str:
-                _supply_raw = _supply_raw[_supply_raw['trade_date'] >= start_date_str]
-            _supply_line = [
-                {"time": str(r['trade_date']), "value": float(r['foreign_net_amount']) / 1e8}
-                for _, r in _supply_raw.iterrows()
-                if pd.notna(r['foreign_net_amount'])
-            ]
+        # 수급 오버레이 옵션
+        _ov_cols = st.columns([2, 2, 1])
+        _ov_investor = _ov_cols[0].selectbox(
+            "수급 오버레이", ["외국인", "기관", "개인", "없음"],
+            index=0, key="price_overlay_investor",
+        )
+        _ov_mode = _ov_cols[1].selectbox(
+            "표시 방식", ["일별 순매수", "누적 순매수"],
+            index=0, key="price_overlay_mode",
+        )
+
+        _INVESTOR_COL = {
+            "외국인": "foreign_net_amount",
+            "기관": "institution_net_amount",
+            "개인": "individual_net_amount",
+        }
+        _INVESTOR_COLOR = {
+            "외국인": "#38bdf8",  # sky-400
+            "기관": "#a78bfa",    # violet-400
+            "개인": "#fbbf24",    # amber-400
+        }
+
+        _supply_lines = []
+        if _ov_investor != "없음" and not raw_df.empty:
+            _col = _INVESTOR_COL.get(_ov_investor)
+            if _col and _col in raw_df.columns:
+                _supply_raw = raw_df[['trade_date', _col]].copy()
+                if start_date_str:
+                    _supply_raw = _supply_raw[_supply_raw['trade_date'] >= start_date_str]
+                _supply_raw = _supply_raw.dropna(subset=[_col])
+
+                if _ov_mode == "누적 순매수":
+                    _supply_raw[_col] = _supply_raw[_col].cumsum()
+
+                _supply_lines = [
+                    {"time": str(r['trade_date']), "value": float(r[_col]) / 1e8}
+                    for _, r in _supply_raw.iterrows()
+                ]
 
         _series = [
             {
@@ -330,15 +357,16 @@ with tab_price:
                 },
             },
         ]
-        if _supply_line:
+        if _supply_lines:
+            _mode_label = "누적" if _ov_mode == "누적 순매수" else ""
             _series.append({
                 "type": "Line",
-                "data": _supply_line,
+                "data": _supply_lines,
                 "options": {
-                    "color": "#38bdf8",
+                    "color": _INVESTOR_COLOR.get(_ov_investor, "#38bdf8"),
                     "lineWidth": 2,
                     "priceScaleId": "supply",
-                    "title": "외국인(억)",
+                    "title": f"{_ov_investor}{_mode_label}(억)",
                 },
             })
 
@@ -364,10 +392,10 @@ with tab_price:
             key="price_chart",
         )
 
-        st.caption(
-            f"표시 기간: {period_sel} ({len(ohlcv_df)}거래일) · "
-            f"양봉 🟢 · 음봉 🔴 · 파란선 = 외국인 순매수(억원)"
-        )
+        _ov_caption = f"표시 기간: {period_sel} ({len(ohlcv_df)}거래일) · 양봉 🟢 · 음봉 🔴"
+        if _ov_investor != "없음":
+            _ov_caption += f" · {_INVESTOR_COLOR.get(_ov_investor, '')} {_ov_investor} {_ov_mode}(억원)"
+        st.caption(_ov_caption)
 
 # ── Tab 1: Z-Score 추이
 with tab1:
