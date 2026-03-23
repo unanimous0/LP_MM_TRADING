@@ -90,35 +90,40 @@ class SignalDetector:
             ref = datetime.strptime(end_date, '%Y-%m-%d')
             start_date = (ref - timedelta(days=calendar_days)).strftime('%Y-%m-%d')
 
+        params = {}
         if is_mv_available():
-            # MV 경로: foreign_net_amount, institution_net_amount 컬럼 존재
-            clauses = []
+            clauses = ["1=1"]
             if stock_codes:
-                codes_str = "','".join(stock_codes)
-                clauses.append(f"stock_code IN ('{codes_str}')")
+                placeholders = ', '.join(f':code_{i}' for i in range(len(stock_codes)))
+                clauses.append(f"stock_code IN ({placeholders})")
+                for i, code in enumerate(stock_codes):
+                    params[f'code_{i}'] = code
             if start_date:
-                clauses.append(f"trade_date >= '{start_date}'")
+                clauses.append("trade_date >= :start_date")
+                params['start_date'] = start_date
             if end_date:
-                clauses.append(f"trade_date <= '{end_date}'")
-            where = "WHERE " + " AND ".join(clauses) if clauses else ""
+                clauses.append("trade_date <= :end_date")
+                params['end_date'] = end_date
 
             query = f"""
             SELECT trade_date, stock_code, foreign_net_amount, institution_net_amount
             FROM mv_daily_sff
-            {where}
+            WHERE {' AND '.join(clauses)}
             ORDER BY stock_code, trade_date
             """
         else:
-            # Fallback: investor_trading 직접 쿼리
-            extra_clauses = []
+            clauses = ["it.investor_type IN ('FOREIGN', 'INSTITUTION')"]
             if stock_codes:
-                codes_str = "','".join(stock_codes)
-                extra_clauses.append(f"AND it.stock_code IN ('{codes_str}')")
+                placeholders = ', '.join(f':code_{i}' for i in range(len(stock_codes)))
+                clauses.append(f"it.stock_code IN ({placeholders})")
+                for i, code in enumerate(stock_codes):
+                    params[f'code_{i}'] = code
             if start_date:
-                extra_clauses.append(f"AND it.time >= '{start_date}'")
+                clauses.append("it.time >= :start_date")
+                params['start_date'] = start_date
             if end_date:
-                extra_clauses.append(f"AND it.time <= '{end_date}'")
-            extra = "\n          ".join(extra_clauses)
+                clauses.append("it.time <= :end_date")
+                params['end_date'] = end_date
 
             query = f"""
             SELECT
@@ -127,13 +132,12 @@ class SignalDetector:
                 SUM(CASE WHEN it.investor_type = 'FOREIGN'      THEN it.net_buy_value ELSE 0 END) AS foreign_net_amount,
                 SUM(CASE WHEN it.investor_type = 'INSTITUTION'  THEN it.net_buy_value ELSE 0 END) AS institution_net_amount
             FROM investor_trading it
-            WHERE it.investor_type IN ('FOREIGN', 'INSTITUTION')
-              {extra}
+            WHERE {' AND '.join(clauses)}
             GROUP BY it.time, it.stock_code
             ORDER BY it.stock_code, it.time
             """
 
-        df = pd.read_sql(text(query), self.conn)
+        df = pd.read_sql(text(query), self.conn, params=params)
 
         # PostgreSQL은 DATE를 datetime.date로 반환 → 문자열 통일
         if not df.empty and 'trade_date' in df.columns:

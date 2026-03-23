@@ -366,7 +366,7 @@ with tab_top:
             'signal_count': st.column_config.NumberColumn('시그널', format='%d'),
             '5D': st.column_config.NumberColumn('5D Z', format='%.2f'),
             'final_score': st.column_config.ProgressColumn(
-                '점수', min_value=0, max_value=106, format='%.1f점',
+                '점수', min_value=0, max_value=100, format='%.1f점',
             ),
             'market_cap_str': st.column_config.TextColumn('시총'),
             'market_cap_rank': st.column_config.NumberColumn('시총순위', format='%d위'),

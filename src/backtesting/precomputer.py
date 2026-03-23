@@ -125,7 +125,7 @@ class BacktestPrecomputer:
             print(f"  시그널 계산 완료: {len(signals_df):,}건")
 
         price_lookup = self._build_price_lookup(raw_df)
-        open_price_lookup = self._build_open_price_lookup(end_date)
+        open_price_lookup = self._build_open_price_lookup(end_date, start_date=data_start)
         stock_names = self._build_stock_names()
 
         trading_dates = sorted(raw_df['trade_date'].unique())
@@ -386,19 +386,25 @@ class BacktestPrecomputer:
             df['foreign_net_amount']
         )
 
-        # 1. MA Cross (signal_detector.detect_ma_crossover 동일 — combined_net 기준)
+        # MA 이동평균 (Long/Short 공용)
         df['ma5'] = df.groupby('stock_code')['combined_net'].transform(
             lambda x: x.rolling(5).mean())
         df['ma20'] = df.groupby('stock_code')['combined_net'].transform(
             lambda x: x.rolling(20).mean())
         df['prev_ma5'] = df.groupby('stock_code')['ma5'].shift(1)
         df['prev_ma20'] = df.groupby('stock_code')['ma20'].shift(1)
-        df['ma_cross'] = (
-            (df['ma5'] > df['ma20']) & (df['prev_ma5'] <= df['prev_ma20'])
-        )
         df['ma_diff'] = df['ma5'] - df['ma20']
 
-        # 2. Acceleration (signal_detector.calculate_acceleration 동일)
+        # 1. MA Cross — Long: 골든크로스(상향돌파), Short: 데드크로스(하향돌파)
+        df['ma_cross_long'] = (
+            (df['ma5'] > df['ma20']) & (df['prev_ma5'] <= df['prev_ma20'])
+        )
+        df['ma_cross_short'] = (
+            (df['ma5'] < df['ma20']) & (df['prev_ma5'] >= df['prev_ma20'])
+        )
+        df['ma_cross'] = df['ma_cross_long']  # 기본값 long (하위 호환)
+
+        # 2. Acceleration — Long: 가속(>1.5), Short: 감속(<0.67=1/1.5)
         df['recent_avg'] = df.groupby('stock_code')['combined_net'].transform(
             lambda x: x.rolling(5).mean())
         df['prev_avg'] = df.groupby('stock_code')['combined_net'].transform(
@@ -409,20 +415,33 @@ class BacktestPrecomputer:
         )
         df['acceleration'] = df['acceleration'].replace([np.inf, -np.inf], np.nan)
 
-        # 3. Sync rate (signal_detector.calculate_sync_rate 동일)
-        df['is_sync'] = (
+        # 3. Sync rate — Long: 동반 매수, Short: 동반 매도
+        df['is_sync_long'] = (
             (df['foreign_net_amount'] > 0) & (df['institution_net_amount'] > 0)
         ).astype(float)
-        df['sync_rate'] = df.groupby('stock_code')['is_sync'].transform(
+        df['is_sync_short'] = (
+            (df['foreign_net_amount'] < 0) & (df['institution_net_amount'] < 0)
+        ).astype(float)
+        df['sync_rate_long'] = df.groupby('stock_code')['is_sync_long'].transform(
             lambda x: x.rolling(20, min_periods=20).mean()
         ) * 100
+        df['sync_rate_short'] = df.groupby('stock_code')['is_sync_short'].transform(
+            lambda x: x.rolling(20, min_periods=20).mean()
+        ) * 100
+        df['sync_rate'] = df['sync_rate_long']  # 기본값 long (하위 호환)
 
-        # 4. Signal count (detect_all_signals 동일 임계값)
-        df['signal_count'] = (
-            df['ma_cross'].fillna(False).astype(int) +
+        # 4. Signal count — 방향별 분리
+        df['signal_count_long'] = (
+            df['ma_cross_long'].fillna(False).astype(int) +
             (df['acceleration'].fillna(0) > 1.5).astype(int) +
-            (df['sync_rate'].fillna(0) > 70).astype(int)
+            (df['sync_rate_long'].fillna(0) > 70).astype(int)
         )
+        df['signal_count_short'] = (
+            df['ma_cross_short'].fillna(False).astype(int) +
+            (df['acceleration'].fillna(0) < 0.67).astype(int) +
+            (df['sync_rate_short'].fillna(0) > 70).astype(int)
+        )
+        df['signal_count'] = df['signal_count_long']  # 기본값 (하위 호환)
 
         result = df[['trade_date', 'stock_code', 'ma_cross', 'ma_diff',
                      'acceleration', 'sync_rate', 'signal_count']].copy()
@@ -436,18 +455,23 @@ class BacktestPrecomputer:
             valid['close_price'].astype(float)
         ))
 
-    def _build_open_price_lookup(self, end_date: str) -> dict:
+    def _build_open_price_lookup(self, end_date: str, start_date: str = None) -> dict:
         """(stock_code, trade_date) → open_price dict 생성
 
         ohlcv_daily에서 시가 로드 (MV에 open_price 없음).
         진입 시 D+1 시가 사용을 위한 lookup.
         """
-        query = text("""
+        params = {'end_date': end_date}
+        where = "WHERE time <= :end_date AND open_price IS NOT NULL"
+        if start_date:
+            where += " AND time >= :start_date"
+            params['start_date'] = start_date
+        query = text(f"""
         SELECT stock_code, time AS trade_date, open_price
         FROM ohlcv_daily
-        WHERE time <= :end_date AND open_price IS NOT NULL
+        {where}
         """)
-        df = pd.read_sql(query, self.conn, params={'end_date': end_date})
+        df = pd.read_sql(query, self.conn, params=params)
         if df.empty:
             return {}
         df['trade_date'] = df['trade_date'].astype(str)
@@ -483,6 +507,21 @@ class BacktestPrecomputer:
             tc_center=self.tc_center, tc_scale=self.tc_scale,
         )
 
+        # 거래대금 기반 유동성 필터 (거래정지/극소거래량 종목 제외)
+        _illiquid_by_date = {}
+        try:
+            _ohlcv_q = text("""
+                SELECT stock_code, time AS trade_date FROM ohlcv_daily
+                WHERE (trading_value < 100000000 OR trading_value IS NULL)
+            """)
+            _illiquid_df = pd.read_sql(_ohlcv_q, self.conn)
+            if not _illiquid_df.empty:
+                _illiquid_df['trade_date'] = _illiquid_df['trade_date'].astype(str)
+                for dt, grp in _illiquid_df.groupby('trade_date'):
+                    _illiquid_by_date[dt] = set(grp['stock_code'])
+        except Exception:
+            pass
+
         patterns_long = {}
         patterns_short = {}
 
@@ -490,6 +529,13 @@ class BacktestPrecomputer:
             try:
                 zscore_on_date = zscore_df.loc[date].reset_index()
             except KeyError:
+                continue
+
+            # 거래대금 1억 미만 종목 제외
+            _illiquid_codes = _illiquid_by_date.get(date, set())
+            if _illiquid_codes:
+                zscore_on_date = zscore_on_date[~zscore_on_date['stock_code'].isin(_illiquid_codes)]
+            if zscore_on_date.empty:
                 continue
 
             # 방향 확신도 기준으로 분할 (_sff_5d_avg 사용 — classify_all과 동일 기준)
@@ -554,9 +600,15 @@ class BacktestPrecomputer:
                     for col in ['ma_cross', 'ma_diff', 'acceleration', 'sync_rate']:
                         merged[col] = np.nan
                     merged['signal_count'] = 0
+                    merged['signal_count_long'] = 0
+                    merged['signal_count_short'] = 0
 
-                # fill defaults
-                merged['signal_count'] = merged['signal_count'].fillna(0).astype(int)
+                # 방향별 시그널 적용
+                _sc_col = f'signal_count_{direction}'
+                if _sc_col in merged.columns:
+                    merged['signal_count'] = merged[_sc_col].fillna(0).astype(int)
+                else:
+                    merged['signal_count'] = merged['signal_count'].fillna(0).astype(int)
                 merged['ma_cross'] = merged['ma_cross'].fillna(False)
 
                 # stock_name 추가
