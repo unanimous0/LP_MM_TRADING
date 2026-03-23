@@ -473,6 +473,19 @@ with tab1:
                 st.toast(f"{len(_sel)}개 종목을 관심종목에서 제거했습니다.", icon="🗑️")
                 st.rerun()
 
+        # 종목 상세 이동
+        st.divider()
+        _detail_opts = [
+            f"{r['stock_name']} ({r['stock_code']})"
+            for _, r in filtered_df.head(50).iterrows()
+        ]
+        _detail_sel = st.selectbox("종목 상세 분석으로 이동", _detail_opts,
+                                    index=None, placeholder="종목 선택...", key="pa_detail_nav")
+        if _detail_sel:
+            _nav_code = _detail_sel.split('(')[-1].rstrip(')')
+            st.session_state['heatmap_selected_code'] = _nav_code
+            st.switch_page("pages/5_📋_종목상세.py")
+
 # ---- Tab 2: 섹터 분석 ----
 with tab2:
     _src_df = filtered_df if not filtered_df.empty else report_df

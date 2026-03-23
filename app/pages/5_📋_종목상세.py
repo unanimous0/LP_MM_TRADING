@@ -297,6 +297,51 @@ with tab_price:
             for _, row in ohlcv_df.iterrows()
         ]
 
+        # 외국인 순매수 오버레이 (raw_df에서 가져옴)
+        _supply_line = []
+        if not raw_df.empty and 'foreign_net_amount' in raw_df.columns:
+            _supply_raw = raw_df[['trade_date', 'foreign_net_amount']].copy()
+            if start_date_str:
+                _supply_raw = _supply_raw[_supply_raw['trade_date'] >= start_date_str]
+            _supply_line = [
+                {"time": str(r['trade_date']), "value": float(r['foreign_net_amount']) / 1e8}
+                for _, r in _supply_raw.iterrows()
+                if pd.notna(r['foreign_net_amount'])
+            ]
+
+        _series = [
+            {
+                "type": "Candlestick",
+                "data": candle_data,
+                "options": {
+                    "upColor": "#4ade80",
+                    "downColor": "#f87171",
+                    "wickUpColor": "#4ade80",
+                    "wickDownColor": "#f87171",
+                    "borderVisible": False,
+                },
+            },
+            {
+                "type": "Histogram",
+                "data": volume_data,
+                "options": {
+                    "priceFormat": {"type": "volume"},
+                    "priceScaleId": "volume",
+                },
+            },
+        ]
+        if _supply_line:
+            _series.append({
+                "type": "Line",
+                "data": _supply_line,
+                "options": {
+                    "color": "#38bdf8",
+                    "lineWidth": 2,
+                    "priceScaleId": "supply",
+                    "title": "외국인(억)",
+                },
+            })
+
         renderLightweightCharts(
             [
                 {
@@ -311,28 +356,9 @@ with tab_price:
                         },
                         "height": 500,
                         "crosshair": {"mode": 0},
+                        "rightPriceScale": {"visible": True},
                     },
-                    "series": [
-                        {
-                            "type": "Candlestick",
-                            "data": candle_data,
-                            "options": {
-                                "upColor": "#4ade80",
-                                "downColor": "#f87171",
-                                "wickUpColor": "#4ade80",
-                                "wickDownColor": "#f87171",
-                                "borderVisible": False,
-                            },
-                        },
-                        {
-                            "type": "Histogram",
-                            "data": volume_data,
-                            "options": {
-                                "priceFormat": {"type": "volume"},
-                                "priceScaleId": "volume",
-                            },
-                        },
-                    ],
+                    "series": _series,
                 }
             ],
             key="price_chart",
@@ -340,7 +366,7 @@ with tab_price:
 
         st.caption(
             f"표시 기간: {period_sel} ({len(ohlcv_df)}거래일) · "
-            f"양봉 🟢 (종가 >= 시가) · 음봉 🔴 (종가 < 시가)"
+            f"양봉 🟢 · 음봉 🔴 · 파란선 = 외국인 순매수(억원)"
         )
 
 # ── Tab 1: Z-Score 추이
