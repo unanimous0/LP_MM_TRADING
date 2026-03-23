@@ -297,11 +297,11 @@ with tab_price:
             for _, row in ohlcv_df.iterrows()
         ]
 
-        # 수급 오버레이 옵션
-        _ov_cols = st.columns([2, 2, 1])
-        _ov_investor = _ov_cols[0].selectbox(
-            "수급 오버레이", ["외국인", "기관", "개인", "없음"],
-            index=0, key="price_overlay_investor",
+        # 수급 오버레이 옵션 (중복 선택 가능)
+        _ov_cols = st.columns([3, 2])
+        _ov_investors = _ov_cols[0].multiselect(
+            "수급 오버레이", ["외국인", "기관", "개인"],
+            default=["외국인"], key="price_overlay_investors",
         )
         _ov_mode = _ov_cols[1].selectbox(
             "표시 방식", ["일별 순매수", "누적 순매수"],
@@ -319,23 +319,7 @@ with tab_price:
             "개인": "#fbbf24",    # amber-400
         }
 
-        _supply_lines = []
-        if _ov_investor != "없음" and not raw_df.empty:
-            _col = _INVESTOR_COL.get(_ov_investor)
-            if _col and _col in raw_df.columns:
-                _supply_raw = raw_df[['trade_date', _col]].copy()
-                if start_date_str:
-                    _supply_raw = _supply_raw[_supply_raw['trade_date'] >= start_date_str]
-                _supply_raw = _supply_raw.dropna(subset=[_col])
-
-                if _ov_mode == "누적 순매수":
-                    _supply_raw[_col] = _supply_raw[_col].cumsum()
-
-                _supply_lines = [
-                    {"time": str(r['trade_date']), "value": float(r[_col]) / 1e8}
-                    for _, r in _supply_raw.iterrows()
-                ]
-
+        # 캔들스틱 (우측 Y축 = 주가)
         _series = [
             {
                 "type": "Candlestick",
@@ -346,6 +330,7 @@ with tab_price:
                     "wickUpColor": "#4ade80",
                     "wickDownColor": "#f87171",
                     "borderVisible": False,
+                    "priceScaleId": "right",
                 },
             },
             {
@@ -357,18 +342,41 @@ with tab_price:
                 },
             },
         ]
-        if _supply_lines:
+
+        # 수급 오버레이 라인들 (좌측 Y축 = 금액 억원)
+        _ov_labels = []
+        for _inv in _ov_investors:
+            _col = _INVESTOR_COL.get(_inv)
+            if not _col or _col not in raw_df.columns or raw_df.empty:
+                continue
+            _supply_raw = raw_df[['trade_date', _col]].copy()
+            if start_date_str:
+                _supply_raw = _supply_raw[_supply_raw['trade_date'] >= start_date_str]
+            _supply_raw = _supply_raw.dropna(subset=[_col])
+            if _supply_raw.empty:
+                continue
+
+            if _ov_mode == "누적 순매수":
+                _supply_raw = _supply_raw.copy()
+                _supply_raw[_col] = _supply_raw[_col].cumsum()
+
+            _line_data = [
+                {"time": str(r['trade_date']), "value": float(r[_col]) / 1e8}
+                for _, r in _supply_raw.iterrows()
+            ]
             _mode_label = "누적" if _ov_mode == "누적 순매수" else ""
+            _title = f"{_inv}{_mode_label}(억)"
             _series.append({
                 "type": "Line",
-                "data": _supply_lines,
+                "data": _line_data,
                 "options": {
-                    "color": _INVESTOR_COLOR.get(_ov_investor, "#38bdf8"),
+                    "color": _INVESTOR_COLOR.get(_inv, "#38bdf8"),
                     "lineWidth": 2,
-                    "priceScaleId": "supply",
-                    "title": f"{_ov_investor}{_mode_label}(억)",
+                    "priceScaleId": "left",
+                    "title": _title,
                 },
             })
+            _ov_labels.append(f"{_inv}")
 
         renderLightweightCharts(
             [
@@ -385,6 +393,7 @@ with tab_price:
                         "height": 500,
                         "crosshair": {"mode": 0},
                         "rightPriceScale": {"visible": True},
+                        "leftPriceScale": {"visible": bool(_ov_labels)},
                     },
                     "series": _series,
                 }
@@ -393,8 +402,8 @@ with tab_price:
         )
 
         _ov_caption = f"표시 기간: {period_sel} ({len(ohlcv_df)}거래일) · 양봉 🟢 · 음봉 🔴"
-        if _ov_investor != "없음":
-            _ov_caption += f" · {_INVESTOR_COLOR.get(_ov_investor, '')} {_ov_investor} {_ov_mode}(억원)"
+        if _ov_labels:
+            _ov_caption += f" · 좌축: {'+'.join(_ov_labels)} {_ov_mode}(억원) · 우축: 주가"
         st.caption(_ov_caption)
 
 # ── Tab 1: Z-Score 추이
