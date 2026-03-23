@@ -1,9 +1,8 @@
 """
-패턴 분석 페이지 - 종합점수 기준 종목 순위 + 섹터 분석
+종목 탐색 페이지 - 종합점수 기준 종목 순위 + 섹터 분석 + 누적 수급
 
-사이드바: 기관 가중치 / 기준 날짜 / 섹터 필터 / 최소 점수
-3개 탭: 종목 순위, 섹터 분석, 패턴 가이드
-종목 상세: 개별 종목 정보 (패턴/점수/시그널/진입/손절)
+사이드바: 기관 가중치 / 기준 날짜 / 섹터 필터 / 최소 점수 / 누적 수급 설정
+4개 탭: 점수 순위, 섹터 분석, 누적 수급, 패턴 가이드
 """
 
 import sys
@@ -25,17 +24,20 @@ from utils.data_loader import (
     get_watchlist, add_to_watchlist, remove_from_watchlist,
     get_market_cap_latest,
     get_score_reference_distributions, rescale_scores,
+    get_cumulative_score_ranking,
+    get_cumulative_sff_ranking,
 )
 from utils.charts import (
     create_sector_avg_score_chart,
     create_sector_concentration_chart,
     create_sector_treemap,
+    create_cumulative_bar_chart,
 )
 from src.analyzer.integrated_report import IntegratedReport
 
-st.set_page_config(page_title="패턴분석", page_icon="🔍", layout="wide")
+st.set_page_config(page_title="종목 탐색", page_icon="🔍", layout="wide")
 st.markdown('<style>div[data-baseweb="select"]>div{border-color:#333!important}div[data-baseweb="input"] input,div[data-baseweb="input"]>div{border-color:#333!important}[data-testid="stDateInput"]>div>div>div{border-color:#333!important}[data-testid="stExpander"]{border-color:#222!important}</style>', unsafe_allow_html=True)
-st.title("패턴 분류 & 시그널 분석")
+st.title("종목 탐색")
 
 
 # ---------------------------------------------------------------------------
@@ -354,6 +356,15 @@ selected_sector = st.sidebar.selectbox("섹터", ["전체"] + sectors)
 min_score = st.sidebar.slider("최소 종합점수", 0.0, 100.0, 60.0, step=5.0,
                                help="종합점수(패턴점수 + 시그널수×2)가 이 값 이상인 종목만 표시합니다.")
 
+# 누적 수급 설정
+st.sidebar.divider()
+st.sidebar.markdown("**누적 수급 설정**")
+_LOOKBACK_OPTIONS = {'5일': 5, '10일': 10, '20일': 20, '60일': 60, '120일': 120, '240일': 240}
+lookback_label = st.sidebar.selectbox("누적 조회 기간", list(_LOOKBACK_OPTIONS.keys()), index=2, key="pa_lookback")
+lookback_days = _LOOKBACK_OPTIONS[lookback_label]
+top_rank_n = st.sidebar.slider("상위 기준 (Top N)", 10, 200, 50, step=10, key="pa_top_rank_n",
+                                help="점수/수급 출현빈도 계산 시 '상위 N위 이내' 기준")
+
 # ---------------------------------------------------------------------------
 # 데이터 로드 & 필터링
 # ---------------------------------------------------------------------------
@@ -433,9 +444,9 @@ _mcap_note = " · 시총 500위 이내" if mcap_filter != "전체" else ""
 st.caption(f"필터링 결과: {len(filtered_df)}개 종목 (전체 {len(report_df)}개) | {_dir_label} | 종합점수 내림차순{_mcap_note}")
 
 # ---------------------------------------------------------------------------
-# 3개 탭: 종목 순위 / 섹터 분석 / 패턴 가이드
+# 4개 탭: 점수 순위 / 섹터 분석 / 누적 수급 / 패턴 가이드
 # ---------------------------------------------------------------------------
-tab1, tab2, tab3 = st.tabs(["종목 순위", "섹터 분석", "패턴 가이드"])
+tab1, tab2, tab3, tab4 = st.tabs(["점수 순위", "섹터 분석", "누적 수급", "패턴 가이드"])
 
 _pat_col = 'pattern_label' if 'pattern_label' in filtered_df.columns else 'pattern'
 
@@ -520,8 +531,168 @@ with tab2:
             use_container_width=True,
         )
 
-# ---- Tab 3: 패턴 가이드 ----
+# ---- Tab 3: 누적 수급 ----
 with tab3:
+    _cum_prog = st.empty()
+    _cum_prog_bar = _cum_prog.progress(0, text="누적 수급 데이터 집계 중... 0%")
+
+    # 시총 필터 → 숫자 변환
+    _cum_mcap_top_n = _mcap_limits.get(mcap_filter, None)
+
+    # A. SQL 기반 수급 집계
+    _cum_prog_bar = _cum_prog.progress(0.05, text="수급 데이터 집계 중... 5%")
+    _cum_sff_df = get_cumulative_sff_ranking(
+        end_date=end_date_str,
+        lookback_days=lookback_days,
+        institution_weight=institution_weight,
+        direction=_direction,
+        top_rank_n=top_rank_n,
+    )
+
+    # B. Precomputer 기반 점수 집계
+    _cum_prog_bar = _cum_prog.progress(0.10, text="종합점수 집계 중... 10%")
+    _cum_score_df = get_cumulative_score_ranking(
+        end_date=end_date_str,
+        lookback_days=lookback_days,
+        institution_weight=institution_weight,
+        direction=_direction,
+        top_rank_n=top_rank_n,
+        market_cap_top_n=_cum_mcap_top_n or 500,
+    )
+
+    # Merge
+    _cum_prog_bar = _cum_prog.progress(0.90, text="종목 정보 병합 중... 90%")
+    if not _cum_sff_df.empty and not _cum_score_df.empty:
+        _cum_merged = pd.merge(_cum_sff_df, _cum_score_df, on='stock_code', how='inner')
+    elif not _cum_sff_df.empty:
+        _cum_merged = _cum_sff_df.copy()
+    elif not _cum_score_df.empty:
+        _cum_merged = _cum_score_df.copy()
+    else:
+        _cum_prog.empty()
+        st.info("누적 수급 데이터가 없습니다.")
+        _cum_merged = pd.DataFrame()
+
+    if not _cum_merged.empty:
+        # 종목명/섹터 조인
+        _cum_stock_list = get_stock_list()
+        _cum_merged = _cum_merged.merge(
+            _cum_stock_list[['stock_code', 'stock_name', 'sector']],
+            on='stock_code', how='left',
+        )
+
+        # 시총 조인
+        _cum_mcap = get_market_cap_latest()
+        if not _cum_mcap.empty:
+            _cum_merged = _cum_merged.merge(
+                _cum_mcap[['stock_code', 'market_cap_rank', 'market_cap_str']],
+                on='stock_code', how='left',
+            )
+        else:
+            _cum_merged['market_cap_rank'] = None
+            _cum_merged['market_cap_str'] = '-'
+
+        # 시총 필터
+        if _cum_mcap_top_n is not None and 'market_cap_rank' in _cum_merged.columns:
+            _cum_merged = _cum_merged[_cum_merged['market_cap_rank'] <= _cum_mcap_top_n]
+
+        # IPO 필터
+        if 'trading_days' in _cum_merged.columns:
+            _cum_merged = _cum_merged[_cum_merged['trading_days'] >= lookback_days * 0.5]
+
+        # Fill NaN
+        for _col in ['avg_score', 'max_score', 'score_top_n_ratio', 'appearance_ratio']:
+            if _col in _cum_merged.columns:
+                _cum_merged[_col] = _cum_merged[_col].fillna(0)
+        for _col in ['cum_sff', 'avg_sff', 'positive_ratio', 'sff_top_n_ratio', 'cum_net_amount']:
+            if _col in _cum_merged.columns:
+                _cum_merged[_col] = _cum_merged[_col].fillna(0)
+
+        # Composite 계산
+        def _pct_rank(series):
+            return series.rank(pct=True, na_option='bottom')
+
+        _zero = pd.Series(0, index=_cum_merged.index)
+        _cum_merged['pct_avg_score'] = _pct_rank(_cum_merged['avg_score']) if 'avg_score' in _cum_merged.columns else _zero
+        _cum_merged['pct_cum_sff'] = _pct_rank(_cum_merged['cum_sff']) if 'cum_sff' in _cum_merged.columns else _zero
+        _cum_merged['pct_positive_ratio'] = _pct_rank(_cum_merged['positive_ratio']) if 'positive_ratio' in _cum_merged.columns else _zero
+        _cum_merged['pct_top_n_ratio'] = _pct_rank(_cum_merged['score_top_n_ratio']) if 'score_top_n_ratio' in _cum_merged.columns else _zero
+
+        _cum_merged['composite'] = (
+            _cum_merged['pct_avg_score'] * 0.35
+            + _cum_merged['pct_cum_sff'] * 0.25
+            + _cum_merged['pct_positive_ratio'] * 0.20
+            + _cum_merged['pct_top_n_ratio'] * 0.20
+        ) * 100
+
+        # 비율 → 퍼센트
+        for _col in ['positive_ratio', 'sff_top_n_ratio', 'score_top_n_ratio', 'appearance_ratio']:
+            if _col in _cum_merged.columns:
+                _cum_merged[_col + '_pct'] = _cum_merged[_col] * 100
+
+        # display_name
+        _cum_merged['display_name'] = _cum_merged.apply(
+            lambda r: f"{r.get('stock_name', r['stock_code'])} ({r['stock_code']})", axis=1
+        )
+
+        _cum_prog.empty()
+
+        # 표시
+        _cum_dir_label = "매수" if _direction == 'long' else "매도"
+        st.caption(
+            f"Composite = 평균점수(35%) + 누적Sff(25%) + 양수비율(20%) + 출현빈도(20%) 백분위 가중평균  |  "
+            f"**{lookback_label}** / {_cum_dir_label} / Top {top_rank_n}"
+        )
+
+        _cum_display_n = 50
+        _cum_chart_top_n = 10
+        _cum_sorted = _cum_merged.sort_values('composite', ascending=False).head(_cum_display_n)
+
+        if not _cum_sorted.empty:
+            _cum_color = '#38bdf8'  # sky-400
+
+            fig_cum = create_cumulative_bar_chart(
+                _cum_sorted, 'composite', title=f'종합 순위 Top {_cum_chart_top_n}',
+                top_n=_cum_chart_top_n, value_format='.1f', color=_cum_color,
+            )
+            st.plotly_chart(fig_cum, use_container_width=True, theme=None)
+
+            _cum_max_pos_pct = max(_cum_sorted['positive_ratio_pct'].max(), 1) if 'positive_ratio_pct' in _cum_sorted.columns else 100
+            _cum_max_topn_pct = max(_cum_sorted['score_top_n_ratio_pct'].max(), 1) if 'score_top_n_ratio_pct' in _cum_sorted.columns else 100
+
+            st.dataframe(
+                _cum_sorted[['display_name', 'sector', 'composite',
+                             'avg_score', 'cum_sff',
+                             'positive_ratio_pct', 'score_top_n_ratio_pct',
+                             'market_cap_str', 'market_cap_rank']].reset_index(drop=True),
+                column_config={
+                    'display_name': st.column_config.TextColumn('종목'),
+                    'sector': st.column_config.TextColumn('섹터'),
+                    'composite': st.column_config.ProgressColumn(
+                        '종합 점수', min_value=0, max_value=100, format='%.1f점',
+                    ),
+                    'avg_score': st.column_config.NumberColumn('평균 점수', format='%.1f점'),
+                    'cum_sff': st.column_config.NumberColumn('누적 Sff', format='%.4f'),
+                    'positive_ratio_pct': st.column_config.ProgressColumn(
+                        '양수비율', min_value=0, max_value=_cum_max_pos_pct, format='%.0f%%',
+                    ),
+                    'score_top_n_ratio_pct': st.column_config.ProgressColumn(
+                        f'점수 Top{top_rank_n}', min_value=0, max_value=_cum_max_topn_pct, format='%.0f%%',
+                    ),
+                    'market_cap_str': st.column_config.TextColumn('시총'),
+                    'market_cap_rank': st.column_config.NumberColumn('시총순위', format='%d위'),
+                },
+                use_container_width=True,
+                hide_index=True,
+                height=min(600, len(_cum_sorted) * 38 + 40),
+            )
+        else:
+            st.info("데이터가 없습니다.")
+    else:
+        _cum_prog.empty()
+
+# ---- Tab 4: 패턴 가이드 ----
+with tab4:
     st.markdown("""
 ### 패턴 분류 체계
 
@@ -619,54 +790,5 @@ Z-Score 패턴의 형태에 따라 3가지 기본 패턴 + 7가지 복합 패턴
 시그널이 2개 이상이면 진입 신뢰도가 높습니다 (백테스트 기준 승률 60%, 평균 +3~4%).
 """)
 
-# ---------------------------------------------------------------------------
-# 종목 상세 (원래 하단 섹션)
-# ---------------------------------------------------------------------------
 st.divider()
-st.subheader("종목 상세 정보")
-
-if not filtered_df.empty:
-    stock_options = [
-        f"{row['stock_name']} ({row['stock_code']})"
-        for _, row in filtered_df.iterrows()
-    ]
-
-    selected = st.selectbox("종목 선택", stock_options)
-
-    if selected:
-        stock_code = selected.split('(')[-1].rstrip(')')
-        row = filtered_df[filtered_df['stock_code'] == stock_code].iloc[0]
-
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("패턴", row.get('pattern_label', row.get('pattern', '-')))
-        col2.metric("종합점수", f"{row.get('final_score', 0):.1f}")
-        col3.metric("시그널 수", f"{row.get('signal_count', 0):.0f}")
-        col4.metric("섹터", row.get('sector', '-'))
-
-        detail_col1, detail_col2 = st.columns(2)
-        with detail_col1:
-            st.markdown("**진입 포인트**")
-            st.info(row.get('entry_point', '-'))
-        with detail_col2:
-            st.markdown("**손절 기준**")
-            st.warning(row.get('stop_loss', '-'))
-
-        # Z-Score 데이터 표시
-        if not classified_df.empty:
-            stock_zscore = classified_df[classified_df['stock_code'] == stock_code]
-            if not stock_zscore.empty:
-                zscore_row = stock_zscore.iloc[0]
-                period_cols = ['5D', '10D', '20D', '50D', '100D', '200D', '500D']
-                existing_periods = [c for c in period_cols if c in zscore_row.index]
-
-                if existing_periods:
-                    st.markdown("**기간별 Z-Score**")
-                    zscore_data = {col: [f"{zscore_row[col]:.2f}"] for col in existing_periods}
-                    st.dataframe(pd.DataFrame(zscore_data), use_container_width=True)
-
-        if 'signal_list' in row.index and row['signal_list']:
-            st.markdown("**활성 시그널**")
-            signals = row['signal_list'] if isinstance(row['signal_list'], str) else str(row['signal_list'])
-            st.success(signals)
-else:
-    st.info("종목을 선택하려면 사이드바에서 최소 종합점수를 조정하세요.")
+st.caption("종목의 상세 분석은 사이드바의 '종목 상세' 페이지에서 확인할 수 있습니다.")

@@ -11,7 +11,7 @@ icon = ":material/grid_on:"
 
 [[pages]]
 path = "pages/2_🔍_패턴분석.py"
-name = "패턴분석"
+name = "종목 탐색"
 icon = ":material/search:"
 
 [[pages]]
@@ -33,8 +33,3 @@ icon = ":material/bar_chart:"
 path = "pages/6_🔀_종목비교.py"
 name = "종목 비교"
 icon = ":material/compare:"
-
-[[pages]]
-path = "pages/8_🏆_누적수급.py"
-name = "누적 수급"
-icon = ":material/leaderboard:"
