@@ -73,11 +73,9 @@ direction = st.sidebar.radio(
 )
 
 sort_options = {
-    'recent':          '최근 수급 (5D 기준)',
-    'long_divergence': '장기이격 (5D-200D 차이)',
-    'mid_divergence':  '중기이격 (5D-100D 차이)',
-    'weighted':        '가중 평균 (최근 높은 비중)',
-    'average':         '단순 평균',
+    'recent':          '최근 수급 강도',
+    'long_divergence': '장기 대비 변화 (5D-200D)',
+    'weighted':        '종합 수급 (가중 평균)',
 }
 sort_by = st.sidebar.selectbox(
     "정렬 기준",
@@ -96,9 +94,11 @@ selected_sector = st.sidebar.selectbox("섹터 필터", options=["전체"] + sec
 # 데이터 로드
 # ---------------------------------------------------------------------------
 _prog = st.progress(0, text="분석 준비 중... 0%")
+_pipeline_direction = 'long' if direction in ('buy', 'both') else 'short'
 zscore_matrix, classified_df, signals_df, report_df = run_analysis_pipeline_with_progress(
     end_date=end_date_str, progress_bar=_prog,
     institution_weight=institution_weight,
+    direction=_pipeline_direction,
 )
 _prog.empty()
 
