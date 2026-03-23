@@ -1,8 +1,8 @@
 # 한국 주식 외국인/기관 투자자 수급 분석 프로그램
 
 ## [Status]
-- **현재 작업**: 점수 공식 v2 + 방향 확신도 필터 + 거래대금 필터
-- **마지막 업데이트**: 2026-03-22
+- **현재 작업**: v6.0 — 점수 공식 v2 + UI 재구성 + 전반 감사 수정
+- **마지막 업데이트**: 2026-03-23
 - **서버**: 리눅스 서버 (Tailscale VPN으로 집/회사 PC에서 접속)
   - 외부 포트 개방 없음 (공유기 NAT + 포트포워딩 미설정)
   - Tailscale IP: `100.64.229.73`
@@ -581,15 +581,19 @@ LP_MM_TRADING/
 ├── data/
 │   ├── app.db                     # 앱 전용 SQLite (watchlist/backtest_history/score_change_log)
 │   └── cache/                     # 파이프라인 결과 파일 캐시 (pkl, .gitignore)
-├── app/                           # Streamlit 웹 대시보드 (Stage 5-1) ✨
-│   ├── streamlit_app.py           # 메인 엔트리포인트
+├── app/                           # Streamlit 웹 대시보드 (v6.0) ✨
+│   ├── streamlit_app.py           # 메인 (4탭: 수급TOP/이상수급/당일순위/고득점변동)
 │   ├── utils/
-│   │   └── data_loader.py         # 캐시 데이터 로더 (DB/분석/백테스트/최적화)
+│   │   ├── data_loader.py         # 캐시 데이터 로더 (DB/분석/백테스트/최적화)
+│   │   ├── charts.py              # Plotly 차트 함수 모음
+│   │   └── ui_constants.py        # 공통 UI 상수 (help 텍스트, CSS)
 │   └── pages/
-│       ├── 1_🏠_홈.py              # DB 통계, 최근 업데이트
-│       ├── 2_🔍_수급_분석.py       # Stage 1-3 분석 파이프라인
+│       ├── 1_📊_히트맵.py          # Z-Score 히트맵 (정렬 3종, direction 연동)
+│       ├── 2_🔍_패턴분석.py        # 종목 탐색 (4탭: 점수순위/섹터/누적수급/패턴가이드)
 │       ├── 3_📈_백테스트.py        # 백테스트 실행 + Optuna 최적화 + Plotly 차트
-│       └── 8_🏆_누적수급.py        # 누적 수급 순위 (종합/점수/수급/안정성)
+│       ├── 4_🔄_워크포워드.py      # Walk-Forward 롤링 검증
+│       ├── 5_📋_종목상세.py        # 종목 상세 (5탭: 주가차트/Z추이/수급금액/시그널MA/패턴)
+│       └── 6_🔀_종목비교.py        # 종목 비교 (최대 5종목 병렬)
 ├── src/
 │   ├── database/                  # DB 모듈
 │   │   └── connection.py          # PostgreSQL(시장데이터) + SQLite(앱데이터) 이중 연결 + MV 확인
@@ -830,6 +834,41 @@ short 정렬/분류: adjusted_z = z × max(-confidence, 0)   ← 매도 방향�
 ## [Progress History]
 
 > 전체 이력은 **CHANGELOG.md** 참조. 아래는 최근 항목만 기록.
+
+### 2026-03-22~23 (v6.0 — 점수 공식 v2 + UI 재구성 + 전반 감사)
+
+**목표**: 점수 공식 단순화, UI 페이지 재구성, 프로젝트 전반 논리/구조 감사
+
+**점수 공식 v2**:
+- 6개 가중치 → 4개: recent(0.35) + long_divergence(0.20) + weighted(0.25) + supply_persistence(0.20)
+- supply_persistence = 평균Sff × √연속일수 (유통시총 대비, Long/Short 양방향)
+- 제거: short_divergence/mid_divergence/average 가중치, tc_bonus, sub_type_score_bonus
+- 시그널 가산: ×5 → ×2 (독립 확인 신호 유지, 점수 지배력 축소)
+
+**필터링 강화**:
+- 방향 확신도 필터: 매도 종목이 매수 순위에 올라가는 구조적 버그 수정 (Z=0→score=50 바닥 문제)
+- 거래대금 1억 미만 종목 제외 (거래정지 + 극소거래량)
+- Precomputer 필터 통일: `5D > 0` → `_sff_5d_avg > 0` + 사후 필터 `recent/weighted > 0.05`
+- Precomputer에 백테스트 유동성 필터 추가 (거래대금 < 1억 종목 진입 방지)
+
+**UI 재구성 (8페이지 → 6페이지)**:
+- 메인 + 이상수급 통합 → 메인 4탭 (수급TOP/이상수급/당일순위/고득점변동)
+- 패턴분석 + 누적수급 통합 → 종목 탐색 4탭 (점수순위/섹터분석/누적수급/패턴가이드)
+- 히트맵 정렬 5→3개 + direction 파이프라인 전달
+- 종목상세에 주가 차트 탭 추가 (TradingView Lightweight Charts, 캔들+거래량+수급오버레이)
+- 기관 가중치 help 텍스트 공통화 (`ui_constants.py`)
+- 삭제: `7_⚡_이상수급.py`, `8_🏆_누적수급.py`
+
+**전반 감사 수정**:
+- H1: signal_detector SQL injection → parameterized query
+- H3: Short 시그널 Long 편향 수정 (데드크로스/매도감속/동반매도 분리)
+- H2: open_price_lookup 전체 DB 로드 → start_date 필터 추가
+- M1~M8: 문서 signal×5→×2, 필터 불일치 통일, supply_persistence 90→365일, 종목상세 direction 전달, 종목탐색→종목상세 네비게이션, 주가+수급 오버레이
+- 검증에서 발견: signal_count_short 결과 DataFrame 미포함 → 수정
+
+**테스트**: 294개 통과 (0 실패)
+
+---
 
 ### 2026-03-17 (tc_bonus 스케일 조정 + 시총 구간별 TOP + Precomputer MA 버그 수정)
 
@@ -1116,5 +1155,5 @@ README.md                             (프로젝트 소개 최신화)
 
 ---
 
-**프로젝트 버전**: v6.0.0 (점수 공식 v2 + 방향 확신도 필터 + 거래대금 필터 + supply_persistence)
-**마지막 업데이트**: 2026-03-22
+**프로젝트 버전**: v6.0.0 (점수 v2 + UI 재구성 6페이지 + 전반 감사 + TradingView 주가차트)
+**마지막 업데이트**: 2026-03-23
