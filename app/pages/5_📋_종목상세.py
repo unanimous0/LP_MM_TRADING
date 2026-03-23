@@ -1,7 +1,7 @@
 """
 종목 상세 페이지 — 단일 종목 수급 심층 분석
 
-4탭: Z-Score 추이 / 수급 금액 / 시그널 & MA / 패턴 현황
+5탭: 주가 차트 / Z-Score 추이 / 수급 금액 / 시그널 & MA / 패턴 현황
 """
 
 import sys
@@ -16,9 +16,10 @@ import pandas as pd
 import streamlit as st
 
 from utils.ui_constants import INSTITUTION_WEIGHT_HELP
+from streamlit_lightweight_charts import renderLightweightCharts
 from utils.data_loader import (
     get_stock_list, get_date_range,
-    get_stock_zscore_history, get_stock_raw_history,
+    get_stock_zscore_history, get_stock_raw_history, get_stock_ohlcv,
     _stage_classify, _stage_report, _stage_signals,
     get_watchlist, is_in_watchlist, add_to_watchlist, remove_from_watchlist,
 )
@@ -253,12 +254,87 @@ else:
 # ---------------------------------------------------------------------------
 # 4탭
 # ---------------------------------------------------------------------------
-tab1, tab2, tab3, tab4 = st.tabs([
+tab_price, tab1, tab2, tab3, tab4 = st.tabs([
+    "주가 차트",
     "Z-Score 추이",
     "수급 금액",
     "시그널 & MA",
     "패턴 현황",
 ])
+
+# ── Tab Price: 주가 차트 (TradingView Lightweight Charts)
+with tab_price:
+    ohlcv_df = get_stock_ohlcv(stock_code, end_date_str, start_date_str)
+    if ohlcv_df.empty:
+        st.info("주가(OHLCV) 데이터가 없습니다.")
+    else:
+        # 캔들스틱 데이터
+        candle_data = [
+            {
+                "time": row["date"],
+                "open": float(row["open"]),
+                "high": float(row["high"]),
+                "low": float(row["low"]),
+                "close": float(row["close"]),
+            }
+            for _, row in ohlcv_df.iterrows()
+        ]
+
+        # 거래량 데이터 (양봉=green, 음봉=red)
+        volume_data = [
+            {
+                "time": row["date"],
+                "value": float(row["volume"]),
+                "color": "#4ade8060" if row["close"] >= row["open"] else "#f8717160",
+            }
+            for _, row in ohlcv_df.iterrows()
+        ]
+
+        renderLightweightCharts(
+            [
+                {
+                    "chart": {
+                        "layout": {
+                            "background": {"color": "#0f172a"},
+                            "textColor": "#e2e8f0",
+                        },
+                        "grid": {
+                            "vertLines": {"color": "#334155"},
+                            "horzLines": {"color": "#334155"},
+                        },
+                        "height": 500,
+                        "crosshair": {"mode": 0},
+                    },
+                    "series": [
+                        {
+                            "type": "Candlestick",
+                            "data": candle_data,
+                            "options": {
+                                "upColor": "#4ade80",
+                                "downColor": "#f87171",
+                                "wickUpColor": "#4ade80",
+                                "wickDownColor": "#f87171",
+                                "borderVisible": False,
+                            },
+                        },
+                        {
+                            "type": "Histogram",
+                            "data": volume_data,
+                            "options": {
+                                "priceFormat": {"type": "volume"},
+                                "priceScaleId": "volume",
+                            },
+                        },
+                    ],
+                }
+            ],
+            key="price_chart",
+        )
+
+        st.caption(
+            f"표시 기간: {period_sel} ({len(ohlcv_df)}거래일) · "
+            f"양봉 🟢 (종가 >= 시가) · 음봉 🔴 (종가 < 시가)"
+        )
 
 # ── Tab 1: Z-Score 추이
 with tab1:

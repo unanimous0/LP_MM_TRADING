@@ -598,6 +598,35 @@ def get_stock_raw_history(
 
 
 # ---------------------------------------------------------------------------
+# OHLCV (주가 차트용)
+# ---------------------------------------------------------------------------
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_stock_ohlcv(stock_code: str, end_date: str, start_date: str = None) -> pd.DataFrame:
+    """종목의 OHLCV 데이터 조회 (주가 차트용)
+
+    Returns:
+        컬럼: date, open, high, low, close, volume
+    """
+    engine = get_db_connection()
+    query = """
+        SELECT time AS date, open_price AS open, high_price AS high,
+               low_price AS low, close_price AS close, volume
+        FROM ohlcv_daily
+        WHERE stock_code = :code AND time <= :end_date
+    """
+    params: dict = {"code": stock_code, "end_date": end_date}
+    if start_date:
+        query += " AND time >= :start_date"
+        params["start_date"] = start_date
+    query += " ORDER BY time"
+    df = pd.read_sql(text(query), engine, params=params)
+    if "date" in df.columns:
+        df["date"] = df["date"].astype(str)
+    return df
+
+
+# ---------------------------------------------------------------------------
 # 백테스트 실행
 # ---------------------------------------------------------------------------
 
