@@ -331,6 +331,7 @@ with tab_price:
                     "wickDownColor": "#f87171",
                     "borderVisible": False,
                     "priceScaleId": "right",
+                    "priceFormat": {"type": "price", "precision": 0, "minMove": 1},
                 },
             },
             {
@@ -374,6 +375,7 @@ with tab_price:
                     "lineWidth": 2,
                     "priceScaleId": "left",
                     "title": _title,
+                    "priceFormat": {"type": "price", "precision": 0, "minMove": 1},
                 },
             })
             _ov_labels.append(f"{_inv}")
@@ -392,8 +394,8 @@ with tab_price:
                         },
                         "height": 500,
                         "crosshair": {"mode": 0},
-                        "rightPriceScale": {"visible": True},
-                        "leftPriceScale": {"visible": bool(_ov_labels)},
+                        "rightPriceScale": {"visible": True, "borderColor": "#334155"},
+                        "leftPriceScale": {"visible": bool(_ov_labels), "borderColor": "#334155"},
                     },
                     "series": _series,
                 }
@@ -403,7 +405,9 @@ with tab_price:
 
         _ov_caption = f"표시 기간: {period_sel} ({len(ohlcv_df)}거래일) · 양봉 🟢 · 음봉 🔴"
         if _ov_labels:
-            _ov_caption += f" · 좌축: {'+'.join(_ov_labels)} {_ov_mode}(억원) · 우축: 주가"
+            _ov_caption += f" · **좌축**: {'+'.join(_ov_labels)} {_ov_mode} (단위: 억원) · **우축**: 주가 (단위: 원)"
+        else:
+            _ov_caption += f" · **우축**: 주가 (단위: 원)"
         st.caption(_ov_caption)
 
 # ── Tab 1: Z-Score 추이
