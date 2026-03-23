@@ -380,6 +380,13 @@ with tab_price:
             })
             _ov_labels.append(f"{_inv}")
 
+        # Y축 단위 라벨 (차트 상단)
+        _left_label = f"{'+'.join(_ov_labels)} {_ov_mode} (억원)" if _ov_labels else ""
+        _axis_html = '<div style="display:flex;justify-content:space-between;font-size:12px;color:#94a3b8;margin-bottom:2px;">'
+        _axis_html += f'<span>{_left_label}</span>' if _left_label else '<span></span>'
+        _axis_html += '<span>주가 (원)</span></div>'
+        st.markdown(_axis_html, unsafe_allow_html=True)
+
         renderLightweightCharts(
             [
                 {
@@ -396,6 +403,14 @@ with tab_price:
                         "crosshair": {"mode": 0},
                         "rightPriceScale": {"visible": True, "borderColor": "#334155"},
                         "leftPriceScale": {"visible": bool(_ov_labels), "borderColor": "#334155"},
+                        "timeScale": {
+                            "borderColor": "#334155",
+                            "timeVisible": False,
+                        },
+                        "localization": {
+                            "locale": "ko-KR",
+                            "dateFormat": "yyyy-MM-dd",
+                        },
                     },
                     "series": _series,
                 }
@@ -403,12 +418,7 @@ with tab_price:
             key="price_chart",
         )
 
-        _ov_caption = f"표시 기간: {period_sel} ({len(ohlcv_df)}거래일) · 양봉 🟢 · 음봉 🔴"
-        if _ov_labels:
-            _ov_caption += f" · **좌축**: {'+'.join(_ov_labels)} {_ov_mode} (단위: 억원) · **우축**: 주가 (단위: 원)"
-        else:
-            _ov_caption += f" · **우축**: 주가 (단위: 원)"
-        st.caption(_ov_caption)
+        st.caption(f"표시 기간: {period_sel} ({len(ohlcv_df)}거래일) · 양봉 🟢 · 음봉 🔴")
 
 # ── Tab 1: Z-Score 추이
 with tab1:
