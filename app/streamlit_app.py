@@ -123,17 +123,6 @@ mcap_filter = st.sidebar.selectbox(
 )
 
 st.sidebar.divider()
-_rescale_on = st.sidebar.checkbox(
-    "점수 보정", value=True,
-    help="시총 필터 범위 종목의 최근 N거래일 점수 분포 기준으로 0~100 스케일을 재조정합니다. "
-         "대형주의 점수가 낮게 나오는 문제를 해결합니다.",
-)
-_rescale_lookback = st.sidebar.number_input(
-    "점수 보정 표본 기간", min_value=20, max_value=240, value=120, step=20,
-    help="점수 보정 전용: 최근 N거래일의 점수 분포로 백분위 변환합니다.",
-    disabled=not _rescale_on,
-)
-st.sidebar.divider()
 
 min_score_filter = st.sidebar.slider(
     "최소 종합점수", 0.0, 100.0, 60.0, step=5.0,
@@ -145,11 +134,21 @@ top_n = st.sidebar.selectbox(
     help="수급 랭킹에 표시할 최대 종목 수",
 )
 
+# 고급 설정 (하단)
 st.sidebar.divider()
+_rescale_on = st.sidebar.checkbox(
+    "점수 보정", value=True,
+    help="시총 필터 범위 종목의 최근 N거래일 점수 분포 기준으로 0~100 스케일을 재조정합니다. "
+         "대형주의 점수가 낮게 나오는 문제를 해결합니다.",
+)
+_rescale_lookback = st.sidebar.number_input(
+    "점수 보정 표본 기간", min_value=20, max_value=240, value=120, step=20,
+    help="점수 보정 전용: 최근 N거래일의 점수 분포로 백분위 변환합니다.",
+    disabled=not _rescale_on,
+)
 z_score_window = st.sidebar.slider(
-    "Z-Score 기준 기간 (거래일)",
-    min_value=20, max_value=240, value=60, step=10,
-    help="이상 수급 판단 시 평균/표준편차 계산에 사용하는 과거 거래일 수 (기본 60일 = 약 3개월). 이상수급 탭에서만 사용됩니다.",
+    "이상수급 Z-Score 기간", min_value=20, max_value=240, value=60, step=10,
+    help="이상수급 탭 전용: 이상 수급 판단 시 평균/표준편차 계산에 사용하는 과거 거래일 수.",
 )
 
 # ---------------------------------------------------------------------------
