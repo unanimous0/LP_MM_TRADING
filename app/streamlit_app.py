@@ -29,6 +29,7 @@ from utils.data_loader import (
     get_today_supply_ranking,
     snapshot_scores,
     get_score_change_alerts,
+    is_in_watchlist, add_to_watchlist, remove_from_watchlist,
 )
 from utils.ui_constants import INSTITUTION_WEIGHT_HELP, WIDGET_BORDER_CSS
 from utils.charts import (
@@ -485,9 +486,22 @@ with tab_top:
                 elif _is_abnormal_sell:
                     st.error("⚡ 이상 수급 매도 (Z < -2σ)")
 
-                if st.button("📋 종목 상세 보기 →", key="drill_to_detail"):
+                _btn_cols = st.columns(2)
+                if _btn_cols[0].button("📋 종목 상세 →", key="drill_to_detail", use_container_width=True):
                     st.session_state['heatmap_selected_code'] = _drill_code
                     st.switch_page("pages/5_📋_종목상세.py")
+                _drill_name = _drill_row.get('stock_name', _drill_code)
+                _drill_sector = _drill_row.get('sector', '')
+                if is_in_watchlist(_drill_code):
+                    if _btn_cols[1].button("⭐ 관심 해제", key="drill_wl", use_container_width=True):
+                        remove_from_watchlist(_drill_code)
+                        st.toast(f"'{_drill_name}' 관심종목에서 제거", icon="🗑️")
+                        st.rerun()
+                else:
+                    if _btn_cols[1].button("☆ 관심 추가", key="drill_wl", use_container_width=True):
+                        add_to_watchlist(_drill_code, str(_drill_name), str(_drill_sector))
+                        st.toast(f"'{_drill_name}' 관심종목에 추가", icon="⭐")
+                        st.rerun()
 
             with dc2:
                 if not classified_df.empty:

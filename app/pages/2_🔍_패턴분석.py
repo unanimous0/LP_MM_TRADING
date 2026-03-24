@@ -432,61 +432,12 @@ st.caption(f"필터링 결과: {len(filtered_df)}개 종목 (전체 {len(report_
 # ---------------------------------------------------------------------------
 # 4개 탭: 점수 순위 / 섹터 분석 / 누적 수급 / 패턴 가이드
 # ---------------------------------------------------------------------------
-tab1, tab2, tab3, tab4 = st.tabs(["점수 순위", "섹터 분석", "누적 수급", "패턴 가이드"])
+tab_cum, tab_sector, tab_guide = st.tabs(["누적 수급", "섹터 분석", "패턴 가이드"])
 
 _pat_col = 'pattern_label' if 'pattern_label' in filtered_df.columns else 'pattern'
 
-# ---- Tab 1: 종목 순위 ----
-with tab1:
-    if filtered_df.empty:
-        st.info("조건에 맞는 종목이 없습니다. 최소 종합점수를 낮춰보세요.")
-    else:
-        html = _build_stock_table_html(filtered_df, classified_df, _pat_col)
-        st.markdown(html, unsafe_allow_html=True)
-
-        # 관심종목 추가/제거 UI
-        with st.expander("⭐ 관심종목 관리", expanded=False):
-            _stock_opts = [
-                f"{r['stock_name']} ({r['stock_code']})"
-                for _, r in filtered_df.iterrows()
-            ]
-            _sel = st.multiselect(
-                "추가할 종목 선택 (현재 필터 기준)",
-                options=_stock_opts,
-                placeholder="종목명 또는 코드로 검색...",
-                key="wl_add_sel",
-            )
-            _c1, _c2 = st.columns(2)
-            if _c1.button("⭐ 선택 종목 추가", use_container_width=True, disabled=not _sel):
-                for _opt in _sel:
-                    _scode = _opt.split('(')[-1].rstrip(')')
-                    _sname = _opt.rsplit(' (', 1)[0]
-                    _ssector = filtered_df[filtered_df['stock_code'] == _scode]['sector'].values
-                    add_to_watchlist(_scode, _sname, str(_ssector[0]) if len(_ssector) else '')
-                st.toast(f"{len(_sel)}개 종목을 관심종목에 추가했습니다.", icon="⭐")
-                st.rerun()
-            if _c2.button("🗑️ 선택 종목 제거", use_container_width=True, disabled=not _sel):
-                for _opt in _sel:
-                    _scode = _opt.split('(')[-1].rstrip(')')
-                    remove_from_watchlist(_scode)
-                st.toast(f"{len(_sel)}개 종목을 관심종목에서 제거했습니다.", icon="🗑️")
-                st.rerun()
-
-        # 종목 상세 이동
-        st.divider()
-        _detail_opts = [
-            f"{r['stock_name']} ({r['stock_code']})"
-            for _, r in filtered_df.head(50).iterrows()
-        ]
-        _detail_sel = st.selectbox("종목 상세 분석으로 이동", _detail_opts,
-                                    index=None, placeholder="종목 선택...", key="pa_detail_nav")
-        if _detail_sel:
-            _nav_code = _detail_sel.split('(')[-1].rstrip(')')
-            st.session_state['heatmap_selected_code'] = _nav_code
-            st.switch_page("pages/5_📋_종목상세.py")
-
-# ---- Tab 2: 섹터 분석 ----
-with tab2:
+# ---- 섹터 분석 ----
+with tab_sector:
     _src_df = filtered_df if not filtered_df.empty else report_df
     if _src_df.empty:
         st.info("데이터가 없습니다.")
@@ -530,8 +481,8 @@ with tab2:
             use_container_width=True,
         )
 
-# ---- Tab 3: 누적 수급 ----
-with tab3:
+# ---- 누적 수급 ----
+with tab_cum:
     _cum_prog = st.empty()
     _cum_prog_bar = _cum_prog.progress(0, text="누적 수급 데이터 집계 중... 0%")
 
@@ -690,8 +641,8 @@ with tab3:
     else:
         _cum_prog.empty()
 
-# ---- Tab 4: 패턴 가이드 ----
-with tab4:
+# ---- 패턴 가이드 ----
+with tab_guide:
     st.markdown("""
 ### 패턴 분류 체계
 
