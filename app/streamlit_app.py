@@ -129,8 +129,8 @@ _rescale_on = st.sidebar.checkbox(
          "대형주의 점수가 낮게 나오는 문제를 해결합니다.",
 )
 _rescale_lookback = st.sidebar.number_input(
-    "기준 기간 (거래일)", min_value=20, max_value=240, value=120, step=20,
-    help="최근 M거래일의 점수 분포를 기준으로 스케일링합니다. 길수록 안정적, 짧으면 최근 시장 반영.",
+    "점수 보정 표본 기간", min_value=20, max_value=240, value=120, step=20,
+    help="점수 보정 전용: 최근 N거래일의 점수 분포로 백분위 변환합니다.",
     disabled=not _rescale_on,
 )
 st.sidebar.divider()

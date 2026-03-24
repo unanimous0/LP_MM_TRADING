@@ -330,8 +330,8 @@ _rescale_on = st.sidebar.checkbox(
     key="pa_rescale_on",
 )
 _rescale_lookback = st.sidebar.number_input(
-    "기준 기간 (거래일)", min_value=20, max_value=240, value=120, step=20,
-    help="최근 M거래일의 점수 분포를 기준으로 스케일링합니다. 길수록 안정적, 짧으면 최근 시장 반영.",
+    "점수 보정 표본 기간", min_value=20, max_value=240, value=120, step=20,
+    help="점수 보정 전용: 최근 N거래일의 점수 분포로 백분위 변환합니다. (누적 수급 탭과 무관)",
     disabled=not _rescale_on,
     key="pa_rescale_lookback",
 )
@@ -347,7 +347,8 @@ min_score = st.sidebar.slider("최소 종합점수", 0.0, 100.0, 60.0, step=5.0,
 st.sidebar.divider()
 st.sidebar.markdown("**누적 수급 설정**")
 _LOOKBACK_OPTIONS = {'5일': 5, '10일': 10, '20일': 20, '60일': 60, '120일': 120, '240일': 240}
-lookback_label = st.sidebar.selectbox("누적 조회 기간", list(_LOOKBACK_OPTIONS.keys()), index=2, key="pa_lookback")
+lookback_label = st.sidebar.selectbox("누적 집계 기간", list(_LOOKBACK_OPTIONS.keys()), index=2, key="pa_lookback",
+                                      help="누적 수급 탭 전용: 최근 N거래일 동안의 수급을 누적 집계합니다. (점수 보정과 무관)")
 lookback_days = _LOOKBACK_OPTIONS[lookback_label]
 top_rank_n = st.sidebar.slider("상위 기준 (Top N)", 10, 200, 50, step=10, key="pa_top_rank_n",
                                 help="점수/수급 출현빈도 계산 시 '상위 N위 이내' 기준")
