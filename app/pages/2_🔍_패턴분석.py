@@ -323,6 +323,15 @@ mcap_filter = st.sidebar.selectbox(
 )
 
 st.sidebar.divider()
+
+sectors = get_sectors()
+selected_sector = st.sidebar.selectbox("섹터", ["전체"] + sectors)
+
+min_score = st.sidebar.slider("최소 종합점수", 0.0, 100.0, 60.0, step=5.0,
+                               help="종합점수(패턴점수 + 시그널수×2)가 이 값 이상인 종목만 표시합니다.")
+
+# 기간 설정 (점수 보정 + 누적 수급)
+st.sidebar.divider()
 _rescale_on = st.sidebar.checkbox(
     "점수 보정", value=True,
     help="시총 필터 범위 종목의 최근 N거래일 점수 분포 기준으로 0~100 스케일을 재조정합니다. "
@@ -331,24 +340,13 @@ _rescale_on = st.sidebar.checkbox(
 )
 _rescale_lookback = st.sidebar.number_input(
     "점수 보정 표본 기간", min_value=20, max_value=240, value=120, step=20,
-    help="점수 보정 전용: 최근 N거래일의 점수 분포로 백분위 변환합니다. (누적 수급 탭과 무관)",
+    help="점수 보정 전용: 최근 N거래일의 점수 분포로 백분위 변환합니다.",
     disabled=not _rescale_on,
     key="pa_rescale_lookback",
 )
-st.sidebar.divider()
-
-sectors = get_sectors()
-selected_sector = st.sidebar.selectbox("섹터", ["전체"] + sectors)
-
-min_score = st.sidebar.slider("최소 종합점수", 0.0, 100.0, 60.0, step=5.0,
-                               help="종합점수(패턴점수 + 시그널수×2)가 이 값 이상인 종목만 표시합니다.")
-
-# 누적 수급 설정
-st.sidebar.divider()
-st.sidebar.markdown("**누적 수급 설정**")
 _LOOKBACK_OPTIONS = {'5일': 5, '10일': 10, '20일': 20, '60일': 60, '120일': 120, '240일': 240}
 lookback_label = st.sidebar.selectbox("누적 집계 기간", list(_LOOKBACK_OPTIONS.keys()), index=2, key="pa_lookback",
-                                      help="누적 수급 탭 전용: 최근 N거래일 동안의 수급을 누적 집계합니다. (점수 보정과 무관)")
+                                      help="누적 수급 탭 전용: 최근 N거래일 동안의 수급을 누적 집계합니다.")
 lookback_days = _LOOKBACK_OPTIONS[lookback_label]
 top_rank_n = st.sidebar.slider("상위 기준 (Top N)", 10, 200, 50, step=10, key="pa_top_rank_n",
                                 help="점수/수급 출현빈도 계산 시 '상위 N위 이내' 기준")
