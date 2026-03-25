@@ -381,7 +381,7 @@ with tab_top:
             column_config=_col_cfg,
             use_container_width=True,
             hide_index=True,
-            height=min(30 * 38 + 40, len(_display) * 38 + 40),
+            height=min(20 * 38 + 40, len(_display) * 38 + 40),
             on_select="rerun",
             selection_mode="single-row",
             key="ranking_table",
