@@ -271,7 +271,7 @@ st.divider()
 # 4탭 구조: 수급 TOP / 이상수급 / 당일순위 / 고득점변동
 # ===========================================================================
 tab_top, tab_abnormal, tab_ranking, tab_alerts = st.tabs([
-    "중단기 수급 TOP",
+    "중단기 수급",
     "오늘 이상수급",
     "당일 순위",
     "고득점 변동",
@@ -281,20 +281,9 @@ tab_top, tab_abnormal, tab_ranking, tab_alerts = st.tabs([
 with tab_top:
     _dir_top_label = "순매수" if _direction == 'long' else "순매도"
 
-    # 정렬 기준 선택 (시총 TOP + 상세 랭킹 공통 적용)
-    _sort_mode = st.radio(
-        "정렬 기준",
-        ["중기 기준 정렬", "단기 기준 정렬"],
-        horizontal=True,
-        key="main_sort_mode",
-        help="중기: 수급강도+추세+종합+지속성 종합 평가 (며칠~몇 주) · 단기: 최근 5~20일 수급 강도 기준",
-    )
-    _is_midterm = (_sort_mode == "중기 기준 정렬")
-
     # 시총 구간별 수급 TOP
     st.subheader(f"시총 구간별 {_dir_top_label} TOP")
-    _sort_desc = "종합점수" if _is_midterm else "단기 수급(recent)"
-    st.caption(f"같은 체급 안에서 **{_sort_desc}** 기준 상위 종목")
+    st.caption("같은 체급 안에서 종합점수 기준 상위 종목")
 
     _TIER_TOP_N = 10
     _pat_col_tier = 'pattern_label' if 'pattern_label' in _report_raw.columns else 'pattern'
@@ -319,10 +308,7 @@ with tab_top:
             if _tier_ref and not _tier_df.empty:
                 _tier_df = rescale_scores(_tier_df, _tier_ref)
 
-            _tier_sort_col = 'final_score' if _is_midterm else 'recent'
-            if _tier_sort_col not in _tier_df.columns:
-                _tier_sort_col = 'final_score'
-            _tier_df = _tier_df.sort_values(_tier_sort_col, ascending=False).head(_TIER_TOP_N)
+            _tier_df = _tier_df.sort_values('final_score', ascending=False).head(_TIER_TOP_N)
 
             st.markdown(f"**{_tier_name}** <span style='color:#94a3b8;font-size:13px;'>({_tier_desc})</span>",
                         unsafe_allow_html=True)
@@ -354,29 +340,18 @@ with tab_top:
     st.divider()
 
     st.subheader(f"{_dir_top_label} 수급 상세 랭킹")
-    if _is_midterm:
-        st.caption(
-            f"**중기 종합** = 수급강도(35%) + 수급추세(20%) + 종합수급(25%) + **수급지속(20%)** + 시그널×2  ·  "
-            f"최소 {min_score_filter:.0f}점 · {len(ranked_df)}개"
-        )
-        _ranked_display = ranked_df.copy()
-    else:
-        st.caption(
-            f"**단기 수급** = 최근 Z-Score ((5D+20D)/2) 기준 · 수급지속(persistence) **미포함**  ·  "
-            f"최소 {min_score_filter:.0f}점 · {len(ranked_df)}개"
-        )
-        _ranked_display = ranked_df.copy()
-        if 'recent' in _ranked_display.columns:
-            _ranked_display = _ranked_display.sort_values('recent', ascending=False)
-
     _mcap_note = f" · {mcap_filter}" if mcap_filter != "전체" else ""
+    st.caption(
+        f"종합점수 = 수급강도(35%) + 수급추세(20%) + 종합수급(25%) + 수급지속(20%) + 시그널×2  ·  "
+        f"최소 {min_score_filter:.0f}점 · {len(ranked_df)}개{_mcap_note}"
+    )
 
-    if _ranked_display.empty:
+    if ranked_df.empty:
         st.info("조건에 맞는 종목이 없습니다. 사이드바에서 최소 종합점수를 낮춰보세요.")
     else:
-        _pat_col = 'pattern_label' if 'pattern_label' in _ranked_display.columns else 'pattern'
+        _pat_col = 'pattern_label' if 'pattern_label' in ranked_df.columns else 'pattern'
 
-        _display = _ranked_display.reset_index(drop=True).copy()
+        _display = ranked_df.reset_index(drop=True).copy()
         _display.insert(0, 'rank', range(1, len(_display) + 1))
 
         _show_cols = ['rank', 'stock_code', 'stock_name', 'sector', _pat_col,
