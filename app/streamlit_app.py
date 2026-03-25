@@ -131,7 +131,7 @@ min_score_filter = st.sidebar.slider(
 )
 
 top_n = st.sidebar.selectbox(
-    "표시 종목 수", [10, 20, 30, 50, 100], index=1,
+    "표시 종목 수", [10, 20, 30, 50, 100], index=3,
     help="수급 랭킹에 표시할 최대 종목 수",
 )
 
@@ -271,18 +271,30 @@ st.divider()
 # 4탭 구조: 수급 TOP / 이상수급 / 당일순위 / 고득점변동
 # ===========================================================================
 tab_top, tab_abnormal, tab_ranking, tab_alerts = st.tabs([
-    "수급 TOP",
-    "이상수급",
+    "중단기 수급 TOP",
+    "오늘 이상수급",
     "당일 순위",
     "고득점 변동",
 ])
 
 # ─── 탭 1: 수급 TOP (기존 메인 콘텐츠) ──────────────────────────────────────
 with tab_top:
-    # 시총 구간별 수급 TOP
     _dir_top_label = "순매수" if _direction == 'long' else "순매도"
+
+    # 정렬 기준 선택 (시총 TOP + 상세 랭킹 공통 적용)
+    _sort_mode = st.radio(
+        "정렬 기준",
+        ["중기 기준 정렬", "단기 기준 정렬"],
+        horizontal=True,
+        key="main_sort_mode",
+        help="중기: 수급강도+추세+종합+지속성 종합 평가 (며칠~몇 주) · 단기: 최근 5~20일 수급 강도 기준",
+    )
+    _is_midterm = (_sort_mode == "중기 기준 정렬")
+
+    # 시총 구간별 수급 TOP
     st.subheader(f"시총 구간별 {_dir_top_label} TOP")
-    st.caption("같은 체급 안에서 수급이 가장 강한 종목을 보여줍니다.")
+    _sort_desc = "종합점수" if _is_midterm else "단기 수급(recent)"
+    st.caption(f"같은 체급 안에서 **{_sort_desc}** 기준 상위 종목")
 
     _TIER_TOP_N = 10
     _pat_col_tier = 'pattern_label' if 'pattern_label' in _report_raw.columns else 'pattern'
@@ -307,7 +319,10 @@ with tab_top:
             if _tier_ref and not _tier_df.empty:
                 _tier_df = rescale_scores(_tier_df, _tier_ref)
 
-            _tier_df = _tier_df.sort_values('final_score', ascending=False).head(_TIER_TOP_N)
+            _tier_sort_col = 'final_score' if _is_midterm else 'recent'
+            if _tier_sort_col not in _tier_df.columns:
+                _tier_sort_col = 'final_score'
+            _tier_df = _tier_df.sort_values(_tier_sort_col, ascending=False).head(_TIER_TOP_N)
 
             st.markdown(f"**{_tier_name}** <span style='color:#94a3b8;font-size:13px;'>({_tier_desc})</span>",
                         unsafe_allow_html=True)
@@ -338,25 +353,16 @@ with tab_top:
 
     st.divider()
 
-    # 정렬 기준 선택
     st.subheader(f"{_dir_top_label} 수급 상세 랭킹")
-    _sort_mode = st.radio(
-        "정렬 기준",
-        ["종합점수순", "오늘수급순"],
-        horizontal=True,
-        key="main_sort_mode",
-        help="종합점수: 수급강도+추세+종합+지속성 종합 평가 · 오늘수급: 오늘 하루 수급 강도만 기준",
-    )
-    if _sort_mode == "종합점수순":
+    if _is_midterm:
         st.caption(
-            f"**종합점수** = 수급강도(35%) + 수급추세(20%) + 종합수급(25%) + **수급지속(20%)** + 시그널×2  ·  "
+            f"**중기 종합** = 수급강도(35%) + 수급추세(20%) + 종합수급(25%) + **수급지속(20%)** + 시그널×2  ·  "
             f"최소 {min_score_filter:.0f}점 · {len(ranked_df)}개"
         )
         _ranked_display = ranked_df.copy()
     else:
-        # 오늘수급순: recent(= (5D+20D)/2) 기준, persistence 제외
         st.caption(
-            f"**오늘 수급** = 최근 Z-Score ((5D+20D)/2) 기준 · 수급지속(persistence) **미포함**  ·  "
+            f"**단기 수급** = 최근 Z-Score ((5D+20D)/2) 기준 · 수급지속(persistence) **미포함**  ·  "
             f"최소 {min_score_filter:.0f}점 · {len(ranked_df)}개"
         )
         _ranked_display = ranked_df.copy()
@@ -400,7 +406,7 @@ with tab_top:
             column_config=_col_cfg,
             use_container_width=True,
             hide_index=True,
-            height=min(600, len(_display) * 40 + 40),
+            height=min(30 * 38 + 40, len(_display) * 38 + 40),
             on_select="rerun",
             selection_mode="single-row",
             key="ranking_table",
