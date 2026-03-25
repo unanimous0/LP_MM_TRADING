@@ -338,17 +338,39 @@ with tab_top:
 
     st.divider()
 
-    # 수급 TOP N 랭킹 (상세 테이블)
+    # 정렬 기준 선택
     st.subheader(f"{_dir_top_label} 수급 상세 랭킹")
-    _mcap_note = f" · {mcap_filter}" if mcap_filter != "전체" else ""
-    st.caption(f"종합점수(패턴점수 + 시그널×2) 기준 내림차순 · 최소 {min_score_filter:.0f}점 이상 · {len(ranked_df)}개 종목{_mcap_note}")
+    _sort_mode = st.radio(
+        "정렬 기준",
+        ["종합점수순", "오늘수급순"],
+        horizontal=True,
+        key="main_sort_mode",
+        help="종합점수: 수급강도+추세+종합+지속성 종합 평가 · 오늘수급: 오늘 하루 수급 강도만 기준",
+    )
+    if _sort_mode == "종합점수순":
+        st.caption(
+            f"**종합점수** = 수급강도(35%) + 수급추세(20%) + 종합수급(25%) + **수급지속(20%)** + 시그널×2  ·  "
+            f"최소 {min_score_filter:.0f}점 · {len(ranked_df)}개"
+        )
+        _ranked_display = ranked_df.copy()
+    else:
+        # 오늘수급순: recent(= (5D+20D)/2) 기준, persistence 제외
+        st.caption(
+            f"**오늘 수급** = 최근 Z-Score ((5D+20D)/2) 기준 · 수급지속(persistence) **미포함**  ·  "
+            f"최소 {min_score_filter:.0f}점 · {len(ranked_df)}개"
+        )
+        _ranked_display = ranked_df.copy()
+        if 'recent' in _ranked_display.columns:
+            _ranked_display = _ranked_display.sort_values('recent', ascending=False)
 
-    if ranked_df.empty:
+    _mcap_note = f" · {mcap_filter}" if mcap_filter != "전체" else ""
+
+    if _ranked_display.empty:
         st.info("조건에 맞는 종목이 없습니다. 사이드바에서 최소 종합점수를 낮춰보세요.")
     else:
-        _pat_col = 'pattern_label' if 'pattern_label' in ranked_df.columns else 'pattern'
+        _pat_col = 'pattern_label' if 'pattern_label' in _ranked_display.columns else 'pattern'
 
-        _display = ranked_df.reset_index(drop=True).copy()
+        _display = _ranked_display.reset_index(drop=True).copy()
         _display.insert(0, 'rank', range(1, len(_display) + 1))
 
         _show_cols = ['rank', 'stock_code', 'stock_name', 'sector', _pat_col,
