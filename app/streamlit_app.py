@@ -119,7 +119,7 @@ direction = st.sidebar.selectbox(
 _direction = 'long' if '매수' in direction else 'short'
 
 mcap_filter = st.sidebar.selectbox(
-    "시총 필터", ["전체", "시총 100위 이내", "시총 200위 이내", "시총 300위 이내", "시총 500위 이내"], index=0,
+    "시총 필터", ["전체", "시총 100위 이내", "시총 200위 이내", "시총 300위 이내", "시총 500위 이내"], index=4,
     help="대형주 위주로 필터링합니다.",
 )
 
