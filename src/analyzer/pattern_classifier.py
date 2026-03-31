@@ -97,7 +97,7 @@ class PatternClassifier:
             # 제거: short_divergence, mid_divergence, average (중복/저정보)
             # 추가: supply_persistence (수급 지속 강도 = 평균Sff × √연속일수)
             'score_weights': {
-                'recent': 0.35,              # 수급강도: (5D+20D)/2
+                'recent': 0.35,              # 수급강도: 5D×0.3+20D×0.7
                 'long_divergence': 0.20,     # 수급추세: 5D-200D
                 'weighted': 0.25,            # 종합수급: 가중평균
                 'supply_persistence': 0.20,  # 수급지속: 평균Sff × √연속일수
@@ -177,7 +177,7 @@ class PatternClassifier:
 
         Returns:
             pd.DataFrame: 5가지 정렬 키 추가
-                - recent: (5D+20D)/2 - 현재 강도
+                - recent: 5D×0.3+20D×0.7 - 현재 강도 (20D 비중 높여 안정화)
                 - mid_divergence: 5D-100D - 중기이격
                 - long_divergence: 5D-200D - 장기이격
                 - weighted: 가중 평균 - 중장기 트렌드
@@ -190,8 +190,8 @@ class PatternClassifier:
         if not all(col in df.columns for col in required_cols):
             raise ValueError(f"Missing required columns. Expected: {required_cols}")
 
-        # 1. Recent: (5D+20D)/2
-        df['recent'] = (df['5D'] + df['20D']) / 2
+        # 1. Recent: 5D×0.3 + 20D×0.7 (20D 비중 높여 일별 변동 완화)
+        df['recent'] = df['5D'] * 0.3 + df['20D'] * 0.7
 
         # 2. Long Divergence: 5D - 가장 긴 유효 기간 (200D→100D→50D→20D 순서 폴백)
         # 500D는 참고용 — 이격도 계산에서 제외 (장기 기준 = 200D/100D)
@@ -279,7 +279,7 @@ class PatternClassifier:
         패턴 강도 점수 계산 (0~100, v2 단순화)
 
         4개 구성요소:
-        - 수급강도 (recent): (5D+20D)/2 — 현재 수급의 절대적 크기
+        - 수급강도 (recent): 5D×0.3+20D×0.7 — 현재 수급 강도 (20D 비중으로 안정화)
         - 수급추세 (long_divergence): 5D-200D — 장기 대비 변화
         - 종합수급 (weighted): 가중평균 — 전체 기간 종합
         - 수급지속 (supply_persistence): 평균Sff×√연속일수 — 지속 강도
