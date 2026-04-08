@@ -333,27 +333,34 @@ def _stage_supply_persistence(end_date: Optional[str] = None,
     if df.empty:
         return pd.DataFrame(columns=['stock_code', 'supply_persistence_long', 'supply_persistence_short'])
 
+    _DECAY = 0.85  # Precomputer와 동일
+
     df = df.sort_values(['stock_code', 'trade_date'])
     result = []
     for code, group in df.groupby('stock_code'):
         vals = group['combined_sff'].values
-        # Long: 연속 양수 강도
+
+        # Long: 지수 감쇠
         long_streak = []
+        sp_long = 0.0
         for v in vals:
             if v > 0:
                 long_streak.append(v)
+                sp_long = sum(long_streak) / len(long_streak) * len(long_streak) ** 0.5
             else:
                 long_streak = []
-        sp_long = (sum(long_streak) / len(long_streak) * len(long_streak) ** 0.5) if long_streak else 0.0
+                sp_long *= _DECAY
 
-        # Short: 연속 음수 강도
+        # Short: 지수 감쇠
         short_streak = []
+        sp_short = 0.0
         for v in vals:
             if v < 0:
                 short_streak.append(abs(v))
+                sp_short = sum(short_streak) / len(short_streak) * len(short_streak) ** 0.5
             else:
                 short_streak = []
-        sp_short = (sum(short_streak) / len(short_streak) * len(short_streak) ** 0.5) if short_streak else 0.0
+                sp_short *= _DECAY
 
         result.append({
             'stock_code': code,
@@ -490,18 +497,21 @@ def run_analysis_pipeline_with_progress(
         except Exception:
             pass  # DB 오류 시 필터 스킵
 
-    # ── 필터 2: 방향 확신도 — 실제 수급 방향이 반대인 종목 제외 ──
-    # direction_confidence가 Z-Score를 0으로 만든 종목은 weighted_sum≈0 → score≈50
-    # 임계값 0.05: tanh(x)>0.05 ↔ sff>0.05×std — 노이즈 수준 제외
-    if not classified_df.empty:
-        _active = classified_df[
-            (classified_df['recent'].abs() > 0.05) |
-            (classified_df['weighted'].abs() > 0.05)
-        ]['stock_code']
-        classified_df = classified_df[classified_df['stock_code'].isin(_active)]
-        if not report_df.empty:
-            report_df = report_df[report_df['stock_code'].isin(_active)]
-        signals_df = signals_df[signals_df['stock_code'].isin(_active)] if not signals_df.empty else signals_df
+    # ── 필터 2: 방향 확신도 — 이진 절벽 대신 점진적 감쇠 ──
+    # 이전: 임계값 0.05 미만 → 완전 제외 (하루 만에 1위가 사라지는 문제)
+    # 현재: confidence 기반 점수 감쇠 (0~0.2 범위에서 0→1 선형 램프)
+    if not classified_df.empty and 'recent' in classified_df.columns and 'weighted' in classified_df.columns:
+        _conf = classified_df[['recent', 'weighted']].abs().max(axis=1)
+        _multiplier = (_conf / 0.2).clip(0, 1)
+        # score에 감쇠 적용 (confidence 낮으면 점수도 낮아짐, 단 제외되지는 않음)
+        classified_df = classified_df.copy()
+        classified_df['score'] = classified_df['score'] * _multiplier
+        # report_df에도 동일 적용
+        if not report_df.empty and 'stock_code' in report_df.columns:
+            report_df = report_df.copy()
+            _score_map = classified_df.set_index('stock_code')['score']
+            _matched = report_df['stock_code'].map(_score_map)
+            report_df.loc[_matched.notna(), 'score'] = _matched.dropna().values
 
     _upd(0.85, "📋 리포트 생성 완료 85%")
 
@@ -1486,23 +1496,28 @@ def rescale_scores(
     df: pd.DataFrame,
     ref_sorted: List[float],
 ) -> pd.DataFrame:
-    """백분위 기반 점수 보정: 역사적 분포에서 해당 종합점수의 백분위 × 100.
+    """고정 선형 매핑 기반 점수 보정.
 
-    final_score(패턴점수+시그널보너스)를 기준 분포와 비교하여 백분위로 변환.
-    - 같은 체급 안에서 0~100으로 자연 분포 (100 초과 없음)
-    - 강한 날 1위는 99점, 약한 날 1위는 70점 (교차일 비교 보존)
+    역사적 분포의 5th/95th percentile을 기준으로 선형 매핑.
+    - 백분위 변환보다 안정적 (날짜별 분포 변동에 덜 민감)
+    - 교차일 비교 보존 (같은 raw 점수 = 같은 표시 점수)
     """
     df = df.copy()
     n = len(ref_sorted)
-    if n == 0:
+    if n < 10:
         return df
 
     ref_arr = np.array(ref_sorted)
+    # 5th/95th percentile로 안정적 기준 범위 설정 (극단값 영향 제거)
+    ref_low = float(ref_arr[int(n * 0.05)])
+    ref_high = float(ref_arr[int(n * 0.95)])
+    span = ref_high - ref_low
+    if span < 3.0:
+        return df
 
-    # final_score(raw) 기준으로 백분위 계산
+    # 선형 매핑: ref_low → 0, ref_high → 100
     raw_final = df['final_score'].values
-    percentiles = np.searchsorted(ref_arr, raw_final, side='right') / n * 100
-    df['final_score'] = np.clip(percentiles, 0, 100)
+    df['final_score'] = np.clip((raw_final - ref_low) / span * 100, 0, 100)
     return df
 
 

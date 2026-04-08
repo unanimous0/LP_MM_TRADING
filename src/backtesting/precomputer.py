@@ -327,36 +327,38 @@ class BacktestPrecomputer:
         # = 평균 Sff × √연속일수 — 며칠째 + 얼마나 강하게 매수/매도 중인지
         # Sff는 이미 유통시총 대비 비율이므로 종목 간 비교 가능
         # Long: combined_sff > 0 연속, Short: combined_sff < 0 연속
+        _DECAY = 0.85  # 매수 끊기면 하루당 15% 감쇠 (5일 후 ~44%, 10일 후 ~20%)
+
         def _supply_persistence(series):
-            """연속 동일방향 Sff의 평균강도 × √연속일수"""
+            """수급 지속 강도 (지수 감쇠): 매수 중 = 평균Sff×√연속일, 끊기면 ×0.85/일"""
             result = pd.Series(0.0, index=series.index, dtype=float)
             streak_vals = []
+            prev_sp = 0.0
             for i, val in enumerate(series):
                 if val > 0:
                     streak_vals.append(val)
+                    avg_sff = sum(streak_vals) / len(streak_vals)
+                    prev_sp = avg_sff * (len(streak_vals) ** 0.5)
                 else:
                     streak_vals = []
-                if streak_vals:
-                    avg_sff = sum(streak_vals) / len(streak_vals)
-                    result.iloc[i] = avg_sff * (len(streak_vals) ** 0.5)
-                else:
-                    result.iloc[i] = 0.0
+                    prev_sp *= _DECAY  # 이진 리셋 대신 지수 감쇠
+                result.iloc[i] = prev_sp
             return result
 
         def _supply_persistence_short(series):
-            """매도 방향 연속 지속 강도"""
+            """매도 방향 수급 지속 강도 (지수 감쇠)"""
             result = pd.Series(0.0, index=series.index, dtype=float)
             streak_vals = []
+            prev_sp = 0.0
             for i, val in enumerate(series):
                 if val < 0:
                     streak_vals.append(abs(val))
+                    avg_sff = sum(streak_vals) / len(streak_vals)
+                    prev_sp = avg_sff * (len(streak_vals) ** 0.5)
                 else:
                     streak_vals = []
-                if streak_vals:
-                    avg_sff = sum(streak_vals) / len(streak_vals)
-                    result.iloc[i] = avg_sff * (len(streak_vals) ** 0.5)
-                else:
-                    result.iloc[i] = 0.0
+                    prev_sp *= _DECAY
+                result.iloc[i] = prev_sp
             return result
 
         df['supply_persistence_long'] = df.groupby('stock_code')['combined_sff'].transform(
@@ -557,22 +559,20 @@ class BacktestPrecomputer:
 
             if not long_stocks.empty:
                 _classified = classifier.classify_all(long_stocks, direction='long')
-                # 방향 확신도 사후 필터 (메인 파이프라인과 동일 기준)
+                # 방향 확신도 점진적 감쇠 (이진 절벽 대신)
                 if not _classified.empty and 'recent' in _classified.columns:
-                    _classified = _classified[
-                        (_classified['recent'].abs() > 0.05) |
-                        (_classified['weighted'].abs() > 0.05)
-                    ]
+                    _conf = _classified[['recent', 'weighted']].abs().max(axis=1)
+                    _classified = _classified.copy()
+                    _classified['score'] = _classified['score'] * (_conf / 0.2).clip(0, 1)
                 if not _classified.empty:
                     patterns_long[date] = _classified
 
             if not short_stocks.empty:
                 _classified = classifier.classify_all(short_stocks, direction='short')
                 if not _classified.empty and 'recent' in _classified.columns:
-                    _classified = _classified[
-                        (_classified['recent'].abs() > 0.05) |
-                        (_classified['weighted'].abs() > 0.05)
-                    ]
+                    _conf = _classified[['recent', 'weighted']].abs().max(axis=1)
+                    _classified = _classified.copy()
+                    _classified['score'] = _classified['score'] * (_conf / 0.2).clip(0, 1)
                 if not _classified.empty:
                     patterns_short[date] = _classified
 
